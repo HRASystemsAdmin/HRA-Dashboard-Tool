@@ -1,4 +1,11 @@
-# Request Center · Hunter Recruitment Advisors
+# HRA Dashboard · Hunter Recruitment Advisors
+
+Internal tools for the team, switched from the left panel:
+
+- **Request Center**: send and track requests (details below).
+- **Client Pipeline**: submitted candidates per client from Workable, in the Weekly Hiring Update layout, with **Download spreadsheet**. Setup: **[WORKABLE-SETUP.md](WORKABLE-SETUP.md)**.
+
+## Request Center
 
 Internal request system for employees. People send a request, admins take it (in progress) and complete it, and the requester sees the status update live.
 
@@ -12,6 +19,9 @@ Internal request system for employees. People send a request, admins take it (in
 | `config.js` | **The only file you normally edit**: Firebase keys, who has access, phone queues, request types |
 | `firestore.rules` | Security rules that lock the data to approved accounts |
 | `assets/logo.png` | Company logo |
+| `WORKABLE-SETUP.md` | How to connect Workable to the Client Pipeline |
+| `workable-sync/` | The Workable sync script (runs in GitHub Actions, not in the browser) |
+| `.github/workflows/workable-sync.yml` | The schedule for the Workable sync |
 
 ## Try it right now (demo mode)
 

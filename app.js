@@ -198,6 +198,15 @@ async function createFirebaseStore() {
       if (!snap.exists()) throw { code: "not-found" };
       return snap.data().data;
     },
+    watchPipeline(cb) {
+      let clients = [], meta = null;
+      const u1 = fsMod.onSnapshot(fsMod.collection(db, "workable_clients"),
+        (snap) => { clients = snap.docs.map((d) => ({ id: d.id, ...d.data() })); cb(clients, meta); },
+        (err) => { console.error(err); cb(clients, { error: err.code }); });
+      const u2 = fsMod.onSnapshot(fsMod.doc(db, "workable_meta", "status"),
+        (snap) => { meta = snap.exists() ? snap.data() : null; cb(clients, meta); }, () => {});
+      return () => { u1(); u2(); };
+    },
     setEmailStatus(id, emailStatus) {
       return fsMod.updateDoc(fsMod.doc(db, "tickets", id), { emailStatus, updatedAt: fsMod.serverTimestamp() });
     },
@@ -266,6 +275,7 @@ function handleUser(u) {
   state.tickets = []; state.loaded = false; state.known.clear();
 
   if (!u) {
+    stopPipeline();
     state.user = null;
     showView("view-login");
     hideBoot();
@@ -295,9 +305,13 @@ function handleUser(u) {
   $("#greeting").textContent = `${h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"}, ${state.user.name.split(" ")[0]}`;
 
   setTab("mine", true);
+  stopPipeline();
   renderTypes();
   renderAll();
   showView("view-app");
+  let savedTool = "requests";
+  try { savedTool = localStorage.getItem(TOOL_KEY) || "requests"; } catch {}
+  setTool(savedTool, true);
   hideBoot();
 
   state.unsub = state.store.watch(isAdmin ? "all" : "mine", state.user, onTickets);
@@ -1500,6 +1514,13 @@ function bind() {
     const t = e.target;
     if (t.matches?.("input[type=file]")) return;
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
+    const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
+    const amb = t.closest("[data-am]"); if (amb) { PL.animate = true; PL.am = amb.dataset.am; PL.client = null; PL.filter.clear(); PL.search = ""; renderPipeline(); return; }
+    const ct = t.closest("[data-client]"); if (ct) { PL.animate = true; PL.client = ct.dataset.client; PL.filter.clear(); PL.search = ""; renderPipeline(); return; }
+    const sf = t.closest("[data-status-filter]"); if (sf) { const k = sf.dataset.statusFilter; PL.filter.has(k) ? PL.filter.delete(k) : PL.filter.add(k); renderSheet(); return; }
+    if (t.closest("[data-sort-toggle]")) { PL.newest = !PL.newest; renderSheet(); return; }
+    const dlw = t.closest("[data-pl-download]"); if (dlw) { downloadWorkbook(dlw); return; }
+    const prow = t.closest(".pl-row"); if (prow && !t.closest("a")) { prow.classList.toggle("is-open"); return; }
     const tab = t.closest(".tab"); if (tab) { setTab(tab.dataset.tab); return; }
     const seg = t.closest(".seg-btn"); if (seg) { setSeg(seg.closest(".seg").id, seg.dataset.filter); return; }
     const meter = t.closest(".meter"); if (meter) { setSeg(meter.closest(".panel").dataset.panel + "-filter", meter.dataset.filter); return; }
@@ -1595,6 +1616,13 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
+    if (e.target.id === "pl-search") {
+      PL.search = e.target.value;
+      const pos = e.target.selectionStart;
+      renderSheet();
+      const inp = $("#pl-search"); inp.focus(); try { inp.setSelectionRange(pos, pos); } catch {}
+      return;
+    }
     if (e.target.dataset?.boardSearch) {
       const id = e.target.dataset.boardSearch;
       boardState[id].search = e.target.value;
@@ -1607,6 +1635,7 @@ function bind() {
     if (e.key === "Escape") { const o = $$(".overlay:not([hidden])").pop(); if (o && o.id !== "confirm") closeOverlay(o); }
     if (!$("#lightbox").hidden && (e.key === "ArrowRight" || e.key === "ArrowLeft")) stepViewer(e.key === "ArrowRight" ? 1 : -1);
     if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("drop")) { e.preventDefault(); $(".drop-input", e.target).click(); }
+    if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("pl-row")) { e.preventDefault(); e.target.classList.toggle("is-open"); }
     if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("ticket")) { e.preventDefault(); openTicket(e.target.dataset.id); }
   });
 
@@ -1640,7 +1669,7 @@ function bind() {
     });
   }
 
-  addEventListener("resize", () => $$(".tabs, .seg").forEach(moveIndicator));
+  addEventListener("resize", () => { $$(".tabs, .seg").forEach(moveIndicator); moveRailGlow(); });
   document.fonts?.ready.then(() => $$(".tabs, .seg").forEach(moveIndicator));
   setInterval(() => { if (state.user && state.loaded) renderAll(); }, 60000); // keep "x min ago" fresh
 }
@@ -1660,3 +1689,408 @@ function bind() {
   $("#demo-entry").hidden = !state.store.demo;
   state.store.init(handleUser);
 })();
+
+/* ==========================================================================
+   Tools rail
+   ========================================================================== */
+const TOOL_KEY = "hra_tool";
+let currentTool = "requests";
+
+function moveRailGlow() {
+  const active = $("#rail .rail-item.is-active"), glow = $("#rail .rail-glow");
+  if (!active || !glow) return;
+  const horizontal = getComputedStyle($("#rail")).flexDirection === "row";
+  glow.style.transform = horizontal ? `translateX(${active.offsetLeft}px)` : `translateY(${active.offsetTop}px)`;
+  glow.style.width = active.offsetWidth + "px";
+  glow.style.height = active.offsetHeight + "px";
+}
+
+function setTool(id, silent) {
+  if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
+  const changed = id !== currentTool;
+  currentTool = id;
+  try { localStorage.setItem(TOOL_KEY, id); } catch {}
+  $$("#rail .rail-item").forEach((b) => { b.classList.toggle("is-active", b.dataset.tool === id); b.setAttribute("aria-current", b.dataset.tool === id ? "page" : "false"); });
+  $$("[data-tool-panel]").forEach((m) => {
+    const on = m.dataset.toolPanel === id;
+    m.hidden = !on;
+    if (on && changed && !reduceMotion) { m.classList.remove("tool-in"); void m.offsetWidth; m.classList.add("tool-in"); }
+  });
+  $(".topbar").classList.toggle("is-tool-pipeline", id === "pipeline");
+  moveRailGlow();
+  if (id === "pipeline") startPipeline();
+  if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
+  if (!silent) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+}
+
+/* ==========================================================================
+   Client Pipeline (Workable)
+   ========================================================================== */
+const WK = CFG.workable || {};
+const PSTATUS = {
+  passed:       { label: "Client has passed on this candidate", short: "Client passed", fill: "FFFFFF", bar: "#A3B1C6" },
+  in_process:   { label: "In Process", short: "In process", fill: "FFF2CC", bar: "#E0A800" },
+  no_show:      { label: "Interview No Show", short: "No show", fill: "FA8E8E", bar: "#E5484D" },
+  hired:        { label: "Hired", short: "Hired", fill: "D9EAD3", bar: "#2F9E44" },
+  fell_through: { label: "Hired no-show or quit/fired/declined offer", short: "Fell through", fill: "CFE2F3", bar: "#3B82C4" }
+};
+const COLUMNS = [
+  ["name", "Candidate Submitted"], ["role", "Role Submitted"], ["submitted", "Date Submitted"],
+  ["interview", "Wants to Interview (Y/N), When?"], ["hired", "Hired (Y/N)"], ["roleHired", "Role hired for"],
+  ["startDate", "Start Date"], ["recruiter", "Recruiter"], ["notes", "Notes"]
+];
+const PL = { animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
+
+const fmtDay = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number); return y ? `${m}/${d}/${y}` : String(iso); };
+const sameName = (a, b) => lower(a) === lower(b);
+
+function buildAms() {
+  let ams = PL.store === "demo" ? demoAms() : (WK.accountManagers || []).map((a) => ({ ...a }));
+  const assigned = new Set(ams.flatMap((a) => (a.clients || []).map(lower)));
+  const loose = PL.clients.filter((c) => !assigned.has(lower(c.name))).map((c) => c.name);
+  if (loose.length) ams.push({ name: "Unassigned", email: "", clients: loose, unassigned: true });
+  ams.forEach((a) => { a.isMe = Boolean(a.email) && lower(a.email) === state.user.email; });
+  return ams;
+}
+
+function startPipeline() {
+  if (PL.started) return;
+  PL.started = true;
+  PL.store = state.store.demo ? "demo" : "firebase";
+  renderPipelineLoading();
+  if (PL.store === "demo") {
+    setTimeout(() => onPipelineData(demoClients(), { ok: true, lastSync: new Date(Date.now() - 11 * 60e3).toISOString(), demo: true }), 450);
+  } else {
+    PL.unsub = state.store.watchPipeline(onPipelineData);
+  }
+  clearInterval(PL.timer);
+  PL.timer = setInterval(renderSync, 30e3);
+}
+
+function stopPipeline() {
+  PL.unsub?.(); PL.unsub = null; clearInterval(PL.timer);
+  Object.assign(PL, { started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "" });
+}
+
+function onPipelineData(clients, meta) {
+  if (!PL.clients.length) PL.animate = true;
+  PL.clients = clients || [];
+  PL.meta = meta || null;
+  PL.ams = buildAms();
+  if (!PL.am || !PL.ams.some((a) => a.name === PL.am)) PL.am = (PL.ams.find((a) => a.isMe) || PL.ams[0])?.name || null;
+  renderPipeline();
+}
+
+function amObj() { return PL.ams.find((a) => a.name === PL.am); }
+function amClients() {
+  const am = amObj();
+  return (am?.clients || []).map((n) => PL.clients.find((c) => sameName(c.name, n)) || { name: n, candidates: [], sourcing: [], empty: true });
+}
+
+function renderSync() {
+  const el = $("#pl-sync"); if (!el) return;
+  const m = PL.meta;
+  el.className = "sync-chip";
+  if (m?.error === "permission-denied") { el.classList.add("is-bad"); $("span", el).textContent = "No access to Workable data"; return; }
+  if (!m || !m.lastSync) { el.classList.add("is-wait"); $("span", el).textContent = PL.store === "demo" ? "Demo data" : "Waiting for first sync"; return; }
+  if (m.ok === false) { el.classList.add("is-bad"); $("span", el).textContent = `Last sync failed, showing ${ago(m.lastSync)} data`; el.title = m.message || ""; return; }
+  const mins = (Date.now() - new Date(m.lastSync)) / 60e3;
+  if (mins > (WK.syncEveryMinutes || 30) * 6) el.classList.add("is-wait");
+  $("span", el).textContent = `${m.demo ? "Demo data, synced" : "Synced"} ${ago(m.lastSync)}`;
+  el.title = m.lastSync ? `Last Workable sync: ${fullDate(m.lastSync)}` : "";
+}
+
+function renderPipelineLoading() {
+  $("#pl-ams").innerHTML = Array.from({ length: 3 }, () => `<span class="am-pill is-skel"><span class="sk" style="width:90px"></span></span>`).join("");
+  $("#pl-clients").innerHTML = "";
+  $("#pl-sheet").innerHTML = `<div class="sheet-card">${skeleton()}</div>`;
+  renderSync();
+}
+
+function renderPipeline() {
+  renderSync();
+  const amsEl = $("#pl-ams");
+  if (!PL.ams.length) {
+    amsEl.innerHTML = "";
+    $("#pl-clients").innerHTML = "";
+    $("#pl-sheet").innerHTML = `<div class="sheet-card">${empty("No account managers set up yet", "Add account managers and their clients in config.js, under workable.accountManagers.").replace(/<li/g, "<div").replace(/<\/li>/g, "</div>")}</div>`;
+    return;
+  }
+  amsEl.innerHTML = PL.ams.map((a, i) => `
+    <button type="button" role="tab" class="am-pill${a.name === PL.am ? " is-active" : ""}${a.isMe ? " is-me" : ""}${a.unassigned ? " is-loose" : ""}" data-am="${esc(a.name)}" aria-selected="${a.name === PL.am}" style="--i:${i}">
+      <span class="am-avatar">${esc(a.unassigned ? "?" : initials(a.name))}</span>
+      <span class="am-name">${esc(a.name)}</span>
+      ${a.isMe ? `<span class="am-you">You</span>` : ""}
+      <span class="am-count">${(a.clients || []).length}</span>
+    </button>`).join("");
+
+  const list = amClients();
+  if (!PL.client || !list.some((c) => sameName(c.name, PL.client))) PL.client = list[0]?.name || null;
+  $("#pl-clients").innerHTML = list.map((c) => {
+    const n = c.candidates?.length || 0;
+    const live = (c.candidates || []).filter((r) => r.status === "in_process").length;
+    return `<button type="button" role="tab" class="sheet-tab${sameName(c.name, PL.client) ? " is-active" : ""}" data-client="${esc(c.name)}" aria-selected="${sameName(c.name, PL.client)}">
+      <span class="sheet-tab-name">${esc(c.name)}</span>
+      <span class="sheet-tab-count" title="${live} in process of ${n} submitted">${live ? `<i></i>${live}` : n}</span>
+    </button>`;
+  }).join("");
+  $("#pl-download").disabled = !list.length;
+  renderSheet();
+}
+
+function renderSheet() {
+  const el = $("#pl-sheet");
+  const c = amClients().find((x) => sameName(x.name, PL.client));
+  if (!c) { el.innerHTML = `<div class="sheet-card">${emptyBlock("No clients for this account manager", "Add client names to this account manager in config.js.")}</div>`; return; }
+  const extra = (WK.clients || {})[c.name] || {};
+  const rows = c.candidates || [];
+  const counts = Object.fromEntries(Object.keys(PSTATUS).map((k) => [k, rows.filter((r) => r.status === k).length]));
+  const s = lower(PL.search);
+  let shown = rows.filter((r) => (!PL.filter.size || PL.filter.has(r.status)) && (!s || lower([r.name, r.role, r.recruiter, r.notes, r.interview, r.hired].join(" ")).includes(s)));
+  shown = shown.slice().sort((a, b) => (a.submitted || "").localeCompare(b.submitted || "") * (PL.newest ? -1 : 1));
+  const interviewed = rows.filter((r) => /^y/i.test(r.interview || "")).length;
+  const loc = c.location || extra.location, hrs = c.hours || extra.hours;
+
+  el.innerHTML = `
+    <div class="sheet-card">
+      <header class="sheet-head">
+        <div class="sheet-title">
+          <h2>${esc(c.name)}</h2>
+          ${loc ? `<span class="sheet-tag">${esc(loc)}</span>` : ""}${hrs ? `<span class="sheet-tag">${esc(hrs)}</span>` : ""}
+        </div>
+        <dl class="sheet-stats">
+          <div><dt>Submitted</dt><dd>${rows.length}</dd></div>
+          <div><dt>Interviews</dt><dd>${interviewed}</dd></div>
+          <div><dt>In process</dt><dd>${counts.in_process}</dd></div>
+          <div class="is-hired"><dt>Hired</dt><dd>${counts.hired}</dd></div>
+        </dl>
+      </header>
+
+      <div class="sheet-tools">
+        <div class="legend" role="group" aria-label="Filter by status">
+          ${Object.entries(PSTATUS).map(([k, v]) => `
+            <button type="button" class="legend-item${PL.filter.has(k) ? " is-on" : ""}" data-status-filter="${k}" aria-pressed="${PL.filter.has(k)}" style="--sw:#${v.fill};--bar:${v.bar}" title="${esc(v.label)}">
+              <span class="legend-sw"></span><span class="legend-label">${esc(v.short)}</span><span class="legend-n">${counts[k]}</span>
+            </button>`).join("")}
+        </div>
+        <div class="sheet-tools-right">
+          <button type="button" class="btn-mini" data-sort-toggle title="Change order">${PL.newest ? "Newest first" : "Oldest first"}</button>
+          <label class="search search-sm">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
+            <input type="search" id="pl-search" value="${esc(PL.search)}" placeholder="Search candidates" aria-label="Search candidates" />
+          </label>
+        </div>
+      </div>
+
+      ${c.empty || !rows.length
+        ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
+        : `<div class="pl-table-wrap"><table class="pl-table${PL.animate ? " is-enter" : ""}">
+            <thead><tr>${COLUMNS.map(([k, t]) => `<th class="col-${k}" scope="col">${esc(t)}</th>`).join("")}</tr></thead>
+            <tbody>${shown.length ? shown.map((r, i) => `
+              <tr class="pl-row" data-status="${r.status}" style="--sw:#${PSTATUS[r.status]?.fill || "FFFFFF"};--bar:${PSTATUS[r.status]?.bar || "#A3B1C6"};--i:${Math.min(i, 18)}" tabindex="0" title="${esc(PSTATUS[r.status]?.label || "")}">
+                <th scope="row" class="col-name">${r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(r.name)}</a>` : esc(r.name)}</th>
+                <td class="col-role">${esc(r.role)}</td>
+                <td class="col-submitted">${esc(fmtDay(r.submitted))}</td>
+                <td class="col-interview">${esc(r.interview)}</td>
+                <td class="col-hired">${esc(r.hired)}</td>
+                <td class="col-roleHired">${esc(r.roleHired)}</td>
+                <td class="col-startDate">${esc(/^\d{4}-/.test(r.startDate || "") ? fmtDay(r.startDate) : r.startDate)}</td>
+                <td class="col-recruiter">${esc(r.recruiter)}</td>
+                <td class="col-notes"><div class="notes">${esc(r.notes)}</div></td>
+              </tr>`).join("") : `<tr><td colspan="9" class="pl-none">No candidates match. Clear the filters or search.</td></tr>`}
+            </tbody></table></div>`}
+    </div>
+
+    ${sourcingHTML(c)}`;
+  PL.animate = false;
+}
+
+function emptyBlock(title, text) {
+  return `<div class="empty"><div class="empty-mark">${ICONS.inbox}</div><strong>${esc(title)}</strong>${esc(text)}</div>`;
+}
+
+function sourcingHTML(c) {
+  const weeks = (c.sourcing || []).slice(0, 2);
+  if (!weeks.length) return "";
+  return `<div class="sourcing">
+    <h3 class="sourcing-title">Weekly sourcing numbers</h3>
+    <div class="sourcing-grid">
+      ${weeks.map((w) => `
+        <div class="sheet-card sourcing-card">
+          <div class="sourcing-week">Week ending ${esc(fmtDay(w.weekEnding))}</div>
+          ${w.rows?.length ? `<div class="pl-table-wrap"><table class="pl-table pl-mini">
+            <thead><tr><th scope="col">Day and role</th><th scope="col"># Sourced</th><th scope="col">Screened</th><th scope="col">Submitted</th></tr></thead>
+            <tbody>${w.rows.map((r) => `<tr><th scope="row">${esc(r.day)} <span class="muted">${esc(r.role)}</span></th><td class="num">${r.sourced || ""}</td><td>${esc((r.screened || []).join(", "))}</td><td>${esc((r.submitted || []).join(", "))}</td></tr>`).join("")}</tbody>
+          </table></div>` : `<p class="muted sourcing-none">No sourcing activity recorded this week.</p>`}
+        </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+/* ---------- Excel export (same layout as the Weekly Hiring Update) ---------- */
+let excelLib = null;
+function loadExcel() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (excelLib) return excelLib;
+  excelLib = new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+    sc.onload = () => res(window.ExcelJS);
+    sc.onerror = () => { excelLib = null; rej(new Error("ExcelJS failed to load")); };
+    document.head.appendChild(sc);
+  });
+  return excelLib;
+}
+
+async function downloadWorkbook(btn) {
+  const am = amObj(), clients = amClients();
+  if (!am || !clients.length) return;
+  btn.classList.add("is-loading");
+  try {
+    const ExcelJS = await loadExcel();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "HRA Dashboard";
+    const thin = { style: "thin", color: { argb: "FFB7B7B7" } };
+    const box = { top: thin, left: thin, bottom: thin, right: thin };
+    const fill = (hex) => ({ type: "pattern", pattern: "solid", fgColor: { argb: "FF" + hex } });
+    const used = new Set();
+
+    for (const c of clients) {
+      let name = c.name.replace(/[\[\]:*?/\\]/g, " ").slice(0, 31).trim() || "Client";
+      while (used.has(name)) name = name.slice(0, 28) + " " + (used.size + 1);
+      used.add(name);
+      const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 2 }] });
+      ws.columns = [24, 30, 14, 34, 22, 24, 14, 16, 60].map((w) => ({ width: w }));
+      const extra = (WK.clients || {})[c.name] || {};
+      const loc = c.location || extra.location, hrs = c.hours || extra.hours;
+
+      ws.mergeCells("A1:I1");
+      const t = ws.getCell("A1");
+      t.value = `${c.name}${loc ? ` (${loc})` : ""}${hrs ? ` ${hrs}` : ""}`;
+      t.font = { bold: true, size: 16, name: "Arial" }; t.fill = fill("FFF2CC");
+      ws.getRow(1).height = 26;
+
+      const head = ws.getRow(2);
+      COLUMNS.forEach(([, label], i) => { const cell = head.getCell(i + 1); cell.value = label; cell.font = { bold: true, name: "Arial" }; cell.fill = fill("CFE2F3"); cell.border = box; cell.alignment = { vertical: "middle", wrapText: true }; });
+      head.height = 32;
+
+      let r = 3;
+      for (const row of (c.candidates || []).slice().sort((a, b) => (a.submitted || "").localeCompare(b.submitted || ""))) {
+        const xr = ws.getRow(r++);
+        COLUMNS.forEach(([k], i) => {
+          const cell = xr.getCell(i + 1);
+          let v = row[k] || "";
+          if ((k === "submitted" || k === "startDate") && /^\d{4}-\d{2}-\d{2}/.test(v)) { const [y, m, d] = v.slice(0, 10).split("-").map(Number); v = new Date(Date.UTC(y, m - 1, d)); cell.numFmt = "m/d/yyyy"; }
+          cell.value = v;
+          cell.font = { name: "Arial", size: 10 };
+          cell.fill = fill(PSTATUS[row.status]?.fill || "FFFFFF");
+          cell.border = box;
+          cell.alignment = { vertical: "top", wrapText: ["interview", "hired", "notes"].includes(k) };
+        });
+      }
+
+      r += 3;
+      for (const v of Object.values(PSTATUS)) {
+        ws.mergeCells(`A${r}:B${r}`);
+        const cell = ws.getCell(`A${r}`);
+        cell.value = v.label; cell.fill = fill(v.fill); cell.border = box; cell.font = { name: "Arial", size: 10 };
+        r++;
+      }
+
+      for (const w of (c.sourcing || []).slice(0, 2)) {
+        r += 2;
+        ws.mergeCells(`A${r}:E${r}`);
+        ws.getCell(`A${r}`).value = "Weekly Sourcing Numbers"; ws.getCell(`A${r}`).font = { bold: true, name: "Arial" };
+        r++;
+        const hdr = ws.getRow(r++);
+        [`WE ${fmtDay(w.weekEnding)}`, "# Candidates Sourced", "Name of Candidates Screened", "Name of Candidates Submitted", "Recruiter Notes"].forEach((v, i) => {
+          const cell = hdr.getCell(i + 1); cell.value = v; cell.font = { bold: true, name: "Arial", size: 10 }; cell.fill = fill("CFE2F3"); cell.border = box; cell.alignment = { wrapText: true };
+        });
+        for (const sr of w.rows || []) {
+          const xr = ws.getRow(r++);
+          [`${sr.day} - ${sr.role}`, sr.sourced || "", (sr.screened || []).join(", "), (sr.submitted || []).join(", "), ""].forEach((v, i) => {
+            const cell = xr.getCell(i + 1); cell.value = v; cell.border = box; cell.font = { name: "Arial", size: 10 }; cell.alignment = { wrapText: true, vertical: "top" };
+          });
+        }
+      }
+      r += 2;
+      ws.getCell(`A${r}`).value = `Generated from Workable on ${new Date().toLocaleString()}${PL.meta?.lastSync ? ` (data synced ${fullDate(PL.meta.lastSync)})` : ""}`;
+      ws.getCell(`A${r}`).font = { italic: true, size: 9, color: { argb: "FF7A869A" }, name: "Arial" };
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const d = new Date();
+    const fname = `Weekly Hiring Update - ${am.name} - ${d.getMonth() + 1}-${d.getDate()}-${d.getFullYear()}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"), { href: url, download: fname });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast(`Downloaded ${clients.length} client sheet${clients.length > 1 ? "s" : ""}`, "var(--s-done)");
+  } catch (e) {
+    console.error(e);
+    toast("The spreadsheet couldn't be created. Check your connection and try again.", "#E2632B");
+  } finally { btn.classList.remove("is-loading"); }
+}
+
+/* ---------- demo data (fictional; real candidate data never ships with the page) ---------- */
+function demoAms() {
+  return [
+    { name: "Alex Morgan",  email: ADMINS[0] || "admin@demo.local",     clients: ["Northwind Plumbing", "Summit Heating & Air", "Harbor Drain & Sewer"] },
+    { name: "Jordan Reyes", email: MEMBERS[0] || "employee@demo.local", clients: ["Bright Spark Electric", "Evergreen Climate"] },
+    { name: "Taylor Brooks", email: "taylor@demo.local",               clients: ["Lakeside Home Builders"] }
+  ];
+}
+
+function demoClients() {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const first = ["Avery", "Blake", "Cameron", "Dakota", "Elliot", "Finley", "Gray", "Harper", "Jules", "Kendall", "Logan", "Morgan", "Noel", "Parker", "Quinn", "Rowan", "Sawyer", "Toby", "Val", "Wren"];
+  const last = ["Adler", "Brennan", "Castillo", "Dorsey", "Ellison", "Fairbanks", "Gallo", "Hendrix", "Ibarra", "Jansen", "Kowalski", "Lindqvist", "Marsh", "Novak", "Ortega", "Pruitt", "Quintero", "Rhodes", "Sterling", "Thorne"];
+  const recruiters = ["Sam", "Riley", "Casey", "Jordan"];
+  const defs = [
+    ["Northwind Plumbing", "Austin, TX", "15 hours/wk", ["Residential Service Plumber", "CSR", "Inside Sales"]],
+    ["Summit Heating & Air", "Quincy, MA", "20 hours/wk", ["HVAC Service Technician", "HVAC Comfort Advisor"]],
+    ["Harbor Drain & Sewer", "Buffalo, NY", "4 hours/wk", ["Sewer Technician", "Dispatcher"]],
+    ["Bright Spark Electric", "Romeo, MI", "10 hours/wk", ["Journeyman Electrician", "Generator Technician"]],
+    ["Evergreen Climate", "Elgin, IL", "20 hours/wk", ["HVAC Tech", "Lead HVAC Installer"]],
+    ["Lakeside Home Builders", "Chattanooga, TN", "20 hours/wk", ["Project Manager", "Production Manager"]]
+  ];
+  const notesBy = {
+    passed: ["HM passed. Rejection sent.", "Pass, not enough residential experience.", "Commute too far per client.", "Client passed after phone screen."],
+    in_process: ["Submitted to HM, waiting for feedback.", "Client likes the resume, scheduling next step.", "2nd interview being scheduled.", ""],
+    no_show: ["No show to in person interview.", "No call no show to Zoom."],
+    hired: ["Offer accepted.", "Started Monday, going well."],
+    fell_through: ["Declined offer for higher pay elsewhere.", "Accepted, then no show on first day."]
+  };
+  const today = new Date();
+  const iso = (daysAgo) => new Date(today.getTime() - daysAgo * 86400e3).toISOString().slice(0, 10);
+  return defs.map(([name, location, hours, roles], ci) => {
+    const n = 7 + Math.floor(rnd() * 9);
+    const candidates = Array.from({ length: n }, (_, i) => {
+      const daysAgo = Math.floor((n - i) * (80 / n) + rnd() * 5);
+      const recent = daysAgo < 18;
+      const r = rnd();
+      const status = recent ? (r < .65 ? "in_process" : r < .85 ? "passed" : "no_show")
+        : r < .48 ? "passed" : r < .62 ? "in_process" : r < .74 ? "no_show" : r < .9 ? "hired" : "fell_through";
+      const role = pick(roles);
+      const iv = status === "passed" && rnd() < .5 ? "N" : (status !== "in_process" || rnd() < .5) ? `Y - ${pick(["In person", "Zoom", "Phone"])} ${new Date(today - (daysAgo - 4) * 86400e3).getMonth() + 1}/${new Date(today - (daysAgo - 4) * 86400e3).getDate()}` : "";
+      return {
+        id: `d${ci}-${i}`, name: `${pick(first)} ${pick(last)}`, role, submitted: iso(daysAgo),
+        interview: status === "no_show" ? iv.replace(/^Y/, "Y") || "Y" : iv,
+        hired: status === "hired" ? "Y" : status === "fell_through" ? "N - " + pick(["declined offer", "no show day 1"]) : "",
+        roleHired: status === "hired" ? role : "", startDate: status === "hired" ? iso(Math.max(daysAgo - 14, -10)) : "",
+        recruiter: pick(recruiters), notes: pick(notesBy[status]), status, link: ""
+      };
+    });
+    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + ((5 - weekEnd.getDay() + 7) % 7));
+    const sourcing = [0, 1].map((w) => ({
+      weekEnding: new Date(weekEnd.getTime() - w * 7 * 86400e3).toISOString().slice(0, 10),
+      rows: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].flatMap((day) => roles.slice(0, 2).map((role) => ({
+        day, role, sourced: Math.floor(rnd() * 14), screened: rnd() < .35 ? [`${pick(first)} ${pick(last)}`] : [], submitted: rnd() < .2 ? [`${pick(first)} ${pick(last)}`] : []
+      })))
+    }));
+    return { id: `demo-${ci}`, name, location, hours, candidates, sourcing };
+  });
+}

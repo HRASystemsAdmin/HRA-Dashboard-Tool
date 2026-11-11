@@ -177,5 +177,46 @@ window.HRA_CONFIG = {
       ],
       title: (d) => d.subject || "General help"
     }
+  },
+
+  /* 7) Client Pipeline (Workable). Data is copied from Workable by the sync in
+        workable-sync/ (see WORKABLE-SETUP.md). The dashboard only displays it. */
+  workable: {
+    // Who manages which clients. The account manager whose email matches the
+    // person signed in is highlighted in green and opened automatically.
+    // Client names must match the client names the sync produces (see clientFrom).
+    accountManagers: [
+      { name: "Megan",  email: "megan@hunterrecruitment.net",  clients: ["Beyond Wow Plumbing", "Trust 1 Plumbing"] },
+      { name: "Holly",  email: "holly@hunterrecruitment.net",  clients: ["Metro Electric"] }
+    ],
+
+    // How a Workable job is matched to a client:
+    //   "department"  the job's Department in Workable is the client name (default)
+    //   "title"       the client name is in the job title, e.g. "Plumber - Beyond Wow Plumbing"
+    clientFrom: "department",
+
+    // Optional extra details shown in each client's title bar, and manual overrides
+    // when a client's jobs don't follow the rule above.
+    clients: {
+      "Beyond Wow Plumbing": { location: "Austin, TX", hours: "15 hours/wk" }
+      // "Trust 1 Plumbing": { location: "Quincy, MA", hours: "20 hours/wk", shortcodes: ["ABC123"] }
+    },
+
+    // Your Workable pipeline stage names (not case sensitive). A candidate shows in
+    // the table once they reach any "submitted" stage or later.
+    stages: {
+      screen:    ["Phone Screen", "Screening"],
+      submitted: ["Submitted to Client", "Submitted", "Client Review"],
+      interview: ["Interview", "Client Interview", "In-Person Interview"],
+      offer:     ["Offer"],
+      hired:     ["Hired"]
+    },
+
+    // Words in a disqualification reason or comment that mark a status color.
+    noShowWords:      ["no show", "no-show", "ncns", "no call"],
+    fellThroughWords: ["declined offer", "offer declined", "quit", "fired", "rescinded", "no show to start", "didn't start"],
+
+    lookbackDays: 365,                  // ignore candidates older than this
+    syncEveryMinutes: 30                // shown on the page; the schedule itself is in the workflow file
   }
 };

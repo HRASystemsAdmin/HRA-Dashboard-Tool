@@ -75,6 +75,17 @@ service cloud.firestore {
       }
     }
 
+    // Client Pipeline: written only by the Workable sync (service account bypasses
+    // these rules); anyone on the access list can read it.
+    match /workable_clients/{clientId} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+    match /workable_meta/{docId} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+
     // Everything else is closed.
     match /{document=**} {
       allow read, write: if false;

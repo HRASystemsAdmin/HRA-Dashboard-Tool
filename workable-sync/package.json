@@ -1,0 +1,10 @@
+{
+  "name": "hra-workable-sync",
+  "private": true,
+  "type": "module",
+  "description": "Copies Workable candidates into Firestore for the Client Pipeline tool.",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "firebase-admin": "12.7.0"
+  }
+}
