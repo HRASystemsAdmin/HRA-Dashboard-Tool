@@ -55,8 +55,13 @@ window.HRA_CONFIG = {
   /* 6) Request types. To add a new one, copy a block and change it.
         group: puts the type under a shared tile (see groups above).
         adminOnly: true shows the type to admins only.
+        adminTab: gives the type its own admin tab instead of the main Admin queue.
         Field types: text, email, url, tel, textarea, date, select (options),
-        chips (multi-select pills), checks (checkboxes; "locked" ones are always on). */
+        chips (multi-select pills), checks (checkboxes; "locked" ones are always on),
+        picker (collapsible section: add items one at a time; items with "options" ask for a value),
+        heading (a section title inside the form).
+        showIf: { field, equals } only shows a field when another field has that value.
+        suggestions: [...] offers typing suggestions on a text field. */
   requestTypes: {
     phone_queue: {
       group: "phone",
@@ -65,13 +70,14 @@ window.HRA_CONFIG = {
       blurb: "Get someone added to an existing call queue.",
       icon: "userplus",
       fields: [
+        { name: "queueName",   label: "Phone queue name",             type: "text",     required: true,  placeholder: "e.g. HRA Recruiting" },
         { name: "members",     label: "Who should be added",          type: "text",     required: true,  placeholder: "Full name(s), separated by commas" },
         { name: "emails",      label: "Their work email(s)",          type: "text",     required: true,  placeholder: "name@yourcompany.com" },
         { name: "permissions", label: "Permissions needed",           type: "checks",   required: true,
           options: ["Access", "Download", "Delete", "Share"], locked: ["Access"] },
         { name: "notes",       label: "Anything else we should know", type: "textarea", required: false, placeholder: "Which queue, temporary access, etc." }
       ],
-      title: (d) => `Add ${d.members || "member"} to a phone queue`
+      title: (d) => `Add ${d.members || "member"} to ${d.queueName || "a phone queue"}`
     },
 
     new_phone_queue: {
@@ -95,21 +101,65 @@ window.HRA_CONFIG = {
 
     new_employee: {
       adminOnly: true,
+      adminTab: { id: "newhires", label: "New employees", short: "New hires", blurb: "Onboarding requests, kept separate from the main queue." },
       label: "New employee request",
       blurb: "Set up accounts and access for someone joining.",
       icon: "userplus",
-      fields: [
-        { name: "fullName",       label: "Full name",               type: "text",     required: true,  placeholder: "First and last name" },
-        { name: "jobTitle",       label: "Job title",               type: "text",     required: true },
-        { name: "department",     label: "Department",              type: "text",     required: false },
-        { name: "manager",        label: "Manager",                 type: "text",     required: true,  placeholder: "Who they report to" },
-        { name: "startDate",      label: "Start date",              type: "date",     required: true },
-        { name: "phone",          label: "Phone number",            type: "tel",      required: false },
-        { name: "personalEmail",  label: "Personal email",          type: "email",    required: true,  placeholder: "name@gmail.com" },
-        { name: "companyEmail",   label: "Company email requested", type: "text",     required: true,  placeholder: "first.last@yourcompany.com" },
-        { name: "notes",          label: "Equipment, software or anything else", type: "textarea", required: false, placeholder: "Laptop, headset, systems they need access to" }
-      ],
       emailTo: "jroching@hunterrecruitment.net",
+      fields: [
+        { name: "fullName",          label: "New employee name",            type: "text",     required: true,  placeholder: "First and last name" },
+        { name: "startDate",         label: "Start date",                   type: "date",     required: true },
+        { name: "phone",             label: "Phone number",                 type: "tel",      required: false },
+        { name: "address",           label: "Address",                      type: "text",     required: false, placeholder: "Street, city, state, ZIP" },
+        { name: "personalEmail",     label: "Personal email address",       type: "email",    required: true,  placeholder: "name@gmail.com" },
+        { name: "title",             label: "Title",                        type: "text",     required: true },
+        { name: "manager",           label: "Manager",                      type: "text",     required: true },
+        { name: "department",        label: "Department",                   type: "select",   required: true,
+          options: ["Recruiting", "Recruiting Contractor (US)", "OSC", "Third Party OSC", "Sales", "Marketing", "Executive"] },
+        { name: "country",           label: "Country of physical location", type: "text",     required: true,
+          suggestions: ["United States", "Mexico", "Argentina", "Philippines", "South Africa"] },
+        { name: "laptopNeeded",      label: "Laptop needed",                type: "select",   required: true,  blank: true, options: ["Yes", "No"] },
+        { name: "roleType",          label: "Type of role",                 type: "select",   required: true,  blank: true,
+          options: ["FT Employee", "Contractor", "Third Party Contractor"] },
+        { name: "thirdPartyCompany", label: "Third party company name",     type: "text",     required: true,
+          showIf: { field: "roleType", equals: "Third Party Contractor" } },
+        { name: "hraEmail",          label: "HRA email address",            type: "text",     required: true,  placeholder: "first.last@hunterrecruitment.net" },
+        { name: "itNotes",           label: "IT notes",                     type: "textarea", required: false },
+
+        { type: "heading", label: "Access and systems", hint: "Open a section and add only what this person needs. Only what you add is sent." },
+
+        { name: "equipment", label: "Equipment Requirements", type: "picker", addLabel: "Add equipment",
+          items: ["Laptop"] },
+        { name: "license", label: "License Type", type: "picker", addLabel: "Add a license",
+          items: [
+            { name: "Microsoft License Type", options: ["Microsoft 365 Business Basic", "Microsoft 365 Business Standard", "Microsoft 365 Business Premium"] },
+            "Power BI"
+          ] },
+        { name: "remoteDesktop", label: "Remote Desktop Access", type: "picker", addLabel: "Add remote access",
+          items: ["Blue Agent Access"] },
+        { name: "extraApps", label: "Extra Applications", type: "picker", addLabel: "Add an application",
+          items: ["Zoom", "Windows App", "Favorites"] },
+        { name: "systemAccess", label: "System User Access", type: "picker", addLabel: "Add system access",
+          items: [
+            { name: "Zoom User Group", options: ["Zoom", "Accounting", "Administrative", "Paused Users", "Prince / Unified", "Recruiting"] },
+            { name: "Zoom Licenses", options: ["Zoom Workplace Enterprise Premier with US/CA Unlimited & Zoom Revenue Accelerator Essentials", "Zoom Workplace Enterprise Premier with US/CA Unlimited", "Zoom Revenue Accelerator Essentials"] },
+            "Zoom HRA Recruiting Call Queue",
+            "Zoom Channels (Recruiter 101/911, Yea You, HRA Random, HRA Company Celebration)",
+            { name: "Udemy", options: ["Account Manager", "Leadership", "Recruiter"] },
+            { name: "JazzHR", options: ["Recruiting Role: Recruiting Administrator", "Accounts Portal Role: Administrator"] },
+            { name: "Workable", options: ["Account Manager: Super Admin", "Recruiter: Recruiting : Admin"] },
+            { name: "Indeed", options: ["Limited", "Admin"] },
+            "Jeanie / Classet"
+          ] },
+        { name: "distributionGroups", label: "Distribution Groups", type: "picker", addLabel: "Add a distribution group",
+          items: ["ALL CONTRACT EE", "All EE", "All FT EE", "Contract Request Group", "Executive Team", "Leadership Team", "Management Team", "Recruiting Management Team", "Recruiting Team", "Sales Team"] },
+        { name: "teamsGroups", label: "Team & Microsoft 365 Groups", type: "picker", addLabel: "Add a group",
+          items: ["All Company", "Employee Archive", "Hunter Recruitment", "INKY-Exclude", "INKY-Journaling", "INKY-Users", "JazzHR Data Hub", "Marketing Group", "Recordings (Zoom)"] },
+        { name: "securityGroups", label: "Security Groups", type: "picker", addLabel: "Add a security group",
+          items: ["Accounting SG", "All Contract EE SG", "All EE SG", "All FT EE SG", "All Licensed & Enabled Users (Excluding Admins)", "All Users", "Argentina Employees", "Azure Requests", "DocusignSSO", "Executive Team SG", "External Users MFA", "Human Resources SG", "Leadership SG", "Management SG", "Marketing SG", "Mexico Employees", "New User Group for Onboarding", "OSC Recruiting SG", "Philippine Employees", "Recruiting Management SG", "Recruiting SG", "Sales SG", "South Africa Employees"] },
+        { name: "sharedEmail", label: "Shared Email Access", type: "picker", addLabel: "Add a shared mailbox",
+          items: ["HRA Candidate", "HRA Canva (Everyone)", "HRA Corp", "HRA Manufacturing", "HRA Marketing", "HRA Recruiting (Account Managers & Up)", "HRA Sales", "HRA Workable", "HRA1 (Account Managers & Up)", "HRA2 (Account Managers & Up)", "HRA3 (Account Managers & Up)", "HRA4 (Account Managers & Up)", "HRA5 (Account Managers & Up)", "Blue Agent Calendar Access", "Market Analysis (Account Managers & Up)", "Unified Prince"] }
+      ],
       title: (d) => `New employee: ${d.fullName || "new hire"}`
     },
 

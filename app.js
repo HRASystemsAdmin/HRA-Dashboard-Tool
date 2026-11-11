@@ -227,7 +227,6 @@ const state = {
   loaded: false,
   tab: "mine",
   mineFilter: "active",
-  queueFilter: "active",
   search: "",
   openId: null,
   known: new Map(),   // id -> status, for live change notifications
@@ -291,7 +290,7 @@ function handleUser(u) {
   $("#user-name").textContent = state.user.name;
   $("#user-role").textContent = isAdmin ? "Admin" : "Team member";
   $("#user-avatar").textContent = initials(state.user.name);
-  $("#tab-queue").hidden = !isAdmin;
+  buildBoards();
   const h = new Date().getHours();
   $("#greeting").textContent = `${h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"}, ${state.user.name.split(" ")[0]}`;
 
@@ -425,35 +424,101 @@ function renderMine() {
 }
 
 const PRI = { Urgent: 0, Soon: 1 };
-function renderQueue() {
-  if (!state.isAdmin) return;
+
+/* Admin boards: the main queue plus one tab per "adminTab" in config.js */
+function getBoards() {
+  const tabs = {};
+  for (const [key, t] of Object.entries(CFG.requestTypes)) {
+    if (!t.adminTab) continue;
+    const id = t.adminTab.id;
+    tabs[id] ||= { id, label: t.adminTab.label, short: t.adminTab.short || t.adminTab.label, blurb: t.adminTab.blurb || "", types: [] };
+    tabs[id].types.push(key);
+  }
+  const separate = Object.values(tabs).flatMap((b) => b.types);
+  return [
+    { id: "queue", label: "Admin queue", short: "Queue", blurb: "Take a request to show it's in progress, then complete it when it's done.", match: (t) => !separate.includes(t.type) },
+    ...Object.values(tabs).map((b) => ({ ...b, match: (t) => b.types.includes(t.type) }))
+  ];
+}
+let BOARDS = [];
+const boardState = {};
+
+function boardPanelHTML(b) {
+  return `<div class="panel" data-panel="${b.id}">
+    <div class="hero hero-compact">
+      <h1 class="hero-title">${esc(b.id === "queue" ? "Admin queue" : b.label)}</h1>
+      <p class="hero-sub">${esc(b.blurb)}</p>
+    </div>
+    <div class="meters">
+      <button class="meter" data-filter="open"><span class="meter-num" data-count="open">0</span><span class="meter-label">Submitted</span><span class="meter-bar s-open"></span></button>
+      <button class="meter" data-filter="in_progress"><span class="meter-num" data-count="in_progress">0</span><span class="meter-label">In progress</span><span class="meter-bar s-progress"></span></button>
+      <button class="meter" data-filter="completed"><span class="meter-num" data-count="completed">0</span><span class="meter-label">Completed</span><span class="meter-bar s-done"></span></button>
+    </div>
+    <div class="section-head section-head-tools">
+      <div class="seg" id="${b.id}-filter" role="tablist" aria-label="Filter ${esc(b.label)}">
+        <button class="seg-btn is-active" data-filter="active">Active</button>
+        <button class="seg-btn" data-filter="open">Submitted</button>
+        <button class="seg-btn" data-filter="in_progress">In progress</button>
+        <button class="seg-btn" data-filter="completed">Completed</button>
+        <span class="seg-indicator" aria-hidden="true"></span>
+      </div>
+      <label class="search">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
+        <input type="search" data-board-search="${b.id}" placeholder="Search name, reference or text" aria-label="Search ${esc(b.label)}" />
+      </label>
+    </div>
+    <ul class="tickets" id="${b.id}-list"></ul>
+  </div>`;
+}
+
+function buildBoards() {
+  $$("[data-board-tab]").forEach((el) => el.remove());
+  $$(".panel[data-board]").forEach((el) => el.remove());
+  BOARDS = state.isAdmin ? getBoards() : [];
+  const ind = $("#tabs .tab-indicator");
+  for (const b of BOARDS) {
+    boardState[b.id] = { filter: "active", search: "" };
+    ind.insertAdjacentHTML("beforebegin", `<button class="tab" data-tab="${b.id}" data-board-tab><span class="tab-long">${esc(b.label)}</span><span class="tab-short">${esc(b.short)}</span> <span class="tab-count is-zero" id="${b.id}-count">0</span></button>`);
+    $(".main").insertAdjacentHTML("beforeend", boardPanelHTML(b));
+    $(".main").lastElementChild.dataset.board = b.id;
+  }
+}
+
+function renderBoard(b) {
+  const st = boardState[b.id];
+  const panel = $(`.panel[data-panel="${b.id}"]`);
+  const pool = state.tickets.filter(b.match);
   const counts = { open: 0, in_progress: 0, completed: 0 };
-  state.tickets.forEach((t) => { if (counts[t.status] !== undefined) counts[t.status]++; });
-  $$("[data-count]").forEach((el) => countTo(el, counts[el.dataset.count]));
+  pool.forEach((t) => { if (counts[t.status] !== undefined) counts[t.status]++; });
+  $$("[data-count]", panel).forEach((el) => countTo(el, counts[el.dataset.count]));
 
-  const qc = $("#queue-count");
-  const waiting = counts.open;
-  if (qc.textContent !== String(waiting)) { qc.classList.remove("bump"); void qc.offsetWidth; qc.classList.add("bump"); }
-  qc.textContent = waiting;
-  qc.classList.toggle("is-zero", waiting === 0);
+  const qc = $("#" + b.id + "-count");
+  if (qc.textContent !== String(counts.open)) { qc.classList.remove("bump"); void qc.offsetWidth; qc.classList.add("bump"); }
+  qc.textContent = counts.open;
+  qc.classList.toggle("is-zero", counts.open === 0);
 
-  const list = $("#queue-list");
+  const list = $("#" + b.id + "-list");
   if (!state.loaded) { list.innerHTML = skeleton(); return; }
-  const s = lower(state.search);
-  const items = state.tickets
-    .filter((t) => matchFilter(t, state.queueFilter))
+  const s = lower(st.search);
+  const items = pool
+    .filter((t) => matchFilter(t, st.filter))
     .filter((t) => !s || lower([ref(t.id), t.title, t.createdBy?.name, t.createdBy?.email, JSON.stringify(t.fields || {})].join(" ")).includes(s))
-    .sort((a, b) => {
-      if (a.status !== "completed" && b.status !== "completed") {
-        const p = (PRI[a.fields?.priority] ?? 2) - (PRI[b.fields?.priority] ?? 2);
+    .sort((a, b2) => {
+      if (a.status !== "completed" && b2.status !== "completed") {
+        const p = (PRI[a.fields?.priority] ?? 2) - (PRI[b2.fields?.priority] ?? 2);
         if (p) return p;
       }
-      return toDate(b.createdAt) - toDate(a.createdAt);
+      return toDate(b2.createdAt) - toDate(a.createdAt);
     });
   list.innerHTML = items.length
     ? items.map((t, i) => row(t, i, true)).join("")
     : s ? empty("No matches", "Try a name, a reference like HRA-1A2B3C, or fewer words.")
-        : empty("The queue is clear", "New requests appear here the moment they're sent.");
+        : empty(b.id === "queue" ? "The queue is clear" : `No ${b.label.toLowerCase()} requests`, "New requests appear here the moment they're sent.");
+}
+
+function renderQueue() {
+  if (!state.isAdmin) return;
+  BOARDS.forEach(renderBoard);
 }
 
 function renderAll() {
@@ -499,7 +564,12 @@ function setSeg(groupId, filter) {
   $$(".seg-btn", g).forEach((b) => b.classList.toggle("is-active", b.dataset.filter === filter));
   moveIndicator(g);
   if (groupId === "mine-filter") { state.mineFilter = filter; renderMine(); }
-  else { state.queueFilter = filter; renderQueue(); }
+  else {
+    const id = groupId.replace(/-filter$/, "");
+    if (boardState[id]) boardState[id].filter = filter;
+    const b = BOARDS.find((x) => x.id === id);
+    if (b) renderBoard(b);
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -525,7 +595,82 @@ function closeAll(instant) { $$(".overlay").forEach((o) => closeOverlay(o, insta
 /* --------------------------------------------------------------------------
    New request
    -------------------------------------------------------------------------- */
+const CHEV = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+const itemName = (it) => typeof it === "string" ? it : it.name;
+const isDataField = (f) => f.type !== "heading";
+
+function pickerHTML(f, i) {
+  return `<div class="field picker" data-field="${f.name}" data-picker="${f.name}" style="--i:${i}">
+    <button type="button" class="picker-head" aria-expanded="false" data-toggle-picker>
+      <span class="picker-title">${esc(f.label)}</span>
+      <span class="picker-count" hidden>0</span>
+      <span class="picker-chev" aria-hidden="true">${CHEV}</span>
+    </button>
+    <div class="picker-body"><div class="picker-inner">
+      <ul class="picker-rows"></ul>
+      <div class="picker-add"></div>
+    </div></div>
+  </div>`;
+}
+
+function refreshPicker(wrap) {
+  const f = findField(wrap.dataset.picker);
+  const chosen = $$(".pick-row", wrap).map((r) => r.dataset.item);
+  const left = f.items.filter((it) => !chosen.includes(itemName(it)));
+  $(".picker-add", wrap).innerHTML = left.length
+    ? `<label class="pick-add"><span class="pick-plus" aria-hidden="true">${ICONS.plus.replace(/18/g, "14")}</span>
+        <select class="pick-select" aria-label="${esc(f.addLabel || "Add")}">
+          <option value="">${esc(f.addLabel || "Add an item")}</option>
+          ${left.map((it) => `<option>${esc(itemName(it))}</option>`).join("")}
+        </select></label>`
+    : `<p class="pick-done">Everything in this section has been added.</p>`;
+  const c = $(".picker-count", wrap);
+  c.textContent = chosen.length;
+  c.hidden = !chosen.length;
+}
+
+function addPick(wrap, name) {
+  const f = findField(wrap.dataset.picker);
+  const it = f.items.find((x) => itemName(x) === name);
+  if (!it) return;
+  const opts = typeof it === "object" && it.options;
+  const li = document.createElement("li");
+  li.className = "pick-row";
+  li.dataset.item = name;
+  li.innerHTML = `<span class="pick-name">${esc(name)}</span>
+    ${opts ? `<select class="pick-value" aria-label="${esc(name)} option"><option value="">Choose an option</option>${opts.map((o) => `<option>${esc(o)}</option>`).join("")}</select>` : `<span class="pick-yes">Added</span>`}
+    <button type="button" class="file-x" data-unpick aria-label="Remove ${esc(name)}">${ICONS.x}</button>`;
+  $(".picker-rows", wrap).appendChild(li);
+  refreshPicker(wrap);
+  wrap.classList.remove("is-invalid");
+  (opts ? $(".pick-value", li) : $(".pick-select", wrap))?.focus({ preventScroll: true });
+}
+
+function togglePicker(wrap, open) {
+  const head = $(".picker-head", wrap);
+  const now = open ?? head.getAttribute("aria-expanded") !== "true";
+  head.setAttribute("aria-expanded", String(now));
+  wrap.classList.toggle("is-open", now);
+}
+
+let currentType = null;
+const findField = (name) => CFG.requestTypes[currentType]?.fields.find((f) => f.name === name);
+
+function applyShowIf(form) {
+  const type = CFG.requestTypes[form.dataset.type];
+  type.fields.filter((f) => f.showIf).forEach((f) => {
+    const wrap = $(`[data-field="${f.name}"]`, form);
+    const src = form.elements[f.showIf.field];
+    const show = src && src.value === f.showIf.equals;
+    if (wrap.hidden === !show) return;
+    wrap.hidden = !show;
+    if (show) { wrap.classList.add("is-revealed"); setTimeout(() => wrap.classList.remove("is-revealed"), 500); }
+  });
+}
+
 function fieldHTML(f, i) {
+  if (f.type === "heading") return `<div class="form-section" style="--i:${i}"><h3>${esc(f.label)}</h3>${f.hint ? `<p>${esc(f.hint)}</p>` : ""}</div>`;
+  if (f.type === "picker") return pickerHTML(f, i);
   const id = "f-" + f.name;
   const req = f.required ? "required" : "";
   const label = `<span class="field-label">${esc(f.label)}${f.required ? "" : '<span class="opt">optional</span>'}</span>`;
@@ -534,7 +679,7 @@ function fieldHTML(f, i) {
     case "textarea":
       control = `<textarea id="${id}" name="${f.name}" ${req} placeholder="${esc(f.placeholder || "")}"></textarea>`; break;
     case "select":
-      control = `<select id="${id}" name="${f.name}" ${req}>${(f.options || []).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`; break;
+      control = `<select id="${id}" name="${f.name}" ${req}>${f.required && f.options.length > 3 || f.blank ? '<option value="">Choose one</option>' : ""}${(f.options || []).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`; break;
     case "chips": {
       const opts = f.optionsFrom ? (CFG[f.optionsFrom] || []) : (f.options || []);
       control = `<div class="chips" data-chips="${f.name}" role="group" aria-label="${esc(f.label)}">${opts.map((o) => `<button type="button" class="chip" aria-pressed="false" data-value="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
@@ -550,10 +695,13 @@ function fieldHTML(f, i) {
     }
     default: {
       const t = ["date", "email", "url", "tel"].includes(f.type) ? f.type : "text";
-      control = `<input id="${id}" name="${f.name}" type="${t}" ${req} placeholder="${esc(f.placeholder || "")}" />`;
+      const list = f.suggestions ? `list="${id}-list"` : "";
+      control = `<input id="${id}" name="${f.name}" type="${t}" ${req} ${list} autocomplete="off" placeholder="${esc(f.placeholder || "")}" />`
+        + (f.suggestions ? `<datalist id="${id}-list">${f.suggestions.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>` : "");
     }
   }
-  return `<label class="field" data-field="${f.name}" style="--i:${i}">${label}${control}</label>`;
+  const hide = f.showIf ? " hidden" : "";
+  return `<label class="field" data-field="${f.name}" style="--i:${i}"${hide}>${label}${control}</label>`;
 }
 
 function swapModal(html, dir) {
@@ -612,6 +760,10 @@ function openNew(key, dir) {
         <button type="submit" class="btn btn-primary"><span class="btn-text">Send request</span><span class="spinner" aria-hidden="true"></span></button>
       </div>
     </form>`, dir);
+  currentType = key;
+  const form = $("#new-form");
+  $$("[data-picker]", form).forEach(refreshPicker);
+  applyShowIf(form);
   setTimeout(() => $("#new-form input, #new-form textarea")?.focus({ preventScroll: true }), 350);
 }
 
@@ -621,20 +773,30 @@ async function submitNew(form) {
   const data = {};
   let firstBad = null;
 
-  for (const f of type.fields) {
+  for (const f of type.fields.filter(isDataField)) {
     const wrap = $(`[data-field="${f.name}"]`, form);
-    let v;
+    if (wrap.hidden) { data[f.name] = ""; continue; }
+    let v, bad = false;
     if (f.type === "chips") v = $$(`.chip[aria-pressed="true"]`, wrap).map((c) => c.dataset.value);
     else if (f.type === "checks") v = $$("input:checked", wrap).map((c) => c.value);
+    else if (f.type === "picker") {
+      v = $$(".pick-row", wrap).map((r) => {
+        const sel = $(".pick-value", r);
+        if (sel && !sel.value) { bad = true; sel.classList.add("is-missing"); }
+        return sel ? `${r.dataset.item}: ${sel.value}` : r.dataset.item;
+      });
+      if (bad) togglePicker(wrap, true);
+    }
     else v = String(form.elements[f.name].value || "").trim();
     data[f.name] = v;
-    const bad = f.required && (Array.isArray(v) ? v.length === 0 : !v);
+    bad = bad || (f.required && (Array.isArray(v) ? v.length === 0 : !v));
     wrap.classList.remove("is-invalid");
     if (bad) { void wrap.offsetWidth; wrap.classList.add("is-invalid"); firstBad ||= wrap; }
   }
   if (firstBad) {
-    $("#new-error").textContent = "Fill in the highlighted fields to send this request.";
-    ($("input, textarea, select, .chip", firstBad))?.focus();
+    $("#new-error").textContent = $(".is-missing", firstBad) ? "Choose an option for each item you added, or remove it." : "Fill in the highlighted fields to send this request.";
+    ($(".is-missing, input, textarea, select, .chip", firstBad))?.focus();
+    firstBad.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
     return;
   }
 
@@ -1000,7 +1162,7 @@ function loadEmailJS() {
 }
 
 function displayValue(f, v) {
-  if (Array.isArray(v)) v = v.join(", ");
+  if (Array.isArray(v)) v = v.join(f.type === "picker" ? "\n" : ", ");
   if (f.type === "url" && v && !/^https?:\/\//i.test(v)) v = "https://" + v;
   if (f.type === "date" && v) v = new Date(v + "T00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
   return v;
@@ -1009,7 +1171,9 @@ function displayValue(f, v) {
 function emailParams(t) {
   const type = CFG.requestTypes[t.type];
   const rows = [["Reference", ref(t.id)], ["Requested by", `${t.createdBy?.name} (${t.createdBy?.email})`]]
-    .concat(type.fields.map((f) => [f.label, displayValue(f, t.fields?.[f.name]) || "Not provided"]));
+    .concat(type.fields.filter(isDataField)
+      .filter((f) => !(f.type === "picker" || f.showIf) || displayValue(f, t.fields?.[f.name]))
+      .map((f) => [f.label, displayValue(f, t.fields?.[f.name]) || "Not provided"]));
   const n = t.attachments?.length || 0;
   const base = (MAIL.siteUrl || location.href.split("#")[0]).replace(/index\.html$/, "").replace(/\/?$/, "/");
   const link = base + "#r-" + t.id;
@@ -1089,12 +1253,9 @@ function renderDrawer() {
   const type = CFG.requestTypes[t.type];
   const keepNote = $("#admin-note")?.value || "";
 
-  const rows = (type?.fields || []).map((f) => {
-    let v = t.fields?.[f.name];
-    if (Array.isArray(v)) v = v.join(", ");
-    if (f.type === "url" && v && !/^https?:\/\//i.test(v)) v = "https://" + v;
-    if (f.type === "date" && v) v = new Date(v + "T00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-    return v ? `<div class="detail"><dt>${esc(f.label)}</dt><dd>${esc(v)}</dd></div>` : "";
+  const rows = (type?.fields || []).filter(isDataField).map((f) => {
+    const v = displayValue(f, t.fields?.[f.name]);
+    return v ? `<div class="detail${f.type === "picker" ? " detail-list" : ""}"><dt>${esc(f.label)}</dt><dd>${esc(v)}</dd></div>` : "";
   }).join("");
 
   const history = (t.history || []).slice().reverse().map((h) => `
@@ -1217,9 +1378,16 @@ function bind() {
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
     const tab = t.closest(".tab"); if (tab) { setTab(tab.dataset.tab); return; }
     const seg = t.closest(".seg-btn"); if (seg) { setSeg(seg.closest(".seg").id, seg.dataset.filter); return; }
-    const meter = t.closest(".meter"); if (meter) { setSeg("queue-filter", meter.dataset.filter); return; }
+    const meter = t.closest(".meter"); if (meter) { setSeg(meter.closest(".panel").dataset.panel + "-filter", meter.dataset.filter); return; }
     const nw = t.closest("[data-new]"); if (nw) { openNew(nw.dataset.new, nw.dataset.dir); return; }
     const pick = t.closest("[data-pick]"); if (pick) { openNew(pick.dataset.pick, "fwd"); return; }
+    const ph = t.closest("[data-toggle-picker]"); if (ph) { togglePicker(ph.closest(".picker")); return; }
+    const up = t.closest("[data-unpick]"); if (up) {
+      const wrap = up.closest(".picker"), li = up.closest(".pick-row");
+      li.classList.add("is-leaving");
+      setTimeout(() => { li.remove(); refreshPicker(wrap); }, 200);
+      return;
+    }
     const chip = t.closest(".chip"); if (chip) {
       chip.setAttribute("aria-pressed", chip.getAttribute("aria-pressed") === "true" ? "false" : "true");
       chip.closest(".field")?.classList.remove("is-invalid");
@@ -1258,6 +1426,9 @@ function bind() {
   });
 
   document.addEventListener("change", (e) => {
+    if (e.target.classList?.contains("pick-select") && e.target.value) { addPick(e.target.closest(".picker"), e.target.value); return; }
+    if (e.target.classList?.contains("pick-value")) e.target.classList.remove("is-missing");
+    if (e.target.closest?.("#new-form")) applyShowIf($("#new-form"));
     if (e.target.classList?.contains("drop-input")) { stage(e.target.files); e.target.value = ""; }
     if (e.target.id === "drawer-files") { addFilesToTicket([...e.target.files]); e.target.value = ""; }
   });
@@ -1288,7 +1459,11 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
-    if (e.target.id === "queue-search") { state.search = e.target.value; renderQueue(); }
+    if (e.target.dataset?.boardSearch) {
+      const id = e.target.dataset.boardSearch;
+      boardState[id].search = e.target.value;
+      renderBoard(BOARDS.find((b) => b.id === id));
+    }
     e.target.closest?.(".field.is-invalid")?.classList.remove("is-invalid");
   });
 

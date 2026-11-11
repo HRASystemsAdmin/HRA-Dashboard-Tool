@@ -78,9 +78,6 @@
         <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo topbar-logo" />
         <nav class="tabs" id="tabs" aria-label="Sections">
           <button class="tab is-active" data-tab="mine">My requests</button>
-          <button class="tab" data-tab="queue" id="tab-queue" hidden>
-            Admin queue <span class="tab-count" id="queue-count">0</span>
-          </button>
           <span class="tab-indicator" aria-hidden="true"></span>
         </nav>
         <div class="user">
@@ -118,34 +115,6 @@
         <ul class="tickets" id="mine-list"></ul>
       </div>
 
-      <!-- Admin queue -->
-      <div class="panel" data-panel="queue">
-        <div class="hero hero-compact">
-          <h1 class="hero-title">Admin queue</h1>
-          <p class="hero-sub">Take a request to show it's in progress, then complete it when it's done.</p>
-        </div>
-
-        <div class="meters" id="meters">
-          <button class="meter" data-filter="open"><span class="meter-num" data-count="open">0</span><span class="meter-label">Submitted</span><span class="meter-bar s-open"></span></button>
-          <button class="meter" data-filter="in_progress"><span class="meter-num" data-count="in_progress">0</span><span class="meter-label">In progress</span><span class="meter-bar s-progress"></span></button>
-          <button class="meter" data-filter="completed"><span class="meter-num" data-count="completed">0</span><span class="meter-label">Completed</span><span class="meter-bar s-done"></span></button>
-        </div>
-
-        <div class="section-head section-head-tools">
-          <div class="seg" id="queue-filter" role="tablist" aria-label="Filter queue">
-            <button class="seg-btn is-active" data-filter="active">Active</button>
-            <button class="seg-btn" data-filter="open">Submitted</button>
-            <button class="seg-btn" data-filter="in_progress">In progress</button>
-            <button class="seg-btn" data-filter="completed">Completed</button>
-            <span class="seg-indicator" aria-hidden="true"></span>
-          </div>
-          <label class="search">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
-            <input type="search" id="queue-search" placeholder="Search name, reference or text" aria-label="Search requests" />
-          </label>
-        </div>
-        <ul class="tickets" id="queue-list"></ul>
-      </div>
     </main>
   </section>
 

@@ -43,6 +43,8 @@ Admins don't need to be listed in `members` too. An account that signs in but is
 
 - **Phone Queues** is one tile. Clicking it first asks whether to add members to a queue or create a new one. This comes from `groups` in `config.js`: any request types with the same `group` share a tile.
 - **New employee request** has `adminOnly: true`, so only admins see it. The Firestore rules also block employees from creating one.
+- New employee requests have their own **New employees** admin tab (from `adminTab` in `config.js`), so they stay out of the main Admin queue.
+- The New employee form follows the VC tab of the New Employee Request spreadsheet. The grey-titled groups (licenses, system access, distribution/security groups, shared mailboxes and so on) are collapsible `picker` sections: open one, add items one at a time, and pick a value where the spreadsheet had a dropdown. Only added items are saved and emailed. To change the lists, edit `items` on those fields in `config.js`.
 
 ## Adding a new request type
 
