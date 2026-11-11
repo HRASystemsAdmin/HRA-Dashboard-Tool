@@ -1,0 +1,52 @@
+rules_version = '2';
+
+// Paste this into Firebase console → Firestore Database → Rules → Publish.
+// These rules are the real lock on the data. Keep the two lists below in
+// sync with config.js (lowercase emails).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function adminEmails() {
+      return [
+        'admin@yourcompany.com'
+      ];
+    }
+
+    function memberEmails() {
+      return [
+        'employee@yourcompany.com'
+      ];
+    }
+
+    function signedIn() { return request.auth != null && request.auth.token.email != null; }
+    function email()    { return request.auth.token.email.lower(); }
+    function isAdmin()  { return signedIn() && email() in adminEmails(); }
+    function isMember() { return signedIn() && (isAdmin() || email() in memberEmails()); }
+
+    match /tickets/{ticketId} {
+      // Admins see everything; members only see their own requests.
+      allow read: if isAdmin()
+                  || (isMember() && resource.data.createdBy.uid == request.auth.uid);
+
+      // Members create requests as themselves, always starting as "open".
+      allow create: if isMember()
+                    && request.resource.data.createdBy.uid == request.auth.uid
+                    && request.resource.data.createdBy.email == email()
+                    && request.resource.data.status == 'open'
+                    && request.resource.data.type is string
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() <= 200;
+
+      // Only admins change status or delete.
+      allow update: if isAdmin()
+                    && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if isAdmin();
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
