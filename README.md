@@ -39,6 +39,11 @@ To add or remove someone, update **both** places:
 
 Admins don't need to be listed in `members` too. An account that signs in but isn't on either list sees a "doesn't have access" screen and can't read anything.
 
+## Request types, groups and admin-only types
+
+- **Phone Queues** is one tile. Clicking it first asks whether to add members to a queue or create a new one. This comes from `groups` in `config.js`: any request types with the same `group` share a tile.
+- **New employee request** has `adminOnly: true`, so only admins see it. The Firestore rules also block employees from creating one.
+
 ## Adding a new request type
 
 Copy a block inside `requestTypes` in `config.js`, give it a new key, label, and fields. Field types: `text`, `email`, `url`, `tel`, `textarea`, `date`, `select` (with `options`), `chips` (multi-select pills), `checks` (checkboxes; add `locked` for options that are always on, like Access). The form, details view, and admin queue pick it up automatically.
@@ -48,7 +53,7 @@ Copy a block inside `requestTypes` in `config.js`, give it a new key, label, and
 - People can attach files when they send a request (drag and drop, browse, or paste a screenshot with Ctrl+V), and add more later from the request's details. Admins can add files too.
 - Files are stored inside Firestore, so **no billing card is needed** (Firebase's separate file storage service requires the paid Blaze plan). The free plan includes about 1 GB, which is thousands of screenshots. Large photos and screenshots are compressed automatically.
 - Limits are set in `config.js` → `attachments` (default 8 files per upload, 5 MB each).
-- Admins can delete a request once it's **Completed**. A confirmation appears first, and deleting also removes its attachments, which frees up space.
+- Once a request is **Completed**, the person who sent it (and any admin) can delete it. A confirmation appears first, and deleting also removes its attachments, which frees up space.
 
 ## Email for New employee requests (EmailJS)
 

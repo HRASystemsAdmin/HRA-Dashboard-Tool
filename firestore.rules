@@ -24,8 +24,11 @@ service cloud.firestore {
     function isAdmin()  { return signedIn() && email() in adminEmails(); }
     function isMember() { return signedIn() && (isAdmin() || email() in memberEmails()); }
 
+    function ticket(ticketId) {
+      return get(/databases/$(database)/documents/tickets/$(ticketId)).data;
+    }
     function ownerOf(ticketId) {
-      return get(/databases/$(database)/documents/tickets/$(ticketId)).data.createdBy.uid;
+      return ticket(ticketId).createdBy.uid;
     }
 
     match /tickets/{ticketId} {
@@ -40,7 +43,9 @@ service cloud.firestore {
                     && request.resource.data.status == 'open'
                     && request.resource.data.type is string
                     && request.resource.data.title is string
-                    && request.resource.data.title.size() <= 200;
+                    && request.resource.data.title.size() <= 200
+                    // New employee requests are admin-only.
+                    && (request.resource.data.type != 'new_employee' || isAdmin());
 
       // Admins change status. The requester may only add attachments (and record the email result) on their own request.
       allow update: if (isAdmin()
@@ -50,8 +55,11 @@ service cloud.firestore {
                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attachments', 'emailStatus', 'updatedAt'])
                         && (!('attachments' in request.resource.data) || request.resource.data.attachments.size() <= 40));
 
-      // Only admins can delete requests.
-      allow delete: if isAdmin();
+      // Admins can delete any request; employees can delete their own once it's completed.
+      allow delete: if isAdmin()
+                    || (isMember()
+                        && resource.data.createdBy.uid == request.auth.uid
+                        && resource.data.status == 'completed');
 
       // Attachment data, split into pieces under 1 MB each.
       match /chunks/{chunkId} {
@@ -60,7 +68,10 @@ service cloud.firestore {
                       && request.resource.data.keys().hasOnly(['data'])
                       && request.resource.data.data is string
                       && request.resource.data.data.size() <= 800000;
-        allow delete: if isAdmin();
+        allow delete: if isAdmin()
+                      || (isMember()
+                          && ticket(ticketId).createdBy.uid == request.auth.uid
+                          && ticket(ticketId).status == 'completed');
       }
     }
 

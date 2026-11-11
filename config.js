@@ -41,14 +41,29 @@ window.HRA_CONFIG = {
     siteUrl: ""        // optional, e.g. "https://your-username.github.io/request-center/"
   },
 
-  /* 5) Request types. To add a new one, copy a block and change it.
+  /* 5) Tile groups. Request types with the same "group" share one tile on the home
+        screen; clicking it first asks which kind of request it is. */
+  groups: {
+    phone: {
+      label: "Phone Queues",
+      blurb: "Add members to a queue or set up a new one.",
+      icon: "phone",
+      question: "What do you need?"
+    }
+  },
+
+  /* 6) Request types. To add a new one, copy a block and change it.
+        group: puts the type under a shared tile (see groups above).
+        adminOnly: true shows the type to admins only.
         Field types: text, email, url, tel, textarea, date, select (options),
         chips (multi-select pills), checks (checkboxes; "locked" ones are always on). */
   requestTypes: {
     phone_queue: {
-      label: "Add members to phone queues",
+      group: "phone",
+      label: "Add members to a queue",
+      short: "Add members",
       blurb: "Get someone added to an existing call queue.",
-      icon: "phone",
+      icon: "userplus",
       fields: [
         { name: "members",     label: "Who should be added",          type: "text",     required: true,  placeholder: "Full name(s), separated by commas" },
         { name: "emails",      label: "Their work email(s)",          type: "text",     required: true,  placeholder: "name@yourcompany.com" },
@@ -56,11 +71,13 @@ window.HRA_CONFIG = {
           options: ["Access", "Download", "Delete", "Share"], locked: ["Access"] },
         { name: "notes",       label: "Anything else we should know", type: "textarea", required: false, placeholder: "Which queue, temporary access, etc." }
       ],
-      title: (d) => `Add ${d.members || "member"} to phone queues`
+      title: (d) => `Add ${d.members || "member"} to a phone queue`
     },
 
     new_phone_queue: {
-      label: "Request new phone queue",
+      group: "phone",
+      label: "Create a new phone queue",
+      short: "New queue",
       blurb: "Set up a new call queue for a client.",
       icon: "queue",
       fields: [
@@ -77,6 +94,7 @@ window.HRA_CONFIG = {
     },
 
     new_employee: {
+      adminOnly: true,
       label: "New employee request",
       blurb: "Set up accounts and access for someone joining.",
       icon: "userplus",

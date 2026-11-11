@@ -335,9 +335,29 @@ const flashIds = new Set();
 /* --------------------------------------------------------------------------
    Rendering
    -------------------------------------------------------------------------- */
+const GROUPS = CFG.groups || {};
+const canUseType = (t) => t && (!t.adminOnly || state.isAdmin);
+function typeLabel(key) {
+  const t = CFG.requestTypes[key];
+  if (!t) return "Request";
+  const g = t.group && GROUPS[t.group];
+  return g ? `${g.label}: ${t.short || t.label}` : t.label;
+}
+
 function renderTypes() {
-  $("#type-tiles").innerHTML = Object.entries(CFG.requestTypes).map(([key, t]) => `
-    <button class="type-tile" data-new="${esc(key)}">
+  const tiles = [], seen = new Set();
+  for (const [key, t] of Object.entries(CFG.requestTypes)) {
+    if (!canUseType(t)) continue;
+    const g = t.group && GROUPS[t.group];
+    if (g) {
+      if (seen.has(t.group)) continue;
+      seen.add(t.group);
+      tiles.push({ open: "group:" + t.group, icon: g.icon, label: g.label, blurb: g.blurb });
+    } else tiles.push({ open: key, icon: t.icon, label: t.label, blurb: t.blurb });
+  }
+  $("#type-tiles").classList.toggle("is-stacked", tiles.length >= 3);
+  $("#type-tiles").innerHTML = tiles.map((t) => `
+    <button class="type-tile" data-new="${esc(t.open)}">
       <span class="type-icon">${ICONS[t.icon] || ICONS.spark}</span>
       <span>
         <span class="type-name" style="display:block">${esc(t.label)}</span>
@@ -362,7 +382,7 @@ function row(t, i, adminView) {
   const urgent = t.fields?.priority === "Urgent" && t.status !== "completed";
   const meta = [
     `<span class="t-ref">${ref(t.id)}</span>`,
-    `<span>${esc(type?.label || "Request")}</span>`,
+    `<span>${esc(typeLabel(t.type))}</span>`,
     adminView ? `<span>${ICONS.user}${esc(t.createdBy?.name || "")}</span>` : "",
     `<span>${ICONS.clock}${ago(t.createdAt)}</span>`,
     t.attachments?.length ? `<span>${ICONS.clip}${t.attachments.length} file${t.attachments.length > 1 ? "s" : ""}</span>` : "",
@@ -536,11 +556,49 @@ function fieldHTML(f, i) {
   return `<label class="field" data-field="${f.name}" style="--i:${i}">${label}${control}</label>`;
 }
 
-function openNew(key) {
-  const type = CFG.requestTypes[key];
-  if (!type) return;
+function swapModal(html, dir) {
+  const body = $("#modal-body");
+  body.innerHTML = html;
+  if (dir && !reduceMotion) {
+    body.classList.remove("swap-fwd", "swap-back"); void body.offsetWidth;
+    body.classList.add(dir === "back" ? "swap-back" : "swap-fwd");
+  }
+  const m = $("#modal");
+  if (m.hidden) openOverlay(m);
+  else $("#modal .sheet").scrollTop = 0;
+}
+
+function openGroup(groupKey, dir) {
+  const g = GROUPS[groupKey];
+  const options = Object.entries(CFG.requestTypes).filter(([, t]) => t.group === groupKey && canUseType(t));
+  if (!g || !options.length) return;
   pending.length = 0;
-  $("#modal-body").innerHTML = `
+  swapModal(`
+    <div class="modal-head">
+      <span class="type-icon">${ICONS[g.icon] || ICONS.spark}</span>
+      <div><h2 id="modal-title">${esc(g.label)}</h2><p>${esc(g.question || "Choose a request type.")}</p></div>
+    </div>
+    <div class="choices" role="list">
+      ${options.map(([key, t], i) => `
+        <button type="button" class="choice" data-pick="${esc(key)}" role="listitem" style="--i:${i}">
+          <span class="choice-icon">${ICONS[t.icon] || ICONS.spark}</span>
+          <span class="choice-text"><span class="choice-name">${esc(t.label)}</span><span class="choice-blurb">${esc(t.blurb)}</span></span>
+          <span class="choice-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+        </button>`).join("")}
+    </div>`, dir);
+  setTimeout(() => $(".choice")?.focus({ preventScroll: true }), 300);
+}
+
+function openNew(key, dir) {
+  if (key.startsWith("group:")) { openGroup(key.slice(6), dir); return; }
+  const type = CFG.requestTypes[key];
+  if (!canUseType(type)) return;
+  pending.length = 0;
+  const back = type.group && GROUPS[type.group]
+    ? `<button type="button" class="back-link" data-new="group:${esc(type.group)}" data-dir="back"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>${esc(GROUPS[type.group].label)}</button>`
+    : "";
+  swapModal(`
+    ${back}
     <div class="modal-head">
       <span class="type-icon">${ICONS[type.icon] || ICONS.spark}</span>
       <div><h2 id="modal-title">${esc(type.label)}</h2><p>${esc(type.blurb)}</p></div>
@@ -553,13 +611,13 @@ function openNew(key) {
         <button type="button" class="btn btn-ghost" data-close>Cancel</button>
         <button type="submit" class="btn btn-primary"><span class="btn-text">Send request</span><span class="spinner" aria-hidden="true"></span></button>
       </div>
-    </form>`;
-  openOverlay($("#modal"));
+    </form>`, dir);
   setTimeout(() => $("#new-form input, #new-form textarea")?.focus({ preventScroll: true }), 350);
 }
 
 async function submitNew(form) {
   const key = form.dataset.type, type = CFG.requestTypes[key];
+  if (!canUseType(type)) return;
   const data = {};
   let firstBad = null;
 
@@ -916,7 +974,7 @@ async function deleteTicket() {
     console.error(e);
     ok.classList.remove("is-loading");
     closeOverlay($("#confirm"));
-    toast(e?.code === "permission-denied" ? "Only admins can delete requests." : "The request wasn't deleted. Check your connection and try again.", "#E2632B");
+    toast(e?.code === "permission-denied" ? "This request can't be deleted until it's completed." : "The request wasn't deleted. Check your connection and try again.", "#E2632B");
   }
 }
 
@@ -958,8 +1016,8 @@ function emailParams(t) {
   return {
     to_email: type.emailTo,
     reply_to: t.createdBy?.email || "",
-    subject: `${type.label}: ${t.title.replace(/^New employee:\s*/i, "")} (${ref(t.id)})`,
-    request_type: type.label,
+    subject: `${typeLabel(t.type)}: ${t.title.replace(/^New employee:\s*/i, "")} (${ref(t.id)})`,
+    request_type: typeLabel(t.type),
     reference: ref(t.id),
     requested_by: t.createdBy?.name || "",
     requested_by_email: t.createdBy?.email || "",
@@ -1062,6 +1120,14 @@ function renderDrawer() {
       </div>`;
   }
 
+  if (!state.isAdmin && t.status === "completed" && t.createdBy?.uid === state.user.uid) {
+    admin = `
+      <div class="owner-actions">
+        <p>This request is complete. Delete it to keep your list tidy.</p>
+        <button class="btn btn-danger" data-delete>${ICONS.trash.replace(/22/g, "17")}Delete request</button>
+      </div>`;
+  }
+
   $("#drawer-body").innerHTML = `
     <div class="drawer-top">
       <span class="pill" data-status="${t.status}">${STATUS[t.status].label}</span>
@@ -1071,7 +1137,7 @@ function renderDrawer() {
     ${track(t.status)}
     <dl class="details">
       <div class="detail"><dt>Requested by</dt><dd>${esc(t.createdBy?.name)}${state.isAdmin ? ` <span style="color:var(--muted)">${esc(t.createdBy?.email)}</span>` : ""}</dd></div>
-      <div class="detail"><dt>Type</dt><dd>${esc(type?.label || t.type)}</dd></div>
+      <div class="detail"><dt>Type</dt><dd>${esc(typeLabel(t.type))}</dd></div>
       ${rows}
     </dl>
     ${emailHTML(t)}
@@ -1152,7 +1218,8 @@ function bind() {
     const tab = t.closest(".tab"); if (tab) { setTab(tab.dataset.tab); return; }
     const seg = t.closest(".seg-btn"); if (seg) { setSeg(seg.closest(".seg").id, seg.dataset.filter); return; }
     const meter = t.closest(".meter"); if (meter) { setSeg("queue-filter", meter.dataset.filter); return; }
-    const nw = t.closest("[data-new]"); if (nw) { openNew(nw.dataset.new); return; }
+    const nw = t.closest("[data-new]"); if (nw) { openNew(nw.dataset.new, nw.dataset.dir); return; }
+    const pick = t.closest("[data-pick]"); if (pick) { openNew(pick.dataset.pick, "fwd"); return; }
     const chip = t.closest(".chip"); if (chip) {
       chip.setAttribute("aria-pressed", chip.getAttribute("aria-pressed") === "true" ? "false" : "true");
       chip.closest(".field")?.classList.remove("is-invalid");
