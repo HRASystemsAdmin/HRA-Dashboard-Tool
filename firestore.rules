@@ -24,6 +24,10 @@ service cloud.firestore {
     function isAdmin()  { return signedIn() && email() in adminEmails(); }
     function isMember() { return signedIn() && (isAdmin() || email() in memberEmails()); }
 
+    function ownerOf(ticketId) {
+      return get(/databases/$(database)/documents/tickets/$(ticketId)).data.createdBy.uid;
+    }
+
     match /tickets/{ticketId} {
       // Admins see everything; members only see their own requests.
       allow read: if isAdmin()
@@ -38,10 +42,26 @@ service cloud.firestore {
                     && request.resource.data.title is string
                     && request.resource.data.title.size() <= 200;
 
-      // Only admins change status or delete.
-      allow update: if isAdmin()
-                    && request.resource.data.createdBy == resource.data.createdBy;
+      // Admins change status. The requester may only add attachments to their own request.
+      allow update: if (isAdmin()
+                        && request.resource.data.createdBy == resource.data.createdBy)
+                    || (isMember()
+                        && resource.data.createdBy.uid == request.auth.uid
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attachments', 'updatedAt'])
+                        && request.resource.data.attachments.size() <= 40);
+
+      // Only admins can delete requests.
       allow delete: if isAdmin();
+
+      // Attachment data, split into pieces under 1 MB each.
+      match /chunks/{chunkId} {
+        allow read:   if isAdmin() || (isMember() && ownerOf(ticketId) == request.auth.uid);
+        allow create: if (isAdmin() || (isMember() && ownerOf(ticketId) == request.auth.uid))
+                      && request.resource.data.keys().hasOnly(['data'])
+                      && request.resource.data.data is string
+                      && request.resource.data.data.size() <= 800000;
+        allow delete: if isAdmin();
+      }
     }
 
     // Everything else is closed.

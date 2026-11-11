@@ -23,6 +23,10 @@ const ICONS = {
   spark: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M12 8.5l1.2 2.3 2.3 1.2-2.3 1.2L12 15.5l-1.2-2.3L8.5 12l2.3-1.2z"/></svg>',
   plus:  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   inbox: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-7.5A2 2 0 0 1 7.4 4h9.2a2 2 0 0 1 1.9 1.5L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg>',
+  clip:  '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2L9.8 17.5a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>',
+  upload: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>',
+  x:     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   user:  '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
   clock: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
 };
@@ -62,7 +66,8 @@ function toast(msg, color) {
    Data stores
    -------------------------------------------------------------------------- */
 function createDemoStore() {
-  const KEY = "hra_demo_tickets_v2", UKEY = "hra_demo_user_v1";
+  const KEY = "hra_demo_tickets_v2", UKEY = "hra_demo_user_v1", FKEY = "hra_demo_files_v1";
+  const loadFiles = () => { try { return JSON.parse(localStorage.getItem(FKEY)) || {}; } catch { return {}; } };
   const listeners = new Set();
   let onUser = () => {};
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
@@ -118,6 +123,26 @@ function createDemoStore() {
     },
     async update(id, patch, entry) {
       save(load().map((t) => t.id === id ? { ...t, ...patch, updatedAt: Date.now(), history: [...(t.history || []), entry] } : t));
+    },
+    async putChunk(ticketId, chunkId, data) {
+      const files = loadFiles();
+      files[ticketId + "/" + chunkId] = data;
+      try { localStorage.setItem(FKEY, JSON.stringify(files)); }
+      catch { throw { code: "demo-quota" }; }
+    },
+    async getChunk(ticketId, chunkId) {
+      const d = loadFiles()[ticketId + "/" + chunkId];
+      if (d == null) throw { code: "not-found" };
+      return d;
+    },
+    async addAttachments(id, metas) {
+      save(load().map((t) => t.id === id ? { ...t, attachments: [...(t.attachments || []), ...metas], updatedAt: Date.now() } : t));
+    },
+    async remove(t) {
+      const files = loadFiles();
+      Object.keys(files).forEach((k) => { if (k.startsWith(t.id + "/")) delete files[k]; });
+      try { localStorage.setItem(FKEY, JSON.stringify(files)); } catch {}
+      save(load().filter((x) => x.id !== t.id));
     }
   };
 }
@@ -159,6 +184,27 @@ async function createFirebaseStore() {
     },
     update(id, patch, entry) {
       return fsMod.updateDoc(fsMod.doc(db, "tickets", id), { ...patch, updatedAt: fsMod.serverTimestamp(), history: fsMod.arrayUnion(entry) });
+    },
+    // Files live in tickets/{id}/chunks as base64 pieces, so no Cloud Storage (or billing) is needed.
+    putChunk(ticketId, chunkId, data) {
+      return fsMod.setDoc(fsMod.doc(db, "tickets", ticketId, "chunks", chunkId), { data });
+    },
+    async getChunk(ticketId, chunkId) {
+      const snap = await fsMod.getDoc(fsMod.doc(db, "tickets", ticketId, "chunks", chunkId));
+      if (!snap.exists()) throw { code: "not-found" };
+      return snap.data().data;
+    },
+    addAttachments(id, metas) {
+      return fsMod.updateDoc(fsMod.doc(db, "tickets", id), { attachments: fsMod.arrayUnion(...metas), updatedAt: fsMod.serverTimestamp() });
+    },
+    async remove(t) {
+      const ids = (t.attachments || []).flatMap((a) => Array.from({ length: a.chunks || 0 }, (_, n) => `${a.id}_${n}`));
+      for (let i = 0; i < ids.length; i += 400) {
+        const b = fsMod.writeBatch(db);
+        ids.slice(i, i + 400).forEach((c) => b.delete(fsMod.doc(db, "tickets", t.id, "chunks", c)));
+        await b.commit();
+      }
+      await fsMod.deleteDoc(fsMod.doc(db, "tickets", t.id));
     }
   };
 }
@@ -308,6 +354,7 @@ function row(t, i, adminView) {
     `<span>${esc(type?.label || "Request")}</span>`,
     adminView ? `<span>${ICONS.user}${esc(t.createdBy?.name || "")}</span>` : "",
     `<span>${ICONS.clock}${ago(t.createdAt)}</span>`,
+    t.attachments?.length ? `<span>${ICONS.clip}${t.attachments.length} file${t.attachments.length > 1 ? "s" : ""}</span>` : "",
     t.assignee && t.status !== "open" ? `<span>Handled by ${esc(t.assignee.name)}</span>` : "",
     urgent ? `<span class="t-urgent">Urgent</span>` : ""
   ].join("");
@@ -481,6 +528,7 @@ function fieldHTML(f, i) {
 function openNew(key) {
   const type = CFG.requestTypes[key];
   if (!type) return;
+  pending.length = 0;
   $("#modal-body").innerHTML = `
     <div class="modal-head">
       <span class="type-icon">${ICONS[type.icon] || ICONS.spark}</span>
@@ -488,6 +536,7 @@ function openNew(key) {
     </div>
     <form class="modal-form" id="new-form" data-type="${esc(key)}" novalidate>
       ${type.fields.map(fieldHTML).join("")}
+      ${dropzoneHTML(type.fields.length)}
       <p class="form-error" id="new-error" role="alert"></p>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" data-close>Cancel</button>
@@ -531,10 +580,23 @@ async function submitNew(form) {
       status: "open",
       createdBy: { uid: state.user.uid, email: state.user.email, name: state.user.name },
       assignee: null,
+      attachments: [],
       history: [{ status: "open", at: new Date().toISOString(), by }]
     });
     flashIds.add(id);
     renderAll();
+
+    let uploadNote = "";
+    if (pending.length) {
+      const bar = showUploadProgress(form, btn);
+      try {
+        await uploadFiles(id, pending.slice(), (k) => bar(k));
+      } catch (e) {
+        console.error(e);
+        uploadNote = `<p class="warn">The request was sent, but the attachments didn't upload${e?.code === "demo-quota" ? " (demo storage in this browser is full)" : ""}. Open the request and select Add files to try again.</p>`;
+      }
+      pending.length = 0;
+    }
     $("#modal-body").innerHTML = `
       <div class="success">
         <svg viewBox="0 0 90 90" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -542,6 +604,7 @@ async function submitNew(form) {
         </svg>
         <h2 id="modal-title">Request sent</h2>
         <p>Your reference is <strong>${ref(id)}</strong>. You'll see it move to in progress as soon as someone takes it.</p>
+        ${uploadNote}
         <button class="btn btn-primary" data-close>Done</button>
       </div>`;
     if (state.mineFilter === "completed") setSeg("mine-filter", "active");
@@ -552,6 +615,286 @@ async function submitNew(form) {
     $("#new-error").textContent = e?.code === "permission-denied"
       ? "Your account isn't allowed to send requests. Ask an admin to add you."
       : "The request didn't send. Check your connection and try again.";
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Attachments
+   Files are stored in Firestore (tickets/{id}/chunks) as base64 pieces under
+   the 1 MB document limit, so the free Firebase plan is enough.
+   -------------------------------------------------------------------------- */
+const ATT = Object.assign({ maxFiles: 8, maxSizeMB: 5 }, CFG.attachments || {});
+const CHUNK = 750000;                 // base64 characters per Firestore document
+const pending = [];                   // files staged in the new-request form
+const fileCache = new Map();          // ticketId/fileId -> object URL
+const touch = matchMedia("(pointer: coarse)").matches;
+
+const newId = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
+const fmtSize = (b) => b < 1024 ? b + " B" : b < 1048576 ? Math.round(b / 1024) + " KB" : (b / 1048576).toFixed(1) + " MB";
+const isImage = (t) => /^image\/(png|jpe?g|webp|gif|bmp)$/i.test(t || "");
+const extOf = (n) => (String(n).match(/\.([a-z0-9]{1,5})$/i)?.[1] || "file").toUpperCase();
+const blobToDataURL = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
+
+function loadImage(blob) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob), img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); rej(e); };
+    img.src = url;
+  });
+}
+async function resize(blob, max, type = "image/jpeg", q = 0.85) {
+  const img = await loadImage(blob);
+  const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(img.naturalWidth * k));
+  c.height = Math.max(1, Math.round(img.naturalHeight * k));
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  return new Promise((res) => c.toBlob(res, type, q));
+}
+
+async function prepareFile(file) {
+  let blob = file, type = file.type || "application/octet-stream";
+  let name = file.name && file.name !== "image.png" ? file.name : `Screenshot ${new Date().toLocaleString().replace(/[/:]/g, "-")}.png`;
+  // Large photos and screenshots are scaled down so they upload fast and stay under the size limit.
+  if (isImage(type) && !/gif/i.test(type) && file.size > 1.2 * 1048576) {
+    blob = await resize(file, 2200, "image/jpeg", 0.86);
+    type = "image/jpeg";
+    name = name.replace(/\.[a-z0-9]+$/i, "") + ".jpg";
+  }
+  if (blob.size > ATT.maxSizeMB * 1048576) throw { code: "too-big", name };
+  let thumb = null;
+  if (isImage(type)) { try { thumb = await blobToDataURL(await resize(blob, 360, "image/jpeg", 0.72)); } catch {} }
+  return { id: newId(), blob, name, type, size: blob.size, thumb };
+}
+
+async function uploadFiles(ticketId, files, onProgress) {
+  const total = files.reduce((n, f) => n + f.size, 0) || 1;
+  let done = 0;
+  const metas = [];
+  for (const f of files) {
+    const b64 = (await blobToDataURL(f.blob)).split(",")[1] || "";
+    const n = Math.max(1, Math.ceil(b64.length / CHUNK));
+    for (let i = 0; i < n; i++) {
+      await state.store.putChunk(ticketId, `${f.id}_${i}`, b64.slice(i * CHUNK, (i + 1) * CHUNK));
+      done += f.size / n;
+      onProgress?.(done / total);
+    }
+    metas.push({ id: f.id, name: f.name, type: f.type, size: f.size, chunks: n, thumb: f.thumb || null, by: state.user.name, at: new Date().toISOString() });
+  }
+  await state.store.addAttachments(ticketId, metas);
+  return metas;
+}
+
+async function fetchFile(ticketId, a) {
+  const key = ticketId + "/" + a.id;
+  if (fileCache.has(key)) return fileCache.get(key);
+  const parts = await Promise.all(Array.from({ length: a.chunks || 1 }, (_, i) => state.store.getChunk(ticketId, `${a.id}_${i}`)));
+  const bin = atob(parts.join(""));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: a.type }));
+  fileCache.set(key, url);
+  return url;
+}
+
+async function downloadAttachment(ticketId, a, btn) {
+  btn?.classList.add("is-loading");
+  try {
+    const url = await fetchFile(ticketId, a);
+    const link = Object.assign(document.createElement("a"), { href: url, download: a.name });
+    document.body.appendChild(link); link.click(); link.remove();
+  } catch (e) {
+    console.error(e);
+    toast("That file couldn't be loaded. It may have been removed.", "#E2632B");
+  } finally { btn?.classList.remove("is-loading"); }
+}
+
+/* ---- staging in the new-request form ---- */
+function dropzoneHTML(i) {
+  const hint = touch ? "Take a photo or choose files." : "Drag files here, browse, or paste a screenshot (Ctrl+V).";
+  return `<div class="field" data-field="__files" style="--i:${i}">
+    <span class="field-label">Attachments<span class="opt">optional, up to ${ATT.maxFiles} files, ${ATT.maxSizeMB} MB each</span></span>
+    <div class="drop" tabindex="0" role="button" aria-label="Add attachments">
+      <input type="file" multiple hidden class="drop-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.zip,.msg,.eml" />
+      <span class="drop-icon">${ICONS.upload}</span>
+      <span class="drop-text"><strong>${touch ? "Add files" : "Add files or screenshots"}</strong><span>${hint}</span></span>
+    </div>
+    <ul class="files" id="pending-files"></ul>
+  </div>`;
+}
+
+function fileItemHTML(f, removable) {
+  const preview = f.thumb ? `<img src="${f.thumb}" alt="" />` : `<span class="file-ext">${esc(extOf(f.name))}</span>`;
+  return `<li class="file" data-file="${esc(f.id)}">
+    <span class="file-prev">${preview}</span>
+    <span class="file-meta"><span class="file-name">${esc(f.name)}</span><span class="file-size">${fmtSize(f.size)}</span></span>
+    ${removable ? `<button type="button" class="file-x" data-unstage="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${ICONS.x}</button>` : ""}
+  </li>`;
+}
+
+function renderPending() {
+  const ul = $("#pending-files");
+  if (ul) ul.innerHTML = pending.map((f) => fileItemHTML(f, true)).join("");
+}
+
+async function stage(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  const room = ATT.maxFiles - pending.length;
+  if (room <= 0) { toast(`You can attach up to ${ATT.maxFiles} files.`, "#E2632B"); return; }
+  if (files.length > room) toast(`Only ${room} more file${room > 1 ? "s" : ""} can be added.`, "#E2632B");
+  for (const file of files.slice(0, room)) {
+    try { pending.push(await prepareFile(file)); renderPending(); }
+    catch (e) { toast(e?.code === "too-big" ? `${e.name} is over ${ATT.maxSizeMB} MB. Compress it or share a link instead.` : `${file.name || "That file"} couldn't be added.`, "#E2632B"); }
+  }
+  $('[data-field="__files"]')?.classList.remove("is-invalid");
+}
+
+function showUploadProgress(form, btn) {
+  const wrap = document.createElement("div");
+  wrap.className = "upload";
+  wrap.innerHTML = `<span class="upload-label">Uploading attachments</span><span class="upload-track"><span class="upload-fill"></span></span>`;
+  $(".modal-actions", form).before(wrap);
+  $(".btn-text", btn).textContent = "Uploading";
+  return (k) => { $(".upload-fill", wrap).style.width = Math.round(k * 100) + "%"; };
+}
+
+/* ---- drawer section ---- */
+function canAttach(t) { return state.isAdmin || t.createdBy?.uid === state.user.uid; }
+
+function attachmentsHTML(t) {
+  const list = t.attachments || [];
+  if (!list.length && !canAttach(t)) return "";
+  const imgs = list.filter((a) => a.thumb);
+  const docs = list.filter((a) => !a.thumb);
+  return `<div class="att">
+    <div class="att-head">
+      <h3 class="drawer-h">Attachments${list.length ? ` <span class="att-count">${list.length}</span>` : ""}</h3>
+      ${canAttach(t) && list.length < ATT.maxFiles * 3 ? `<button type="button" class="btn-mini" data-addfiles>${ICONS.clip}Add files</button>
+        <input type="file" multiple hidden id="drawer-files" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx,.zip,.msg,.eml" />` : ""}
+    </div>
+    <div class="upload" id="drawer-upload" hidden><span class="upload-label">Uploading</span><span class="upload-track"><span class="upload-fill"></span></span></div>
+    ${imgs.length ? `<div class="att-grid">${imgs.map((a) => `
+      <button type="button" class="att-thumb" data-view="${esc(a.id)}" aria-label="View ${esc(a.name)}"><img src="${a.thumb}" alt="" loading="lazy" /></button>`).join("")}</div>` : ""}
+    ${docs.length ? `<ul class="files">${docs.map((a) => `
+      <li class="file">
+        <span class="file-prev"><span class="file-ext">${esc(extOf(a.name))}</span></span>
+        <span class="file-meta"><span class="file-name">${esc(a.name)}</span><span class="file-size">${fmtSize(a.size)}, added by ${esc(a.by || "")}</span></span>
+        <button type="button" class="btn-mini" data-dl="${esc(a.id)}"><span class="btn-text">Download</span><span class="spinner" aria-hidden="true"></span></button>
+      </li>`).join("")}</ul>` : ""}
+    ${!list.length ? `<p class="att-empty">No files yet. Add screenshots or documents that help explain the request.</p>` : ""}
+  </div>`;
+}
+
+async function addFilesToTicket(fileList) {
+  const t = state.tickets.find((x) => x.id === state.openId);
+  if (!t || !fileList.length) return;
+  const room = ATT.maxFiles;
+  const prepared = [];
+  for (const file of [...fileList].slice(0, room)) {
+    try { prepared.push(await prepareFile(file)); }
+    catch (e) { toast(e?.code === "too-big" ? `${e.name} is over ${ATT.maxSizeMB} MB.` : `${file.name} couldn't be added.`, "#E2632B"); }
+  }
+  if (!prepared.length) return;
+  const box = $("#drawer-upload");
+  if (box) box.hidden = false;
+  try {
+    await uploadFiles(t.id, prepared, (k) => { const f = $("#drawer-upload .upload-fill"); if (f) f.style.width = Math.round(k * 100) + "%"; });
+    toast(`${prepared.length} file${prepared.length > 1 ? "s" : ""} added to ${ref(t.id)}`, "var(--s-done)");
+  } catch (e) {
+    console.error(e);
+    toast(e?.code === "demo-quota" ? "Demo storage in this browser is full. Delete a request to free space." : "The files didn't upload. Check your connection and try again.", "#E2632B");
+  } finally { const b = $("#drawer-upload"); if (b) b.hidden = true; }
+}
+
+/* ---- image viewer ---- */
+const viewer = { ticketId: null, list: [], i: 0 };
+async function openViewer(ticketId, attId) {
+  const t = state.tickets.find((x) => x.id === ticketId);
+  viewer.ticketId = ticketId;
+  viewer.list = (t?.attachments || []).filter((a) => a.thumb);
+  viewer.i = Math.max(0, viewer.list.findIndex((a) => a.id === attId));
+  const lb = $("#lightbox");
+  if (lb.hidden) openOverlay(lb);
+  showViewerImage();
+}
+async function showViewerImage() {
+  const a = viewer.list[viewer.i];
+  if (!a) return;
+  const img = $("#lb-img");
+  $("#lb-name").textContent = a.name;
+  $("#lb-count").textContent = viewer.list.length > 1 ? `${viewer.i + 1} of ${viewer.list.length}` : "";
+  $$(".lb-nav").forEach((b) => b.hidden = viewer.list.length < 2);
+  img.src = a.thumb;
+  img.classList.add("is-loading");
+  try {
+    const url = await fetchFile(viewer.ticketId, a);
+    if (viewer.list[viewer.i] === a) img.src = url;
+  } catch { toast("The full-size image couldn't be loaded.", "#E2632B"); }
+  img.classList.remove("is-loading");
+}
+function stepViewer(d) {
+  if (viewer.list.length < 2) return;
+  viewer.i = (viewer.i + d + viewer.list.length) % viewer.list.length;
+  showViewerImage();
+}
+
+/* --------------------------------------------------------------------------
+   Confirm dialog
+   -------------------------------------------------------------------------- */
+function confirmDialog({ title, body, confirm, danger = true }) {
+  return new Promise((resolve) => {
+    const el = $("#confirm");
+    $("#confirm-title").textContent = title;
+    $("#confirm-text").innerHTML = body;
+    const ok = $("#confirm-ok");
+    ok.className = "btn " + (danger ? "btn-danger-solid" : "btn-primary");
+    $(".btn-text", ok).textContent = confirm;
+    ok.classList.remove("is-loading");
+    openOverlay(el);
+    setTimeout(() => $("#confirm-cancel").focus(), 60);
+    const finish = (v) => { cleanup(); resolve(v); };
+    const onOk = () => finish(true);
+    const onCancel = (e) => { if (e.type === "keydown" && e.key !== "Escape") return; finish(false); closeOverlay(el); };
+    const onBackdrop = (e) => { if (e.target === el) { finish(false); closeOverlay(el); } };
+    function cleanup() {
+      ok.removeEventListener("click", onOk);
+      $("#confirm-cancel").removeEventListener("click", onCancel);
+      el.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onCancel);
+    }
+    ok.addEventListener("click", onOk);
+    $("#confirm-cancel").addEventListener("click", onCancel);
+    el.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onCancel);
+  });
+}
+
+async function deleteTicket() {
+  const t = state.tickets.find((x) => x.id === state.openId);
+  if (!t) return;
+  const n = t.attachments?.length || 0;
+  const yes = await confirmDialog({
+    title: "Delete this request?",
+    body: `<strong>${ref(t.id)}</strong> “${esc(t.title)}” will be permanently deleted${n ? `, along with its ${n} attachment${n > 1 ? "s" : ""}` : ""}. This can’t be undone.`,
+    confirm: "Delete permanently"
+  });
+  if (!yes) return;
+  const ok = $("#confirm-ok");
+  ok.classList.add("is-loading");
+  try {
+    await state.store.remove(t);
+    closeOverlay($("#confirm"));
+    closeOverlay($("#drawer"));
+    toast(`${ref(t.id)} deleted`, "var(--muted)");
+  } catch (e) {
+    console.error(e);
+    ok.classList.remove("is-loading");
+    closeOverlay($("#confirm"));
+    toast(e?.code === "permission-denied" ? "Only admins can delete requests." : "The request wasn't deleted. Check your connection and try again.", "#E2632B");
   }
 }
 
@@ -590,7 +933,7 @@ function renderDrawer() {
     const actions = {
       open:        `<button class="btn btn-primary" data-set="in_progress">Take request</button><button class="btn btn-success" data-set="completed">Complete</button>`,
       in_progress: `<button class="btn btn-success" data-set="completed">Complete</button><button class="btn btn-ghost" data-set="open">Move back to submitted</button>`,
-      completed:   `<button class="btn btn-ghost" data-set="in_progress">Reopen</button>`
+      completed:   `<button class="btn btn-ghost" data-set="in_progress">Reopen</button><button class="btn btn-danger" data-delete>${ICONS.trash.replace(/22/g, "17")}Delete request</button>`
     }[t.status];
     admin = `
       <div class="admin-box">
@@ -613,6 +956,7 @@ function renderDrawer() {
       <div class="detail"><dt>Type</dt><dd>${esc(type?.label || t.type)}</dd></div>
       ${rows}
     </dl>
+    ${attachmentsHTML(t)}
     <h3 class="drawer-h">Activity</h3>
     <ul class="timeline">${history}</ul>
     ${admin}`;
@@ -684,6 +1028,7 @@ function bind() {
   // Global clicks
   document.addEventListener("click", (e) => {
     const t = e.target;
+    if (t.matches?.("input[type=file]")) return;
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
     const tab = t.closest(".tab"); if (tab) { setTab(tab.dataset.tab); return; }
     const seg = t.closest(".seg-btn"); if (seg) { setSeg(seg.closest(".seg").id, seg.dataset.filter); return; }
@@ -695,13 +1040,64 @@ function bind() {
       return;
     }
     const set = t.closest("[data-set]"); if (set) { setStatus(set.dataset.set, set); return; }
+    if (t.closest("[data-delete]")) { deleteTicket(); return; }
+    const drop = t.closest(".drop"); if (drop) { $(".drop-input", drop).click(); return; }
+    const un = t.closest("[data-unstage]"); if (un) {
+      const i = pending.findIndex((f) => f.id === un.dataset.unstage);
+      if (i > -1) pending.splice(i, 1);
+      const li = un.closest(".file"); li.classList.add("is-leaving"); setTimeout(renderPending, 220);
+      return;
+    }
+    if (t.closest("[data-addfiles]")) { $("#drawer-files")?.click(); return; }
+    const dl = t.closest("[data-dl]"); if (dl) {
+      const tk = state.tickets.find((x) => x.id === state.openId);
+      const a = tk?.attachments?.find((x) => x.id === dl.dataset.dl);
+      if (a) downloadAttachment(tk.id, a, dl);
+      return;
+    }
+    const view = t.closest("[data-view]"); if (view) { openViewer(state.openId, view.dataset.view); return; }
+    if (t.closest("[data-lb]")) { stepViewer(Number(t.closest("[data-lb]").dataset.lb)); return; }
+    if (t.closest("[data-lb-download]")) {
+      const a = viewer.list[viewer.i]; if (a) downloadAttachment(viewer.ticketId, a, t.closest("[data-lb-download]"));
+      return;
+    }
     const row = t.closest(".ticket"); if (row) { openTicket(row.dataset.id); return; }
     if (t.closest("[data-close]")) { closeOverlay(t.closest(".overlay")); return; }
-    if (t.classList.contains("overlay")) closeOverlay(t);
+    if (t.classList.contains("overlay") && t.id !== "confirm") closeOverlay(t);
   });
 
   document.addEventListener("submit", (e) => {
     if (e.target.id === "new-form") { e.preventDefault(); submitNew(e.target); }
+  });
+
+  document.addEventListener("change", (e) => {
+    if (e.target.classList?.contains("drop-input")) { stage(e.target.files); e.target.value = ""; }
+    if (e.target.id === "drawer-files") { addFilesToTicket([...e.target.files]); e.target.value = ""; }
+  });
+
+  // Drag and drop onto the drop zone; block the browser from opening files dropped elsewhere.
+  ["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    const d = e.target.closest?.(".drop");
+    $$(".drop.is-over").forEach((x) => x !== d && x.classList.remove("is-over"));
+    if (d) d.classList.add("is-over");
+  }));
+  document.addEventListener("dragleave", (e) => { const d = e.target.closest?.(".drop"); if (d && !d.contains(e.relatedTarget)) d.classList.remove("is-over"); });
+  document.addEventListener("drop", (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    $$(".drop.is-over").forEach((x) => x.classList.remove("is-over"));
+    if (!$("#modal").hidden && $(".drop")) stage(e.dataTransfer.files);
+    else if (!$("#drawer").hidden && $("#drawer-files")) addFilesToTicket([...e.dataTransfer.files]);
+  });
+
+  // Paste a screenshot straight into the form or an open request.
+  document.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData?.files || [])];
+    if (!files.length) return;
+    if (!$("#modal").hidden && $(".drop")) { e.preventDefault(); stage(files); toast(files.length > 1 ? "Files added" : "Screenshot added", "var(--s-progress)"); }
+    else if (!$("#drawer").hidden && $("#drawer-files") && $("#confirm").hidden) { e.preventDefault(); addFilesToTicket(files); }
   });
 
   document.addEventListener("input", (e) => {
@@ -710,7 +1106,9 @@ function bind() {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { const o = $$(".overlay:not([hidden])").pop(); if (o) closeOverlay(o); }
+    if (e.key === "Escape") { const o = $$(".overlay:not([hidden])").pop(); if (o && o.id !== "confirm") closeOverlay(o); }
+    if (!$("#lightbox").hidden && (e.key === "ArrowRight" || e.key === "ArrowLeft")) stepViewer(e.key === "ArrowRight" ? 1 : -1);
+    if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("drop")) { e.preventDefault(); $(".drop-input", e.target).click(); }
     if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("ticket")) { e.preventDefault(); openTicket(e.target.dataset.id); }
   });
 

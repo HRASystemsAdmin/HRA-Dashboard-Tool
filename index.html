@@ -169,6 +169,35 @@
     </aside>
   </div>
 
+  <!-- Image viewer -->
+  <div class="overlay overlay-lightbox" id="lightbox" hidden>
+    <figure class="lightbox" role="dialog" aria-modal="true" aria-label="Attachment preview">
+      <img id="lb-img" alt="" />
+      <figcaption class="lb-bar">
+        <span class="lb-info"><span id="lb-name"></span><span id="lb-count"></span></span>
+        <span class="lb-actions">
+          <button type="button" class="lb-btn lb-nav" data-lb="-1" aria-label="Previous image"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <button type="button" class="lb-btn lb-nav" data-lb="1" aria-label="Next image"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button type="button" class="lb-btn lb-text" data-lb-download><span class="btn-text">Download</span><span class="spinner" aria-hidden="true"></span></button>
+          <button type="button" class="lb-btn" data-close aria-label="Close preview"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </span>
+      </figcaption>
+    </figure>
+  </div>
+
+  <!-- Confirm -->
+  <div class="overlay overlay-confirm" id="confirm" hidden>
+    <div class="sheet sheet-confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <span class="confirm-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg></span>
+      <h2 id="confirm-title">Delete this request?</h2>
+      <p id="confirm-text"></p>
+      <div class="confirm-actions">
+        <button type="button" class="btn btn-ghost" id="confirm-cancel">Cancel</button>
+        <button type="button" class="btn btn-danger-solid" id="confirm-ok"><span class="btn-text">Delete permanently</span><span class="spinner" aria-hidden="true"></span></button>
+      </div>
+    </div>
+  </div>
+
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <script src="config.js"></script>

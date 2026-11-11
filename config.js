@@ -24,7 +24,14 @@ window.HRA_CONFIG = {
     "employee@yourcompany.com"
   ],
 
-  /* 3) Request types. To add a new one, copy a block and change it.
+  /* 3) Attachments. Files are saved inside Firestore, so the free Firebase plan works
+        (about 1 GB total). Photos and screenshots are compressed automatically. */
+  attachments: {
+    maxFiles: 8,
+    maxSizeMB: 5
+  },
+
+  /* 4) Request types. To add a new one, copy a block and change it.
         Field types: text, email, url, tel, textarea, date, select (options),
         chips (multi-select pills), checks (checkboxes; "locked" ones are always on). */
   requestTypes: {
