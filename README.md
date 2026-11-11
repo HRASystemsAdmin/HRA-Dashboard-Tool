@@ -57,9 +57,13 @@ Copy a block inside `requestTypes` in `config.js`, give it a new key, label, and
 - Limits are set in `config.js` → `attachments` (default 8 files per upload, 5 MB each).
 - Once a request is **Completed**, the person who sent it (and any admin) can delete it. A confirmation appears first, and deleting also removes its attachments, which frees up space.
 
-## Email for New employee requests (EmailJS)
+## Email for New employee requests
 
-New employee requests are emailed to **jroching@hunterrecruitment.net** with everything that was filled in. GitHub Pages can't send email on its own, so this uses EmailJS (free for 200 emails a month, no card).
+New employee requests go to **jroching@hunterrecruitment.net** with everything that was filled in.
+
+**Default: pre-filled email (no setup).** `config.js` → `email.method` is `"outlook"`. After someone selects **Confirm and send**, their email app (Outlook) opens with the To, Subject and all details filled in. They check it and click **Send**, so the email comes from their own mailbox. If a request is too long for one email link (very many groups selected), the full details are copied to the clipboard and the email asks them to paste them in. **Open email again** and **Copy details** buttons are on the confirmation screen and in the request's details. Set `siteUrl` to your GitHub Pages address so the link in the email points to the right place.
+
+**Optional: fully automatic sending with EmailJS.** Set `email.method` to `"emailjs"` and follow the steps below (free for 200 emails a month, no card).
 
 1. Create a free account at https://www.emailjs.com.
 2. **Email Services → Add New Service** → choose the mailbox that will send the emails (Outlook 365 or Gmail), sign in, and save. Copy the **Service ID**.

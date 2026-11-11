@@ -616,7 +616,8 @@ function pickerHTML(f, i) {
 function refreshPicker(wrap) {
   const f = findField(wrap.dataset.picker);
   const chosen = $$(".pick-row", wrap).map((r) => r.dataset.item);
-  const left = f.items.filter((it) => !chosen.includes(itemName(it)));
+  // Items with options can be added more than once (e.g. two license types); plain items only once.
+  const left = f.items.filter((it) => typeof it === "object" || !chosen.includes(itemName(it)));
   $(".picker-add", wrap).innerHTML = left.length
     ? `<label class="pick-add"><span class="pick-plus" aria-hidden="true">${ICONS.plus.replace(/18/g, "14")}</span>
         <select class="pick-select" aria-label="${esc(f.addLabel || "Add")}">
@@ -784,7 +785,7 @@ async function submitNew(form) {
         const sel = $(".pick-value", r);
         if (sel && !sel.value) { bad = true; sel.classList.add("is-missing"); }
         return sel ? `${r.dataset.item}: ${sel.value}` : r.dataset.item;
-      });
+      }).filter((x, i, arr) => arr.indexOf(x) === i);
       if (bad) togglePicker(wrap, true);
     }
     else v = String(form.elements[f.name].value || "").trim();
@@ -800,7 +801,67 @@ async function submitNew(form) {
     return;
   }
 
-  const btn = $('button[type="submit"]', form);
+  showReview(form, data);
+}
+
+/* ---- review step: show what will be sent before sending ---- */
+function reviewRowsHTML(type, data) {
+  return type.fields.filter(isDataField).map((f) => {
+    const v = displayValue(f, data[f.name]);
+    if (!v) return "";
+    return `<div class="detail${f.type === "picker" ? " detail-list" : ""}"><dt>${esc(f.label)}</dt><dd>${esc(v)}</dd></div>`;
+  }).join("");
+}
+
+function showReview(form, data) {
+  const type = CFG.requestTypes[form.dataset.type];
+  const files = pending.length
+    ? `<h3 class="drawer-h">Attachments</h3><ul class="files review-files">${pending.map((f) => fileItemHTML(f, false)).join("")}</ul>`
+    : "";
+  const mail = type.emailTo ? `<p class="sent-note">${ICONS.mail}${OUTLOOK ? `After you confirm, your email app opens with these details addressed to ${esc(type.emailTo)}, ready for you to check and send.` : `These details will also be emailed to ${esc(type.emailTo)}.`}</p>` : "";
+  const view = document.createElement("div");
+  view.className = "review";
+  view.id = "review";
+  view.innerHTML = `
+    <div class="review-head">
+      <h3>Check everything before sending</h3>
+      <p>Select Edit to change anything. Nothing is sent until you select Confirm and send.</p>
+    </div>
+    <dl class="details review-details">${reviewRowsHTML(type, data)}</dl>
+    ${files}
+    ${mail}
+    <p class="form-error" id="review-error" role="alert"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-review-edit>Edit</button>
+      <button type="button" class="btn btn-primary" data-confirm-send><span class="btn-text">Confirm and send</span><span class="spinner" aria-hidden="true"></span></button>
+    </div>`;
+  form.hidden = true;
+  $(".back-link", $("#modal-body"))?.setAttribute("hidden", "");
+  form.after(view);
+  reviewData = data;
+  $("#modal .sheet").scrollTop = 0;
+  if (!reduceMotion) { const b = $("#modal-body"); b.classList.remove("swap-fwd", "swap-back"); void b.offsetWidth; b.classList.add("swap-fwd"); }
+  setTimeout(() => $("[data-confirm-send]", view)?.focus({ preventScroll: true }), 250);
+}
+let reviewData = null;
+
+function editFromReview() {
+  $("#review")?.remove();
+  const form = $("#new-form");
+  form.hidden = false;
+  $(".back-link", $("#modal-body"))?.removeAttribute("hidden");
+  const b = $("#modal-body"); b.classList.remove("swap-fwd", "swap-back"); void b.offsetWidth; if (!reduceMotion) b.classList.add("swap-back");
+  $("#modal .sheet").scrollTop = 0;
+}
+
+async function sendNew() {
+  const form = $("#new-form"), view = $("#review");
+  if (!form || !view || !reviewData) return;
+  const data = reviewData;
+  const key = form.dataset.type, type = CFG.requestTypes[key];
+  const btn = $("[data-confirm-send]", view);
+  if (btn.classList.contains("is-loading")) return;
+  $("[data-review-edit]", view).disabled = true;
   btn.classList.add("is-loading");
   const by = state.user.name;
   try {
@@ -819,7 +880,7 @@ async function submitNew(form) {
 
     let uploadNote = "";
     if (pending.length) {
-      const bar = showUploadProgress(form, btn);
+      const bar = showUploadProgress(view, btn);
       try {
         await uploadFiles(id, pending.slice(), (k) => bar(k));
       } catch (e) {
@@ -830,9 +891,15 @@ async function submitNew(form) {
     }
     let emailNote = "";
     if (type.emailTo) {
-      $(".btn-text", btn).textContent = "Sending email";
+      $(".btn-text", btn).textContent = OUTLOOK ? "Opening email" : "Sending email";
       const r = await emailRequest(id);
-      emailNote = r === "sent"
+      const draftBtns = `<div class="draft-actions"><button type="button" class="btn-mini" data-draft="${esc(id)}">${ICONS.mail}Open email again</button><button type="button" class="btn-mini" data-copy-details="${esc(id)}">Copy details</button></div>`;
+      if (r.startsWith?.("opened")) emailNote = `<div class="sent-note draft-note">${ICONS.mail}<span>${
+        r === "opened" ? `Your email app should now be open with a message to <strong>${esc(type.emailTo)}</strong>. Check the details and click <strong>Send</strong>.`
+        : r === "opened-copied" ? `Your email app should now be open with a message to <strong>${esc(type.emailTo)}</strong>. The details were too long for one link, so they're copied: click in the message, paste (Ctrl+V), check, and click <strong>Send</strong>.`
+        : `Your email app should now be open with a message to <strong>${esc(type.emailTo)}</strong>. Select Copy details below, paste into the message, and click <strong>Send</strong>.`
+      }<br>Nothing opened? Use the button below.${draftBtns}</span></div>`;
+      else emailNote = r === "sent"
         ? `<p class="sent-note">${ICONS.mail}The details were emailed to ${esc(type.emailTo)}.</p>`
         : r === "not-configured"
           ? `<p class="sent-note">${ICONS.mail}Email isn't set up yet, so nothing was sent to ${esc(type.emailTo)}. An admin can send it from the request once it is.</p>`
@@ -854,7 +921,8 @@ async function submitNew(form) {
   } catch (e) {
     console.error(e);
     btn.classList.remove("is-loading");
-    $("#new-error").textContent = e?.code === "permission-denied"
+    $("[data-review-edit]", view).disabled = false;
+    $("#review-error").textContent = e?.code === "permission-denied"
       ? "Your account isn't allowed to send requests. Ask an admin to add you."
       : "The request didn't send. Check your connection and try again.";
   }
@@ -1196,10 +1264,63 @@ function emailParams(t) {
   };
 }
 
+const OUTLOOK = (MAIL.method || "outlook") === "outlook";
+const MAILTO_LIMIT = 1900;   // some email apps cut off longer mailto links
+
+function plainBody(t) {
+  const type = CFG.requestTypes[t.type];
+  const p = emailParams(t);
+  const lines = [`${p.request_type} (${p.reference})`, `Submitted by ${p.requested_by} on ${p.submitted_at}`, ""];
+  for (const f of type.fields.filter(isDataField)) {
+    const v = t.fields?.[f.name];
+    if (f.type === "picker") {
+      if (Array.isArray(v) && v.length) { lines.push("", `${f.label}:`); v.forEach((x) => lines.push(`  - ${x}`)); }
+      continue;
+    }
+    const dv = displayValue(f, v);
+    if (dv) lines.push(`${f.label}: ${dv}`);
+  }
+  if (p.attachments_note) lines.push("", p.attachments_note);
+  lines.push("", `Open in Request Center: ${p.request_link}`);
+  return lines.join("\n");
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  try {
+    const ta = Object.assign(document.createElement("textarea"), { value: text });
+    ta.style.cssText = "position:fixed;opacity:0;top:0;left:0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy"); ta.remove(); return ok;
+  } catch { return false; }
+}
+
+// Opens the person's email app with everything filled in. Returns "opened" or "opened-copied" (body too long, copied instead).
+async function openDraft(t) {
+  const type = CFG.requestTypes[t.type];
+  const p = emailParams(t);
+  const full = plainBody(t);
+  let body = full, mode = "opened";
+  const enc = (s) => encodeURIComponent(s).replace(/%20/g, "%20");
+  const build = (b) => `mailto:${encodeURIComponent(type.emailTo).replace(/%40/g, "@")}?subject=${enc(p.subject)}&body=${enc(b)}`;
+  if (build(full).length > MAILTO_LIMIT) {
+    const copied = await copyText(full);
+    body = copied
+      ? `The full details of ${p.reference} are copied to the clipboard.\nClick here and paste them (Ctrl+V), then send.\n\n`
+      : `Some email apps can't take the full details in one link.\nOpen ${p.request_link} and select Copy details, then paste them here.\n\n`;
+    mode = copied ? "opened-copied" : "opened-short";
+  }
+  const a = Object.assign(document.createElement("a"), { href: build(body) });
+  document.body.appendChild(a); a.click(); a.remove();
+  await state.store.setEmailStatus(t.id, { sent: true, method: "outlook", to: type.emailTo, at: new Date().toISOString(), by: state.user.name }).catch(() => {});
+  return mode;
+}
+
 async function emailRequest(id) {
   const t = state.tickets.find((x) => x.id === id);
   const type = t && CFG.requestTypes[t.type];
   if (!t || !type?.emailTo) return "skipped";
+  if (OUTLOOK) return openDraft(t);
   if (!mailReady()) return "not-configured";
   try {
     const lib = await loadEmailJS();
@@ -1218,13 +1339,16 @@ function emailHTML(t) {
   if (!type?.emailTo) return "";
   const st = t.emailStatus;
   const line = !st ? `Not emailed yet. Details go to ${esc(type.emailTo)}.`
+    : st.method === "outlook" ? `Email to ${esc(st.to)} was opened in ${esc(st.by || "someone")}'s email app on ${fullDate(st.at)}.`
     : st.sent ? `Emailed to ${esc(st.to)} on ${fullDate(st.at)}.`
     : `The email to ${esc(st.to)} didn't go through on ${fullDate(st.at)}.`;
   const cls = st?.sent ? "is-sent" : st ? "is-failed" : "";
   return `<div class="mailbox ${cls}">
     <span class="mailbox-icon">${ICONS.mail}</span>
     <span class="mailbox-text">${line}</span>
-    ${state.isAdmin ? `<button type="button" class="btn-mini" data-resend><span class="btn-text">${st?.sent ? "Send again" : "Send email"}</span><span class="spinner" aria-hidden="true"></span></button>` : ""}
+    ${OUTLOOK && canAttach(t)
+      ? `<span class="mailbox-btns"><button type="button" class="btn-mini" data-draft="${esc(t.id)}">${st ? "Open email again" : "Open email"}</button><button type="button" class="btn-mini" data-copy-details="${esc(t.id)}">Copy details</button></span>`
+      : state.isAdmin ? `<button type="button" class="btn-mini" data-resend><span class="btn-text">${st?.sent ? "Send again" : "Send email"}</span><span class="spinner" aria-hidden="true"></span></button>` : ""}
   </div>`;
 }
 
@@ -1381,6 +1505,8 @@ function bind() {
     const meter = t.closest(".meter"); if (meter) { setSeg(meter.closest(".panel").dataset.panel + "-filter", meter.dataset.filter); return; }
     const nw = t.closest("[data-new]"); if (nw) { openNew(nw.dataset.new, nw.dataset.dir); return; }
     const pick = t.closest("[data-pick]"); if (pick) { openNew(pick.dataset.pick, "fwd"); return; }
+    if (t.closest("[data-review-edit]")) { editFromReview(); return; }
+    if (t.closest("[data-confirm-send]")) { sendNew(); return; }
     const ph = t.closest("[data-toggle-picker]"); if (ph) { togglePicker(ph.closest(".picker")); return; }
     const up = t.closest("[data-unpick]"); if (up) {
       const wrap = up.closest(".picker"), li = up.closest(".pick-row");
@@ -1396,6 +1522,16 @@ function bind() {
     const set = t.closest("[data-set]"); if (set) { setStatus(set.dataset.set, set); return; }
     if (t.closest("[data-delete]")) { deleteTicket(); return; }
     const rs = t.closest("[data-resend]"); if (rs) { resendEmail(rs); return; }
+    const dr = t.closest("[data-draft]"); if (dr) {
+      const tk = state.tickets.find((x) => x.id === dr.dataset.draft);
+      if (tk) openDraft(tk).then((m) => { if (m === "opened-copied") toast("Details copied. Paste them into the email.", "var(--s-progress)"); if (state.openId) renderDrawer(); });
+      return;
+    }
+    const cp = t.closest("[data-copy-details]"); if (cp) {
+      const tk = state.tickets.find((x) => x.id === cp.dataset.copyDetails);
+      if (tk) copyText(plainBody(tk)).then((ok) => toast(ok ? "Details copied" : "Couldn't copy. Select the text in the request instead.", ok ? "var(--s-done)" : "#E2632B"));
+      return;
+    }
     const drop = t.closest(".drop"); if (drop) { $(".drop-input", drop).click(); return; }
     const un = t.closest("[data-unstage]"); if (un) {
       const i = pending.findIndex((f) => f.id === un.dataset.unstage);

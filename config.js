@@ -31,14 +31,18 @@ window.HRA_CONFIG = {
     maxSizeMB: 5
   },
 
-  /* 4) Email (EmailJS, free for 200 emails a month). Request types with "emailTo"
-        send their details to that address when submitted. Setup is in README.md.
-        Leave these empty and nothing is emailed. */
+  /* 4) Email for request types with "emailTo".
+        method "outlook": after sending, the person's email app (Outlook) opens with
+        the email already filled in; they check it and click Send. No setup needed.
+        method "emailjs": sends automatically through EmailJS (fill in the keys below;
+        setup is in README.md). */
   email: {
+    method: "outlook",
+    siteUrl: "",       // optional, e.g. "https://your-username.github.io/request-center/"
+
     publicKey: "",
     serviceId: "",
-    templateId: "",
-    siteUrl: ""        // optional, e.g. "https://your-username.github.io/request-center/"
+    templateId: ""
   },
 
   /* 5) Tile groups. Request types with the same "group" share one tile on the home
@@ -118,7 +122,6 @@ window.HRA_CONFIG = {
           options: ["Recruiting", "Recruiting Contractor (US)", "OSC", "Third Party OSC", "Sales", "Marketing", "Executive"] },
         { name: "country",           label: "Country of physical location", type: "text",     required: true,
           suggestions: ["United States", "Mexico", "Argentina", "Philippines", "South Africa"] },
-        { name: "laptopNeeded",      label: "Laptop needed",                type: "select",   required: true,  blank: true, options: ["Yes", "No"] },
         { name: "roleType",          label: "Type of role",                 type: "select",   required: true,  blank: true,
           options: ["FT Employee", "Contractor", "Third Party Contractor"] },
         { name: "thirdPartyCompany", label: "Third party company name",     type: "text",     required: true,

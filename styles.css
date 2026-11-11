@@ -654,6 +654,15 @@ body.has-app::before {
 }
 .owner-actions p { margin: 0; color: var(--muted); font-size: 13.5px; flex: 1 1 200px; }
 
+/* Review step */
+.review { display: grid; gap: 16px; }
+.review-head h3 { font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: -.015em; margin: 0 0 4px; }
+.review-head p { margin: 0; color: var(--muted); font-size: 13.5px; }
+.review-details { margin: 0; }
+.review .drawer-h { margin: 4px 0 0; }
+.review-files { margin-top: -6px; }
+.review .modal-actions { margin-top: 0; }
+
 /* Success state */
 .success { text-align: center; padding: 22px 8px 6px; }
 .success svg { width: 86px; height: 86px; }
@@ -841,11 +850,20 @@ body.has-app::before {
   font-size: 13.5px; color: var(--muted);
 }
 .mailbox-icon { width: 32px; height: 32px; flex: none; border-radius: 10px; display: grid; place-items: center; background: #fff; border: 1px solid var(--line); color: var(--navy); }
-.mailbox-text { flex: 1; min-width: 0; }
+.mailbox { flex-wrap: wrap; }
+.mailbox-text { flex: 1 1 200px; min-width: 0; }
 .mailbox.is-sent { background: #EFFAF6; border-color: rgba(14,159,126,.22); color: #0B6B55; }
 .mailbox.is-sent .mailbox-icon { color: var(--s-done); }
 .mailbox.is-failed { background: #FFF7ED; border-color: #FED7AA; color: #B45309; }
 .mailbox.is-failed .mailbox-icon { color: #C2410C; }
+
+.draft-note { line-height: 1.5; }
+.draft-note > span { display: block; }
+.draft-actions, .mailbox-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mailbox-btns { margin-top: 0; flex: none; }
+.success .draft-note { text-align: left; }
+.success .draft-note svg { margin-top: 3px; }
+.draft-actions svg { width: 14px !important; height: 14px !important; margin: 0 !important; }
 
 /* Drawer attachments */
 .att { margin-bottom: 26px; display: grid; gap: 12px; }
