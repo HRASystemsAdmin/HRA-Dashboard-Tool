@@ -218,6 +218,28 @@ input, textarea, select { font: inherit; color: inherit; }
 .chip[aria-pressed="true"] { background: var(--navy); color: #fff; border-color: var(--navy); }
 .chip[aria-pressed="true"]::before { width: 8px; margin-left: 0; background: var(--orange); }
 
+/* Checkbox group (permissions) */
+.checks { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 6px 2px; }
+.check {
+  display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+  font-size: 14.5px; font-weight: 500; user-select: none;
+}
+.check input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.check .box {
+  width: 18px; height: 18px; border-radius: 5px; flex: none;
+  border: 1.5px solid rgba(0, 55, 127, .45); background: #fff;
+  display: grid; place-items: center;
+  transition: background .25s, border-color .25s, transform .3s var(--ease-spring), box-shadow .25s;
+}
+.check .box svg { width: 12px; height: 12px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 16; stroke-dashoffset: 16; transition: stroke-dashoffset .3s var(--ease-out); }
+.check:hover .box { border-color: var(--navy); }
+.check input:checked + .box { background: var(--navy); border-color: var(--navy); transform: scale(1.06); }
+.check input:checked + .box svg { stroke-dashoffset: 0; }
+.check input:focus-visible + .box { box-shadow: 0 0 0 4px rgba(0, 55, 127, .15); }
+.check.is-locked { cursor: default; color: #9AAAC2; }
+.check.is-locked .box, .check.is-locked input:checked + .box { background: #A9C2E8; border-color: #A9C2E8; transform: none; }
+.field.is-invalid .checks { border-radius: var(--r-sm); box-shadow: 0 0 0 4px rgba(242, 106, 38, .12); }
+
 .btn {
   position: relative; overflow: hidden;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -347,7 +369,7 @@ body.has-app::before {
 .hero-sub { margin: 0; color: var(--muted); font-size: 16px; max-width: 52ch; }
 
 /* Request-type tiles — the one interactive showpiece */
-.types { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 56px; }
+.types { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 16px; margin-bottom: 56px; }
 .type-tile {
   --mx: 50%; --my: 50%;
   position: relative; overflow: hidden; isolation: isolate;

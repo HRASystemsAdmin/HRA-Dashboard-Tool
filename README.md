@@ -28,7 +28,7 @@ GitHub Pages only hosts files, so accounts and requests are stored in Firebase (
 5. **Firestore Database** → Create database (production mode, nearest region).
 6. **Firestore → Rules** → paste `firestore.rules`, put the real emails in `adminEmails()` and `memberEmails()`, then **Publish**.
 7. **Project settings → Your apps → Web (`</>`)** → register an app → copy `apiKey`, `authDomain`, `projectId`, `appId` into `config.js`.
-8. In `config.js`, put the same emails in `admins` and `members`, and edit `phoneQueues`.
+8. In `config.js`, put the same emails in `admins` and `members`.
 9. Commit and push. Done.
 
 ## Managing access
@@ -41,7 +41,7 @@ Admins don't need to be listed in `members` too. An account that signs in but is
 
 ## Adding a new request type
 
-Copy a block inside `requestTypes` in `config.js`, give it a new key, label, and fields. Field types: `text`, `email`, `textarea`, `date`, `select` (with `options`), `chips` (multi-select, with `options` or `optionsFrom`). The form, details view, and admin queue pick it up automatically.
+Copy a block inside `requestTypes` in `config.js`, give it a new key, label, and fields. Field types: `text`, `email`, `url`, `tel`, `textarea`, `date`, `select` (with `options`), `chips` (multi-select pills), `checks` (checkboxes; add `locked` for options that are always on, like Access). The form, details view, and admin queue pick it up automatically.
 
 ## Notes
 

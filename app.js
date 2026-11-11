@@ -18,6 +18,8 @@ const STATUS = {
 
 const ICONS = {
   phone: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/><path d="M15 3.5a6 6 0 0 1 5.5 5.5"/><path d="M15 7a2.5 2.5 0 0 1 2 2"/></svg>',
+  queue: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h10M4 18h7"/><circle cx="18" cy="6" r="1.4"/><circle cx="18" cy="12" r="1.4"/><path d="M18 16v5M15.5 18.5h5"/></svg>',
+  userplus: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0 1 12.5-4.3"/><path d="M19 14v6M16 17h6"/></svg>',
   spark: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M12 8.5l1.2 2.3 2.3 1.2-2.3 1.2L12 15.5l-1.2-2.3L8.5 12l2.3-1.2z"/></svg>',
   plus:  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   inbox: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-7.5A2 2 0 0 1 7.4 4h9.2a2 2 0 0 1 1.9 1.5L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg>',
@@ -60,7 +62,7 @@ function toast(msg, color) {
    Data stores
    -------------------------------------------------------------------------- */
 function createDemoStore() {
-  const KEY = "hra_demo_tickets_v1", UKEY = "hra_demo_user_v1";
+  const KEY = "hra_demo_tickets_v2", UKEY = "hra_demo_user_v1";
   const listeners = new Set();
   let onUser = () => {};
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
@@ -77,8 +79,8 @@ function createDemoStore() {
     const now = Date.now(), m = people.member, a = people.admin;
     const by = { uid: m.uid, email: m.email, name: m.name };
     save([
-      { id: "a1f3c9e2", type: "phone_queue", title: "Add Priya Shah to Recruiting, Main line", status: "in_progress",
-        fields: { members: "Priya Shah", emails: "priya.shah@company.com", extension: "2214", queues: ["Recruiting", "Main line"], startDate: "", notes: "Starts Monday, 9 to 5 shifts." },
+      { id: "a1f3c9e2", type: "phone_queue", title: "Add Priya Shah to phone queues", status: "in_progress",
+        fields: { members: "Priya Shah", emails: "priya.shah@company.com", permissions: ["Access", "Download"], notes: "Recruiting queue, starts Monday." },
         createdBy: by, assignee: { name: a.name, email: a.email }, createdAt: now - 86400e3 * 1.2, updatedAt: now - 3600e3 * 5,
         history: [{ status: "open", at: new Date(now - 86400e3 * 1.2).toISOString(), by: m.name }, { status: "in_progress", at: new Date(now - 3600e3 * 5).toISOString(), by: a.name, note: "Setting this up now." }] },
       { id: "b7d20e41", type: "general", title: "Laptop can't connect to the office printer", status: "open",
@@ -460,8 +462,18 @@ function fieldHTML(f, i) {
       control = `<div class="chips" data-chips="${f.name}" role="group" aria-label="${esc(f.label)}">${opts.map((o) => `<button type="button" class="chip" aria-pressed="false" data-value="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
       return `<div class="field" data-field="${f.name}" style="--i:${i}">${label}${control}</div>`;
     }
-    default:
-      control = `<input id="${id}" name="${f.name}" type="${f.type === "date" ? "date" : f.type === "email" ? "email" : "text"}" ${req} placeholder="${esc(f.placeholder || "")}" />`;
+    case "checks": {
+      const locked = f.locked || [];
+      control = `<div class="checks" data-checks="${f.name}" role="group" aria-label="${esc(f.label)}">${(f.options || []).map((o) => {
+        const lk = locked.includes(o);
+        return `<label class="check${lk ? " is-locked" : ""}"><input type="checkbox" value="${esc(o)}" ${lk ? "checked disabled" : ""} /><span class="box" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span>${esc(o)}</span></label>`;
+      }).join("")}</div>`;
+      return `<div class="field" data-field="${f.name}" style="--i:${i}">${label}${control}</div>`;
+    }
+    default: {
+      const t = ["date", "email", "url", "tel"].includes(f.type) ? f.type : "text";
+      control = `<input id="${id}" name="${f.name}" type="${t}" ${req} placeholder="${esc(f.placeholder || "")}" />`;
+    }
   }
   return `<label class="field" data-field="${f.name}" style="--i:${i}">${label}${control}</label>`;
 }
@@ -495,6 +507,7 @@ async function submitNew(form) {
     const wrap = $(`[data-field="${f.name}"]`, form);
     let v;
     if (f.type === "chips") v = $$(`.chip[aria-pressed="true"]`, wrap).map((c) => c.dataset.value);
+    else if (f.type === "checks") v = $$("input:checked", wrap).map((c) => c.value);
     else v = String(form.elements[f.name].value || "").trim();
     data[f.name] = v;
     const bad = f.required && (Array.isArray(v) ? v.length === 0 : !v);
@@ -560,6 +573,7 @@ function renderDrawer() {
   const rows = (type?.fields || []).map((f) => {
     let v = t.fields?.[f.name];
     if (Array.isArray(v)) v = v.join(", ");
+    if (f.type === "url" && v && !/^https?:\/\//i.test(v)) v = "https://" + v;
     if (f.type === "date" && v) v = new Date(v + "T00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
     return v ? `<div class="detail"><dt>${esc(f.label)}</dt><dd>${esc(v)}</dd></div>` : "";
   }).join("");
