@@ -694,6 +694,27 @@ body.has-app::before {
 }
 .warn { color: #B45309; background: #FFF7ED; border: 1px solid #FED7AA; padding: 10px 14px; border-radius: 12px; font-size: 13.5px; max-width: none; }
 
+/* Email status */
+.sent-note {
+  display: flex; align-items: flex-start; gap: 8px; text-align: left; max-width: none;
+  padding: 10px 14px; border-radius: 12px; font-size: 13.5px;
+  background: #F1F6FD; border: 1px solid var(--line); color: var(--ink);
+}
+.sent-note svg, .success .sent-note svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--navy); }
+.success .sent-note, .success .warn { margin: 0 auto 18px; max-width: 420px; }
+.mailbox {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 22px;
+  padding: 12px 12px 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: #F6F9FE;
+  font-size: 13.5px; color: var(--muted);
+}
+.mailbox-icon { width: 32px; height: 32px; flex: none; border-radius: 10px; display: grid; place-items: center; background: #fff; border: 1px solid var(--line); color: var(--navy); }
+.mailbox-text { flex: 1; min-width: 0; }
+.mailbox.is-sent { background: #EFFAF6; border-color: rgba(14,159,126,.22); color: #0B6B55; }
+.mailbox.is-sent .mailbox-icon { color: var(--s-done); }
+.mailbox.is-failed { background: #FFF7ED; border-color: #FED7AA; color: #B45309; }
+.mailbox.is-failed .mailbox-icon { color: #C2410C; }
+
 /* Drawer attachments */
 .att { margin-bottom: 26px; display: grid; gap: 12px; }
 .att-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

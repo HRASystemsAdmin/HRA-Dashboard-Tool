@@ -50,6 +50,28 @@ Copy a block inside `requestTypes` in `config.js`, give it a new key, label, and
 - Limits are set in `config.js` → `attachments` (default 8 files per upload, 5 MB each).
 - Admins can delete a request once it's **Completed**. A confirmation appears first, and deleting also removes its attachments, which frees up space.
 
+## Email for New employee requests (EmailJS)
+
+New employee requests are emailed to **jroching@hunterrecruitment.net** with everything that was filled in. GitHub Pages can't send email on its own, so this uses EmailJS (free for 200 emails a month, no card).
+
+1. Create a free account at https://www.emailjs.com.
+2. **Email Services → Add New Service** → choose the mailbox that will send the emails (Outlook 365 or Gmail), sign in, and save. Copy the **Service ID**.
+3. **Email Templates → Create New Template**, then in **Settings**:
+   - Subject: `{{subject}}`
+   - To Email: `{{to_email}}`
+   - From Name: `HRA Request Center`
+   - Reply To: `{{reply_to}}` (replies go to the employee who sent it)
+4. In **Content**, open the code editor, delete what's there, paste everything from `email-template.html`, and save. Copy the **Template ID**.
+5. **Account → General** → copy your **Public Key**.
+6. Paste the three values into `config.js` → `email`, and set `siteUrl` to your GitHub Pages address so the email's button links to the request.
+7. Push to GitHub and send a test New employee request.
+
+Each request's details show whether the email went out. Admins can select **Send email** or **Send again** there if needed.
+
+To email other request types, add `emailTo: "someone@hunterrecruitment.net"` to that type in `config.js`.
+
+Tip: the EmailJS public key is visible in the page code. For extra safety, type the address directly into the template's **To Email** field instead of `{{to_email}}`, so the template can only ever send to that inbox.
+
 ## Notes
 
 - The Firebase web keys in `config.js` are meant to be public; the rules are the security.

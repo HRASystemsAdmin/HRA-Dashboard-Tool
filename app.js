@@ -26,6 +26,7 @@ const ICONS = {
   clip:  '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2L9.8 17.5a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>',
   upload: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>',
   trash: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg>',
+  mail:  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>',
   x:     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   user:  '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
   clock: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
@@ -135,6 +136,9 @@ function createDemoStore() {
       if (d == null) throw { code: "not-found" };
       return d;
     },
+    async setEmailStatus(id, emailStatus) {
+      save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
+    },
     async addAttachments(id, metas) {
       save(load().map((t) => t.id === id ? { ...t, attachments: [...(t.attachments || []), ...metas], updatedAt: Date.now() } : t));
     },
@@ -193,6 +197,9 @@ async function createFirebaseStore() {
       const snap = await fsMod.getDoc(fsMod.doc(db, "tickets", ticketId, "chunks", chunkId));
       if (!snap.exists()) throw { code: "not-found" };
       return snap.data().data;
+    },
+    setEmailStatus(id, emailStatus) {
+      return fsMod.updateDoc(fsMod.doc(db, "tickets", id), { emailStatus, updatedAt: fsMod.serverTimestamp() });
     },
     addAttachments(id, metas) {
       return fsMod.updateDoc(fsMod.doc(db, "tickets", id), { attachments: fsMod.arrayUnion(...metas), updatedAt: fsMod.serverTimestamp() });
@@ -316,6 +323,10 @@ function onTickets(list) {
   state.known = new Map(list.map((t) => [t.id, t.status]));
   state.tickets = list;
   state.loaded = true;
+  if (first) {
+    const m = location.hash.match(/^#r-([A-Za-z0-9]+)$/);
+    if (m && list.some((t) => t.id === m[1])) setTimeout(() => openTicket(m[1]), 250);
+  }
   renderAll();
   if (state.openId) renderDrawer();
 }
@@ -597,6 +608,16 @@ async function submitNew(form) {
       }
       pending.length = 0;
     }
+    let emailNote = "";
+    if (type.emailTo) {
+      $(".btn-text", btn).textContent = "Sending email";
+      const r = await emailRequest(id);
+      emailNote = r === "sent"
+        ? `<p class="sent-note">${ICONS.mail}The details were emailed to ${esc(type.emailTo)}.</p>`
+        : r === "not-configured"
+          ? `<p class="sent-note">${ICONS.mail}Email isn't set up yet, so nothing was sent to ${esc(type.emailTo)}. An admin can send it from the request once it is.</p>`
+          : `<p class="warn">The request was sent, but the email to ${esc(type.emailTo)} didn't go through. An admin can resend it from the request.</p>`;
+    }
     $("#modal-body").innerHTML = `
       <div class="success">
         <svg viewBox="0 0 90 90" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -605,6 +626,7 @@ async function submitNew(form) {
         <h2 id="modal-title">Request sent</h2>
         <p>Your reference is <strong>${ref(id)}</strong>. You'll see it move to in progress as soon as someone takes it.</p>
         ${uploadNote}
+        ${emailNote}
         <button class="btn btn-primary" data-close>Done</button>
       </div>`;
     if (state.mineFilter === "completed") setSeg("mine-filter", "active");
@@ -899,6 +921,102 @@ async function deleteTicket() {
 }
 
 /* --------------------------------------------------------------------------
+   Email (EmailJS) — request types with "emailTo" in config.js send their
+   details by email when submitted. Admins can resend from the request.
+   -------------------------------------------------------------------------- */
+const MAIL = CFG.email || {};
+const mailReady = () => Boolean(MAIL.publicKey && MAIL.serviceId && MAIL.templateId);
+let emailjsLib = null;
+
+function loadEmailJS() {
+  if (window.emailjs) return Promise.resolve(window.emailjs);
+  if (emailjsLib) return emailjsLib;
+  emailjsLib = new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/@emailjs/browser@4.4.1/dist/email.min.js";
+    sc.onload = () => { window.emailjs.init({ publicKey: MAIL.publicKey }); res(window.emailjs); };
+    sc.onerror = () => { emailjsLib = null; rej(new Error("EmailJS failed to load")); };
+    document.head.appendChild(sc);
+  });
+  return emailjsLib;
+}
+
+function displayValue(f, v) {
+  if (Array.isArray(v)) v = v.join(", ");
+  if (f.type === "url" && v && !/^https?:\/\//i.test(v)) v = "https://" + v;
+  if (f.type === "date" && v) v = new Date(v + "T00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  return v;
+}
+
+function emailParams(t) {
+  const type = CFG.requestTypes[t.type];
+  const rows = [["Reference", ref(t.id)], ["Requested by", `${t.createdBy?.name} (${t.createdBy?.email})`]]
+    .concat(type.fields.map((f) => [f.label, displayValue(f, t.fields?.[f.name]) || "Not provided"]));
+  const n = t.attachments?.length || 0;
+  const base = (MAIL.siteUrl || location.href.split("#")[0]).replace(/index\.html$/, "").replace(/\/?$/, "/");
+  const link = base + "#r-" + t.id;
+  return {
+    to_email: type.emailTo,
+    reply_to: t.createdBy?.email || "",
+    subject: `${type.label}: ${t.title.replace(/^New employee:\s*/i, "")} (${ref(t.id)})`,
+    request_type: type.label,
+    reference: ref(t.id),
+    requested_by: t.createdBy?.name || "",
+    requested_by_email: t.createdBy?.email || "",
+    submitted_at: toDate(t.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }),
+    details_text: rows.map(([k, v]) => `${k}: ${v}`).join("\n"),
+    details_html: rows.map(([k, v], i) =>
+      `<tr><td style="padding:10px 14px;border-top:${i ? "1px solid #E4EBF5" : "0"};color:#62789A;font-size:13px;width:38%;vertical-align:top">${esc(k)}</td>` +
+      `<td style="padding:10px 14px;border-top:${i ? "1px solid #E4EBF5" : "0"};color:#0A1E3F;font-size:14px;font-weight:600;white-space:pre-wrap">${esc(v)}</td></tr>`).join(""),
+    attachments_note: n ? `${n} attachment${n > 1 ? "s are" : " is"} saved with the request.` : "",
+    request_link: link,
+    logo_url: base + "assets/logo.png"
+  };
+}
+
+async function emailRequest(id) {
+  const t = state.tickets.find((x) => x.id === id);
+  const type = t && CFG.requestTypes[t.type];
+  if (!t || !type?.emailTo) return "skipped";
+  if (!mailReady()) return "not-configured";
+  try {
+    const lib = await loadEmailJS();
+    await lib.send(MAIL.serviceId, MAIL.templateId, emailParams(t));
+    await state.store.setEmailStatus(id, { sent: true, to: type.emailTo, at: new Date().toISOString(), by: state.user.name }).catch(() => {});
+    return "sent";
+  } catch (e) {
+    console.error("Email failed", e);
+    await state.store.setEmailStatus(id, { sent: false, to: type.emailTo, at: new Date().toISOString(), by: state.user.name }).catch(() => {});
+    return "failed";
+  }
+}
+
+function emailHTML(t) {
+  const type = CFG.requestTypes[t.type];
+  if (!type?.emailTo) return "";
+  const st = t.emailStatus;
+  const line = !st ? `Not emailed yet. Details go to ${esc(type.emailTo)}.`
+    : st.sent ? `Emailed to ${esc(st.to)} on ${fullDate(st.at)}.`
+    : `The email to ${esc(st.to)} didn't go through on ${fullDate(st.at)}.`;
+  const cls = st?.sent ? "is-sent" : st ? "is-failed" : "";
+  return `<div class="mailbox ${cls}">
+    <span class="mailbox-icon">${ICONS.mail}</span>
+    <span class="mailbox-text">${line}</span>
+    ${state.isAdmin ? `<button type="button" class="btn-mini" data-resend><span class="btn-text">${st?.sent ? "Send again" : "Send email"}</span><span class="spinner" aria-hidden="true"></span></button>` : ""}
+  </div>`;
+}
+
+async function resendEmail(btn) {
+  const id = state.openId;
+  if (!mailReady()) { toast("Email isn't set up yet. Add your EmailJS keys to config.js.", "#E2632B"); return; }
+  btn.classList.add("is-loading");
+  const r = await emailRequest(id);
+  btn.classList.remove("is-loading");
+  toast(r === "sent" ? `Details emailed for ${ref(id)}` : "The email didn't go through. Check the EmailJS settings and try again.", r === "sent" ? "var(--s-done)" : "#E2632B");
+  renderDrawer();
+}
+
+/* --------------------------------------------------------------------------
    Drawer (request details + admin actions)
    -------------------------------------------------------------------------- */
 function openTicket(id) {
@@ -956,6 +1074,7 @@ function renderDrawer() {
       <div class="detail"><dt>Type</dt><dd>${esc(type?.label || t.type)}</dd></div>
       ${rows}
     </dl>
+    ${emailHTML(t)}
     ${attachmentsHTML(t)}
     <h3 class="drawer-h">Activity</h3>
     <ul class="timeline">${history}</ul>
@@ -1041,6 +1160,7 @@ function bind() {
     }
     const set = t.closest("[data-set]"); if (set) { setStatus(set.dataset.set, set); return; }
     if (t.closest("[data-delete]")) { deleteTicket(); return; }
+    const rs = t.closest("[data-resend]"); if (rs) { resendEmail(rs); return; }
     const drop = t.closest(".drop"); if (drop) { $(".drop-input", drop).click(); return; }
     const un = t.closest("[data-unstage]"); if (un) {
       const i = pending.findIndex((f) => f.id === un.dataset.unstage);

@@ -31,7 +31,17 @@ window.HRA_CONFIG = {
     maxSizeMB: 5
   },
 
-  /* 4) Request types. To add a new one, copy a block and change it.
+  /* 4) Email (EmailJS, free for 200 emails a month). Request types with "emailTo"
+        send their details to that address when submitted. Setup is in README.md.
+        Leave these empty and nothing is emailed. */
+  email: {
+    publicKey: "",
+    serviceId: "",
+    templateId: "",
+    siteUrl: ""        // optional, e.g. "https://your-username.github.io/request-center/"
+  },
+
+  /* 5) Request types. To add a new one, copy a block and change it.
         Field types: text, email, url, tel, textarea, date, select (options),
         chips (multi-select pills), checks (checkboxes; "locked" ones are always on). */
   requestTypes: {
@@ -81,6 +91,7 @@ window.HRA_CONFIG = {
         { name: "companyEmail",   label: "Company email requested", type: "text",     required: true,  placeholder: "first.last@yourcompany.com" },
         { name: "notes",          label: "Equipment, software or anything else", type: "textarea", required: false, placeholder: "Laptop, headset, systems they need access to" }
       ],
+      emailTo: "jroching@hunterrecruitment.net",
       title: (d) => `New employee: ${d.fullName || "new hire"}`
     },
 
