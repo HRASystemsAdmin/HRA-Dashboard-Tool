@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Microsoft 365 email test · HRA Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #F3F7FC; --ink: #0A1E3F; --navy: #00377F; --orange: #F26A26; --muted: #62789A;
+      --line: rgba(0,55,127,.10); --line-strong: rgba(0,55,127,.18); --ok: #0E9F7E; --bad: #C2410C;
+      --ease: cubic-bezier(.16,1,.3,1);
+      color-scheme: light; box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    *, *::before, *::after { box-sizing: inherit; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); font: 15px/1.55 "Manrope", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: radial-gradient(circle at 1px 1px, rgba(0,55,127,.12) 1px, transparent 1.4px) 0 0 / 26px 26px; mask-image: radial-gradient(ellipse 80% 60% at 50% 10%, #000 30%, transparent 85%); }
+    main { max-width: 680px; margin: 0 auto; padding: 40px 20px 80px; }
+    .logo { display: block; width: 170px; background: #fff; padding: 6px 10px; border-radius: 10px; box-shadow: 0 0 0 1px var(--line); margin-bottom: 28px; }
+    h1 { font-family: "Space Grotesk", "Segoe UI", sans-serif; font-weight: 600; font-size: clamp(28px, 5vw, 40px); letter-spacing: -.03em; line-height: 1.05; margin: 0 0 10px; }
+    .sub { color: var(--muted); margin: 0 0 28px; max-width: 54ch; }
+    .step { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 22px 22px 22px 70px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(0,30,70,.04), 0 20px 44px -34px rgba(0,40,100,.45); transition: opacity .3s, transform .5s var(--ease); animation: rise .6s var(--ease) both; }
+    .step:nth-of-type(2) { animation-delay: .08s; } .step:nth-of-type(3) { animation-delay: .16s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    .step.is-locked { opacity: .5; pointer-events: none; }
+    .num { position: absolute; left: 20px; top: 20px; width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; font-weight: 800; font-size: 14px; color: var(--navy); background: #EEF3FB; border: 1px solid var(--line); transition: all .4s var(--ease); }
+    .step.is-done .num { background: var(--ok); color: #fff; border-color: var(--ok); box-shadow: 0 8px 18px -8px rgba(14,159,126,.8); }
+    h2 { font-family: "Space Grotesk", "Segoe UI", sans-serif; font-weight: 600; font-size: 18px; margin: 4px 0 4px; letter-spacing: -.01em; }
+    .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; }
+    label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+    input, textarea { width: 100%; padding: 11px 13px; border-radius: 11px; border: 1px solid var(--line-strong); font: inherit; font-weight: 500; color: var(--ink); background: #fff; outline: none; transition: border-color .2s, box-shadow .2s; }
+    input:focus, textarea:focus { border-color: var(--navy); box-shadow: 0 0 0 4px rgba(0,55,127,.1); }
+    textarea { min-height: 110px; resize: vertical; }
+    .copyrow { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-radius: 12px; background: #F4F7FB; border: 1px dashed var(--line-strong); margin-bottom: 14px; }
+    .copyrow code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: var(--navy); }
+    button { font: inherit; cursor: pointer; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 18px; border-radius: 12px; border: 1px solid transparent; font-weight: 700; font-size: 14.5px; transition: transform .2s var(--ease), box-shadow .3s, background .3s; }
+    .btn:active { transform: scale(.98); }
+    .btn-primary { background: linear-gradient(135deg, #00418F, var(--navy) 60%, #002B66); color: #fff; box-shadow: 0 10px 24px -10px rgba(0,55,127,.6); }
+    .btn-ms { background: #fff; color: #1B1B1B; border-color: #8C8C8C; }
+    .btn-ms:hover { background: #F7F7F7; }
+    .btn-ghost { background: #fff; color: var(--navy); border-color: var(--line-strong); }
+    .btn-mini { padding: 6px 11px; font-size: 12.5px; border-radius: 9px; }
+    .btn[disabled] { opacity: .6; pointer-events: none; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .who { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 14px; background: #EFFAF6; border: 1px solid rgba(14,159,126,.25); margin-bottom: 12px; }
+    .av { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; background: linear-gradient(140deg, #0E9F7E, #34C79E); }
+    .who strong { display: block; } .who span { color: var(--muted); font-size: 13px; }
+    .msg { margin: 12px 0 0; padding: 11px 14px; border-radius: 12px; font-size: 13.5px; display: none; }
+    .msg.ok { display: block; background: #EFFAF6; color: #0B6B55; border: 1px solid rgba(14,159,126,.25); }
+    .msg.err { display: block; background: #FFF4EE; color: var(--bad); border: 1px solid rgba(194,65,12,.25); }
+    .spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: rot .7s linear infinite; display: none; }
+    .is-loading .spin { display: block; }
+    @keyframes rot { to { transform: rotate(360deg); } }
+    .foot { color: var(--muted); font-size: 12.5px; margin-top: 22px; }
+    @media (max-width: 560px) { .step { padding: 20px 16px 20px 16px; } .num { position: static; margin-bottom: 10px; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+<main>
+  <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo" />
+  <h1>Microsoft 365 email test</h1>
+  <p class="sub">A safe test of sending email from the dashboard through your own Microsoft 365. Nothing here changes the dashboard. Emails go from your mailbox and a copy is saved in your Sent Items.</p>
+
+  <section class="step" id="s1">
+    <span class="num">1</span>
+    <h2>Connect this page to Microsoft</h2>
+    <p class="hint">Register this exact address as a <strong>Single-page application</strong> redirect in Microsoft Entra, then paste the two IDs from the app's Overview page.</p>
+    <div class="copyrow"><code id="redirect"></code><button type="button" class="btn btn-ghost btn-mini" id="copy">Copy</button></div>
+    <label>Application (client) ID<input id="clientId" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000" /></label>
+    <label>Directory (tenant) ID<input id="tenantId" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000" /></label>
+    <button type="button" class="btn btn-ms" id="signin">
+      <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/><rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/></svg>
+      Sign in with Microsoft
+    </button>
+    <p class="msg" id="m1" role="status"></p>
+  </section>
+
+  <section class="step is-locked" id="s2">
+    <span class="num">2</span>
+    <h2>Check who's signed in</h2>
+    <div id="who"><p class="hint">Sign in first.</p></div>
+    <button type="button" class="btn btn-ghost btn-mini" id="signout" hidden>Sign out</button>
+  </section>
+
+  <section class="step is-locked" id="s3">
+    <span class="num">3</span>
+    <h2>Send a test email</h2>
+    <p class="hint">It's addressed to you by default. Change it to send to someone else.</p>
+    <label>To<input id="to" type="email" /></label>
+    <label>Subject<input id="subject" value="Test from the HRA Dashboard" /></label>
+    <label>Message<textarea id="body">Hi,
+
+This is a test email sent from the HRA Dashboard through Microsoft 365. If you're reading this, it works.</textarea></label>
+    <div class="row">
+      <button type="button" class="btn btn-primary" id="send"><span class="spin" aria-hidden="true"></span><span>Send test email</span></button>
+    </div>
+    <p class="msg" id="m3" role="status"></p>
+  </section>
+
+  <p class="foot">This page only asks Microsoft for two permissions: read your basic profile and send mail as you. It stores the two IDs in this browser only, and you can delete this page or the Entra app registration at any time.</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js"></script>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const SCOPES = ["User.Read", "Mail.Send"];
+  const REDIRECT = location.origin + location.pathname;
+  let app = null, account = null;
+
+  $("#redirect").textContent = REDIRECT;
+  $("#copy").onclick = async () => { try { await navigator.clipboard.writeText(REDIRECT); $("#copy").textContent = "Copied"; setTimeout(() => $("#copy").textContent = "Copy", 1500); } catch {} };
+
+  const saved = (() => { try { return JSON.parse(localStorage.getItem("hra_ms_test")) || {}; } catch { return {}; } })();
+  $("#clientId").value = saved.clientId || "";
+  $("#tenantId").value = saved.tenantId || "";
+
+  const say = (id, text, ok) => { const m = $(id); m.textContent = text; m.className = "msg " + (ok ? "ok" : "err"); };
+  const friendly = (e) => {
+    const t = String(e?.errorMessage || e?.message || e);
+    if (/AADSTS50011/.test(t)) return "The address isn't registered. In Entra → your app → Authentication, add the address shown above as a Single-page application redirect URI.";
+    if (/AADSTS700016|AADSTS90002/.test(t)) return "Microsoft doesn't recognize that client or tenant ID. Copy both again from the app's Overview page.";
+    if (/AADSTS65001|consent/i.test(t)) return "The Mail.Send permission hasn't been approved yet. In Entra → API permissions, select Grant admin consent, then try again.";
+    if (/user_cancelled|popup_window_error|BrowserAuthError.*popup/i.test(t)) return "The Microsoft sign-in window was closed or blocked. Allow pop-ups for this site and try again.";
+    return t.slice(0, 300);
+  };
+  const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  function unlock(n, on) { $("#s" + n).classList.toggle("is-locked", !on); }
+  function showAccount() {
+    $("#s1").classList.toggle("is-done", Boolean(account));
+    $("#s2").classList.toggle("is-done", Boolean(account));
+    unlock(2, Boolean(account)); unlock(3, Boolean(account));
+    $("#signout").hidden = !account;
+    if (!account) { $("#who").innerHTML = '<p class="hint">Sign in first.</p>'; return; }
+    const name = account.name || account.username;
+    const ini = name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+    $("#who").innerHTML = "";
+    const box = document.createElement("div"); box.className = "who";
+    box.innerHTML = `<span class="av"></span><span><strong></strong><span></span></span>`;
+    box.querySelector(".av").textContent = ini;
+    box.querySelector("strong").textContent = name;
+    box.querySelector("span span").textContent = account.username;
+    $("#who").appendChild(box);
+    if (!$("#to").value) $("#to").value = account.username;
+  }
+
+  async function makeApp() {
+    const clientId = $("#clientId").value.trim(), tenantId = $("#tenantId").value.trim();
+    if (!guid.test(clientId) || !guid.test(tenantId)) throw new Error("Paste both IDs first. Each looks like 00000000-0000-0000-0000-000000000000.");
+    localStorage.setItem("hra_ms_test", JSON.stringify({ clientId, tenantId }));
+    app = new msal.PublicClientApplication({
+      auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}`, redirectUri: REDIRECT },
+      cache: { cacheLocation: "sessionStorage" }
+    });
+    await app.initialize();
+    await app.handleRedirectPromise();
+    return app;
+  }
+
+  $("#signin").onclick = async () => {
+    try {
+      if (typeof msal === "undefined") throw new Error("The Microsoft sign-in library didn't load. Check your connection and refresh.");
+      await makeApp();
+      const res = await app.loginPopup({ scopes: SCOPES, prompt: "select_account" });
+      account = res.account; app.setActiveAccount(account);
+      say("#m1", "Connected to Microsoft 365.", true);
+      showAccount();
+    } catch (e) { console.error(e); say("#m1", friendly(e), false); }
+  };
+
+  $("#signout").onclick = async () => {
+    try { await app?.logoutPopup({ account }); } catch {}
+    account = null; showAccount(); $("#m1").className = "msg"; $("#m3").className = "msg";
+  };
+
+  async function token() {
+    try { return (await app.acquireTokenSilent({ scopes: SCOPES, account })).accessToken; }
+    catch { return (await app.acquireTokenPopup({ scopes: SCOPES, account })).accessToken; }
+  }
+
+  $("#send").onclick = async () => {
+    const to = $("#to").value.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { say("#m3", "Enter a valid email address.", false); return; }
+    const btn = $("#send"); btn.classList.add("is-loading"); btn.disabled = true;
+    try {
+      const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${await token()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: { subject: $("#subject").value, body: { contentType: "Text", content: $("#body").value }, toRecipients: [{ emailAddress: { address: to } }] },
+          saveToSentItems: true
+        })
+      });
+      if (res.status === 202) { say("#m3", `Sent to ${to}. Check the inbox and your Sent Items.`, true); $("#s3").classList.add("is-done"); }
+      else { const j = await res.json().catch(() => ({})); throw new Error(j?.error?.message || `Microsoft answered ${res.status}`); }
+    } catch (e) { console.error(e); say("#m3", friendly(e), false); }
+    finally { btn.classList.remove("is-loading"); btn.disabled = false; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -68,6 +68,7 @@ function toast(msg, color, action) {
 /* --------------------------------------------------------------------------
    Data stores
    -------------------------------------------------------------------------- */
+const bcListeners = new Set();
 function createDemoStore() {
   const KEY = "hra_demo_tickets_v3", UKEY = "hra_demo_user_v2", FKEY = "hra_demo_files_v1";
   const loadFiles = () => { try { return JSON.parse(localStorage.getItem(FKEY)) || {}; } catch { return {}; } };
@@ -142,6 +143,14 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // All-employees alert (demo: shared between tabs of this browser)
+    watchBroadcast(cb) {
+      const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_broadcast")) || null; } catch { return null; } };
+      const fn = (e) => { if (!e || e.key === "hra_demo_broadcast") cb(read()); };
+      addEventListener("storage", fn); bcListeners.add(fn); setTimeout(() => cb(read()), 0);
+      return () => { removeEventListener("storage", fn); bcListeners.delete(fn); };
+    },
+    async setBroadcast(data) { localStorage.setItem("hra_demo_broadcast", JSON.stringify(data)); bcListeners.forEach((fn) => fn()); },
     async setPrefs(uid, data) { const cur = await this.getPrefs(uid); localStorage.setItem("hra_prefs_" + uid, JSON.stringify({ ...cur, ...data })); },
     async addAttachments(id, metas) {
       save(load().map((t) => t.id === id ? { ...t, attachments: [...(t.attachments || []), ...metas], updatedAt: Date.now() } : t));
@@ -202,6 +211,10 @@ async function createFirebaseStore() {
       if (!snap.exists()) throw { code: "not-found" };
       return snap.data().data;
     },
+    watchBroadcast(cb) {
+      return fsMod.onSnapshot(fsMod.doc(db, "broadcast", "current"), (snap) => cb(snap.exists() ? snap.data() : null), (e) => console.warn("Alerts unavailable", e));
+    },
+    setBroadcast(data) { return fsMod.setDoc(fsMod.doc(db, "broadcast", "current"), data); },
     async getPrefs(uid) {
       const snap = await fsMod.getDoc(fsMod.doc(db, "user_prefs", uid));
       return snap.exists() ? snap.data() : {};
@@ -288,6 +301,7 @@ function handleUser(u) {
   state.tickets = []; state.loaded = false; state.known.clear();
 
   if (!u) {
+    stopAlerts();
     stopPipeline();
     state.user = null;
     showView("view-login");
@@ -323,6 +337,8 @@ function handleUser(u) {
   renderAll();
   showView("view-app");
   $('[data-tool="insights"]').hidden = !isAdmin;
+  $("#alert-btn").hidden = !isAdmin;
+  startAlerts();
   const sp = $("#rail-sharepoint");
   if (sp) { sp.href = CFG.links?.sharepoint || "#"; sp.hidden = !CFG.links?.sharepoint; }
   let savedTool = "requests";
@@ -341,10 +357,11 @@ function onTickets(list) {
     for (const t of list) {
       const prev = state.known.get(t.id);
       if (prev === undefined && state.isAdmin && t.createdBy?.uid !== state.user.uid) {
-        toast(`New request from ${t.createdBy?.name || "a colleague"}`, "var(--s-open)");
+        notify({ kind: "ticket", title: "New request", body: `${t.createdBy?.name || "A colleague"}: ${t.title}`, action: () => { setTool("requests"); openTicket(t.id); } });
         flashIds.add(t.id);
       } else if (prev && prev !== t.status && t.createdBy?.uid === state.user.uid && t.assignee?.email !== state.user.email) {
-        toast(`${ref(t.id)} is now ${STATUS[t.status].label.toLowerCase()}`, STATUS[t.status].color);
+        if (t.status === "completed") notify({ kind: "done", title: "Request completed", body: `${ref(t.id)}: ${t.title}`, action: () => { setTool("requests"); openTicket(t.id); } });
+        else toast(`${ref(t.id)} is now ${STATUS[t.status].label.toLowerCase()}`, STATUS[t.status].color);
         flashIds.add(t.id);
       }
     }
@@ -1529,6 +1546,17 @@ function bind() {
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (t.matches?.("input[type=file]")) return;
+    if (t.closest("[data-alert-compose]")) { openAlertComposer(); return; }
+    if (t.closest("[data-alert-end]")) { endAlert(); return; }
+    if (t.closest("[data-alert-ack]")) { ackTakeover(); return; }
+    if (t.closest("[data-alert-more]")) { if (AL.cur) showTakeover(AL.cur); return; }
+    const tpl = t.closest("[data-ac-tpl]"); if (tpl) { const x = ALERT_TEMPLATES[Number(tpl.dataset.acTpl)]; Object.assign(AL.draft, { level: x.level, minutes: x.minutes, title: x.title, message: x.message }); openAlertComposer(); return; }
+    const lvB = t.closest("[data-ac-level]"); if (lvB) { AL.draft.level = lvB.dataset.acLevel; $$("[data-ac-level]").forEach((b) => { const on = b === lvB; b.classList.toggle("is-on", on); b.setAttribute("aria-checked", String(on)); }); renderPreview(); return; }
+    const mnB = t.closest("[data-ac-min]"); if (mnB) { AL.draft.minutes = Number(mnB.dataset.acMin); $$("[data-ac-min]").forEach((b) => b.setAttribute("aria-pressed", String(b === mnB))); renderPreview(); return; }
+    if (t.closest("[data-notif-panel]")) { const p = $("#notif-pop"), open = p.hidden; renderNotifPanel(); p.hidden = !open; $("#bell-btn").setAttribute("aria-expanded", String(open)); return; }
+    const npT = t.closest("[data-np]"); if (npT) { toggleNP(npT.dataset.np); return; }
+    if (t.closest("[data-np-test]")) { unlockAudio(); setTimeout(() => notify({ kind: state.isAdmin ? "ticket" : "done", title: "Test notification", body: "This is how notifications will look and sound." }), 150); return; }
+    if (!t.closest(".notif-wrap") && $("#notif-pop") && !$("#notif-pop").hidden) { $("#notif-pop").hidden = true; $("#bell-btn").setAttribute("aria-expanded", "false"); }
     const ddT = t.closest("[data-dd-toggle]");
     if (ddT) {
       const dd = ddT.closest(".dd"), open = !dd.classList.contains("is-open");
@@ -1650,6 +1678,7 @@ function bind() {
   });
 
   document.addEventListener("submit", (e) => {
+    if (e.target.id === "ac-form") { e.preventDefault(); sendAlert($(".ac-send", e.target)); return; }
     if (e.target.id === "new-form") { e.preventDefault(); submitNew(e.target); }
   });
 
@@ -1687,6 +1716,7 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
+    if (e.target.id === "ac-title" || e.target.id === "ac-msg") { if (AL.draft) { AL.draft.title = $("#ac-title").value; AL.draft.message = $("#ac-msg").value; renderPreview(); $("#ac-error").textContent = ""; } return; }
     if (e.target.id === "ct-q") { CT.q = e.target.value; CT.open = null; renderContactList(); return; }
     if (e.target.id === "pl-search") {
       PL.search = e.target.value;
@@ -1709,6 +1739,7 @@ function bind() {
     if (IN.pop && e.key === "Escape") { IN.pop = null; const pop = $(".cust-pop"); if (pop) pop.hidden = true; $("[data-in-customize]")?.focus(); return; }
     if (e.key === "/" && currentTool === "contacts" && !e.target.closest?.("input, textarea, select, [contenteditable]")) { e.preventDefault(); $("#ct-q")?.focus(); return; }
     if (e.key === "Escape" && e.target.id === "ct-q" && e.target.value) { e.target.value = ""; CT.q = ""; renderContactList(); return; }
+    if (e.key === "Escape" && $(".alert-takeover")) { ackTakeover(); return; }
     const openDd = $(".dd.is-open");
     if (openDd && e.key === "Escape") { closeDropdowns(); $(".dd-trigger", openDd)?.focus(); e.stopPropagation(); return; }
     if (openDd && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -3214,4 +3245,301 @@ function contactCard(t, k, words, isFallback = false, idx = DIR.topics.indexOf(t
         ${t.backup ? `<p class="ct-backup">Not available? Try <strong>${esc(t.backup.name)}</strong>${t.backup.email ? ` at <a href="mailto:${esc(t.backup.email)}">${esc(t.backup.email)}</a>` : ""}.</p>` : ""}
       </div></div>` : ""}
   </article>`;
+}
+
+/* ==========================================================================
+   Notifications: messenger-style pop-ups, chime, and Windows notifications
+   ========================================================================== */
+const NOTIF_KEY = "hra_notif_prefs";
+const NP = Object.assign({ popup: true, desktop: false, sound: true }, (() => { try { return JSON.parse(localStorage.getItem(NOTIF_KEY)) || {}; } catch { return {}; } })());
+const saveNP = () => { try { localStorage.setItem(NOTIF_KEY, JSON.stringify(NP)); } catch {} };
+const desktopSupported = () => "Notification" in window;
+const desktopState = () => !desktopSupported() ? "unsupported" : Notification.permission;   // default | granted | denied
+
+let audioCtx = null;
+function unlockAudio() { if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (audioCtx?.state === "suspended") audioCtx.resume().catch(() => {}); }
+addEventListener("pointerdown", unlockAudio, { once: false, passive: true });
+function chime(kind) {
+  if (!NP.sound || !audioCtx) return;
+  const t0 = audioCtx.currentTime + 0.02;
+  const tone = (freq, at, dur, vol = 0.16, type = "sine") => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t0 + at);
+    g.gain.setValueAtTime(0.0001, t0 + at); g.gain.exponentialRampToValueAtTime(vol, t0 + at + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
+    o.connect(g).connect(audioCtx.destination); o.start(t0 + at); o.stop(t0 + at + dur + 0.05);
+  };
+  if (kind === "alert") { [0, .22, .44].forEach((d) => { tone(880, d, .16, .2, "triangle"); tone(660, d + .1, .14, .16, "triangle"); }); }
+  else if (kind === "done") { tone(784, 0, .18); tone(1047, .12, .28); tone(1319, .24, .38, .12); }
+  else { tone(988, 0, .2); tone(1319, .14, .36); }      // classic two-note "ding-dong" up
+}
+
+const MSGR_ICONS = {
+  ticket: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M12 9v4M10 11h4"/></svg>',
+  done:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16.5 9.5"/></svg>',
+  alert:  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>',
+  info:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>'
+};
+
+function messengerPopup({ kind = "info", title, body, action, sticky }) {
+  const host = $("#msgr"); if (!host) return;
+  while (host.children.length >= 3) host.firstElementChild.remove();
+  const el = document.createElement("div");
+  el.className = `msgr-win msgr-${kind}`;
+  el.setAttribute("role", "alert");
+  el.innerHTML = `
+    <div class="msgr-bar"><span class="msgr-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="14" height="14"><rect width="32" height="32" rx="8" fill="#fff"/><path d="M10 8v16M22 8v16M10 16h12" stroke="#F26A26" stroke-width="3.6" stroke-linecap="round"/></svg></span>
+      <span class="msgr-app">HRA Dashboard</span><span class="msgr-time">now</span>
+      <button type="button" class="msgr-x" aria-label="Close notification"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <button type="button" class="msgr-body">
+      <span class="msgr-ico">${MSGR_ICONS[kind] || MSGR_ICONS.info}</span>
+      <span class="msgr-text"><strong></strong><span></span>${action ? `<em>Click to open</em>` : ""}</span>
+    </button>
+    <span class="msgr-life" aria-hidden="true"></span>`;
+  $(".msgr-text strong", el).textContent = title;
+  $(".msgr-text span", el).textContent = body || "";
+  const close = () => { if (el.classList.contains("is-leaving")) return; el.classList.add("is-leaving"); setTimeout(() => el.remove(), 420); };
+  $(".msgr-x", el).onclick = close;
+  $(".msgr-body", el).onclick = () => { action?.(); close(); };
+  const life = sticky ? 0 : kind === "alert" ? 14000 : 8000;
+  if (life) {
+    el.style.setProperty("--life", life + "ms");
+    let timer = setTimeout(close, life);
+    el.addEventListener("pointerenter", () => { clearTimeout(timer); el.classList.add("is-paused"); });
+    el.addEventListener("pointerleave", () => { el.classList.remove("is-paused"); timer = setTimeout(close, 2500); });
+  }
+  host.appendChild(el);
+}
+
+function desktopNotify({ kind, title, body, action }) {
+  if (!NP.desktop || desktopState() !== "granted") return;
+  if (document.visibilityState === "visible" && document.hasFocus()) return;   // they're already looking at the dashboard
+  try {
+    const n = new Notification(title, { body, icon: "assets/logo.png", tag: kind + ":" + title + body, requireInteraction: kind === "alert" });
+    n.onclick = () => { window.focus(); action?.(); n.close(); };
+  } catch (e) { console.warn("Notification failed", e); }
+}
+
+function notify(opts) {
+  chime(opts.kind);
+  if (NP.popup) messengerPopup(opts); else toast(`${opts.title}: ${opts.body}`, opts.kind === "done" ? "var(--s-done)" : "var(--s-open)");
+  desktopNotify(opts);
+}
+
+function notifPanelHTML() {
+  const ds = desktopState();
+  const sw = (key, on, label, sub, disabled) => `<li class="np-row${disabled ? " is-disabled" : ""}"><span class="np-label"><strong>${label}</strong><small>${sub}</small></span>
+    <button type="button" class="switch" role="switch" aria-checked="${on}" data-np="${key}" ${disabled ? "disabled" : ""} aria-label="${label}"><span></span></button></li>`;
+  return `<div class="np-head"><strong>Notifications</strong><span>You'll be notified about ${state.isAdmin ? "new requests, completed requests and alerts" : "your completed requests and alerts"}.</span></div>
+    <ul class="np-list">
+      ${sw("popup", NP.popup, "Pop-up windows", "Little windows in the corner of the dashboard")}
+      ${sw("desktop", NP.desktop && ds === "granted", "Windows notifications", ds === "denied" ? "Blocked in your browser. Allow notifications for this site in the browser's site settings." : ds === "unsupported" ? "Not supported in this browser" : "Shows up even when you're in another app", ds === "denied" || ds === "unsupported")}
+      ${sw("sound", NP.sound, "Sound", "A short chime with each notification")}
+    </ul>
+    <button type="button" class="btn btn-ghost np-test" data-np-test>Send me a test</button>
+    <p class="np-note">Notifications arrive while the dashboard is open in a browser tab. Keep it open (it can be in the background).</p>`;
+}
+function renderNotifPanel() { const p = $("#notif-pop"); if (p) p.innerHTML = notifPanelHTML(); $(".bell-dot").hidden = !(desktopState() === "default" && !NP.desktopAsked); }
+
+async function toggleNP(key) {
+  if (key === "desktop") {
+    if (!NP.desktop || desktopState() !== "granted") {
+      NP.desktopAsked = true;
+      const res = desktopState() === "granted" ? "granted" : await Notification.requestPermission();
+      NP.desktop = res === "granted";
+      if (!NP.desktop) toast("Windows notifications weren't allowed. You can change this in your browser's site settings.", "#E0A800");
+    } else NP.desktop = false;
+  } else NP[key] = !NP[key];
+  saveNP(); renderNotifPanel();
+}
+
+/* ==========================================================================
+   All-employees alert
+   ========================================================================== */
+const ALERT_LEVELS = {
+  critical: { label: "Critical", tag: "URGENT" },
+  warning:  { label: "Warning",  tag: "IMPORTANT" },
+  info:     { label: "Notice",   tag: "NOTICE" }
+};
+const ALERT_DURATIONS = [[5, "5 minutes"], [10, "10 minutes"], [30, "30 minutes"], [60, "1 hour"], [240, "4 hours"], [0, "Until I turn it off"]];
+const ALERT_TEMPLATES = [
+  { name: "Microsoft outage", level: "critical", minutes: 0, title: "Outlook is down worldwide. It's not your account.",
+    message: "Microsoft is having an outage. Please don't reset your password or reinstall anything. Emails will send once it's fixed. Use Zoom chat or text for anything urgent. We'll update you here." },
+  { name: "System down", level: "critical", minutes: 60, title: "A system is down. We're working on it.",
+    message: "[System name] isn't working right now. No action needed on your part. We'll post an update here when it's back." },
+  { name: "Planned maintenance", level: "warning", minutes: 30, title: "Scheduled maintenance in progress",
+    message: "[System name] may be unavailable until [time]. Save your work. Thanks for your patience." }
+];
+const AL = { cur: null, unsub: null, tick: null, seen: null, draft: null };
+const alertActive = (a) => Boolean(a && a.active && (!a.endsAt || new Date(a.endsAt).getTime() > Date.now()));
+const ackKey = (a) => "hra_alert_ack_" + a.id;
+const fmtLeft = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}:${String(x).padStart(2, "0")}`; };
+
+function startAlerts() {
+  stopAlerts();
+  AL.unsub = state.store.watchBroadcast(onAlertData);
+  AL.tick = setInterval(tickAlert, 1000);
+  renderNotifPanel();
+}
+function stopAlerts() {
+  AL.unsub?.(); AL.unsub = null; clearInterval(AL.tick); AL.cur = null; AL.seen = null;
+  $("#alert-root").innerHTML = ""; document.body.classList.remove("has-alert");
+}
+
+function onAlertData(a) {
+  const wasId = AL.cur?.id;
+  AL.cur = a;
+  if (alertActive(a) && a.id !== AL.seen) {
+    AL.seen = a.id;
+    const mine = a.byUid && a.byUid === state.user?.uid;
+    let acked = false; try { acked = Boolean(localStorage.getItem(ackKey(a))); } catch {}
+    if (!mine && !acked) {
+      showTakeover(a);
+      notify({ kind: "alert", title: `${ALERT_LEVELS[a.level]?.tag || "ALERT"}: ${a.title}`, body: a.message || "", sticky: false });
+    }
+  }
+  if (!alertActive(a) && wasId && AL.cur?.id === wasId && !a?.active) $(".alert-takeover")?.remove();
+  renderBanner();
+  if ($("#alert-compose")) renderComposerLive();
+}
+
+function tickAlert() {
+  const a = AL.cur;
+  if (!a) return;
+  if (a.active && a.endsAt && new Date(a.endsAt).getTime() <= Date.now()) { renderBanner(); $(".alert-takeover")?.remove(); return; }
+  const left = $("#alert-left"); if (left && a.endsAt) left.textContent = fmtLeft(new Date(a.endsAt) - Date.now());
+  const cl = $("#compose-left"); if (cl && a.endsAt) cl.textContent = fmtLeft(new Date(a.endsAt) - Date.now());
+}
+
+function renderBanner() {
+  const root = $("#alert-root"); if (!root) return;
+  const a = AL.cur, on = alertActive(a) && state.user;
+  let bar = $(".alert-banner", root);
+  if (!on) {
+    if (bar) { bar.classList.add("is-leaving"); setTimeout(() => { bar.remove(); document.body.classList.remove("has-alert"); }, 450); }
+    else document.body.classList.remove("has-alert");
+    return;
+  }
+  const lv = ALERT_LEVELS[a.level] ? a.level : "critical";
+  const html = `
+    <div class="alert-stripes" aria-hidden="true"></div><div class="alert-shine" aria-hidden="true"></div>
+    <div class="alert-inner">
+      <span class="alert-siren" aria-hidden="true"><span class="siren-ring"></span><span class="siren-ring r2"></span>${MSGR_ICONS.alert}</span>
+      <span class="alert-tag">${esc(ALERT_LEVELS[lv].tag)}</span>
+      <span class="alert-copy"><strong class="alert-title">${esc(a.title)}</strong>${a.message ? `<span class="alert-msg">${esc(a.message)}</span>` : ""}</span>
+      <span class="alert-side">
+        ${a.endsAt ? `<span class="alert-timer" title="This alert ends automatically"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="alert-left">${fmtLeft(new Date(a.endsAt) - Date.now())}</span></span>` : ""}
+        ${a.message ? `<button type="button" class="alert-more" data-alert-more>Details</button>` : ""}
+        ${state.isAdmin ? `<button type="button" class="alert-end" data-alert-end>End alert</button>` : ""}
+      </span>
+    </div>`;
+  if (!bar) {
+    bar = document.createElement("div");
+    root.appendChild(bar);
+  }
+  bar.className = `alert-banner lv-${lv}`;
+  bar.setAttribute("role", "alert");
+  bar.innerHTML = html;
+  document.body.classList.add("has-alert");
+  const setH = () => { const b = $(".alert-banner:not(.is-leaving)", root); if (b) document.documentElement.style.setProperty("--alert-h", b.offsetHeight + "px"); };
+  requestAnimationFrame(setH); setTimeout(setH, 300);
+  if (!AL.ro && window.ResizeObserver) { AL.ro = new ResizeObserver(setH); }
+  AL.ro?.disconnect(); AL.ro?.observe(bar);
+}
+
+function showTakeover(a) {
+  $(".alert-takeover")?.remove();
+  const lv = ALERT_LEVELS[a.level] ? a.level : "critical";
+  const el = document.createElement("div");
+  el.className = `alert-takeover lv-${lv}`;
+  el.innerHTML = `<div class="tk-card" role="alertdialog" aria-modal="true" aria-labelledby="tk-title">
+      <div class="alert-stripes" aria-hidden="true"></div>
+      <span class="tk-siren" aria-hidden="true"><span class="siren-ring"></span><span class="siren-ring r2"></span><span class="siren-ring r3"></span>${MSGR_ICONS.alert}</span>
+      <span class="tk-tag">${esc(ALERT_LEVELS[lv].tag)} · MESSAGE TO ALL EMPLOYEES</span>
+      <h2 id="tk-title">${esc(a.title)}</h2>
+      ${a.message ? `<p>${esc(a.message)}</p>` : ""}
+      <span class="tk-from">From ${esc(a.by || "an admin")}, ${esc(new Date(a.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }))}</span>
+      <button type="button" class="tk-ok" data-alert-ack>Got it</button>
+    </div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("is-open"));
+  setTimeout(() => $(".tk-ok", el)?.focus(), 300);
+}
+function ackTakeover() {
+  const el = $(".alert-takeover"); if (!el) return;
+  if (AL.cur) { try { localStorage.setItem(ackKey(AL.cur), "1"); } catch {} }
+  el.classList.add("is-closing");
+  setTimeout(() => el.remove(), 550);
+  $(".alert-banner")?.classList.add("is-landing");
+  setTimeout(() => $(".alert-banner")?.classList.remove("is-landing"), 1200);
+}
+
+/* ---- composer (admins) ---- */
+function openAlertComposer() {
+  if (!state.isAdmin) return;
+  AL.draft = AL.draft || { level: "critical", minutes: 10, title: "", message: "" };
+  swapModal(`<div id="alert-compose">
+    <div class="modal-head">
+      <span class="type-icon ac-icon">${MSGR_ICONS.alert}</span>
+      <div><h2 id="modal-title">Alert all employees</h2><p>Puts a red banner on everyone's screen and sends a notification.</p></div>
+    </div>
+    <div id="ac-live"></div>
+    <div class="ac-templates"><span>Start from:</span>${ALERT_TEMPLATES.map((t, i) => `<button type="button" class="ct-try-btn" data-ac-tpl="${i}">${esc(t.name)}</button>`).join("")}</div>
+    <form class="modal-form" id="ac-form" novalidate>
+      <label class="field"><span class="field-label">Headline</span><input id="ac-title" maxlength="90" required placeholder="e.g. Outlook is down worldwide. It's not your account." value="${esc(AL.draft.title)}" /></label>
+      <label class="field"><span class="field-label">Message<span class="opt">optional</span></span><textarea id="ac-msg" maxlength="320" placeholder="What's happening and what people should do">${esc(AL.draft.message)}</textarea></label>
+      <div class="field"><span class="field-label">Look</span>
+        <div class="ac-levels" role="radiogroup" aria-label="Alert style">${Object.entries(ALERT_LEVELS).map(([k, v]) => `<button type="button" role="radio" class="ac-level lv-${k}${AL.draft.level === k ? " is-on" : ""}" aria-checked="${AL.draft.level === k}" data-ac-level="${k}"><i></i>${v.label}</button>`).join("")}</div></div>
+      <div class="field"><span class="field-label">Show it for</span>
+        <div class="chips">${ALERT_DURATIONS.map(([m, l]) => `<button type="button" class="chip" aria-pressed="${AL.draft.minutes === m}" data-ac-min="${m}">${l}</button>`).join("")}</div></div>
+      <div class="field"><span class="field-label">Preview</span><div class="ac-preview" id="ac-preview"></div></div>
+      <p class="form-error" id="ac-error" role="alert"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" class="btn ac-send"><span class="btn-text">Send to everyone</span><span class="spinner" aria-hidden="true"></span></button>
+      </div>
+    </form>
+  </div>`);
+  renderComposerLive(); renderPreview();
+  setTimeout(() => $("#ac-title")?.focus(), 300);
+}
+function renderComposerLive() {
+  const box = $("#ac-live"); if (!box) return;
+  const a = AL.cur;
+  box.innerHTML = alertActive(a) ? `<div class="ac-live lv-${a.level}"><span class="ac-dot"></span><span><strong>Live now:</strong> ${esc(a.title)}${a.endsAt ? `<em>Ends in <span id="compose-left">${fmtLeft(new Date(a.endsAt) - Date.now())}</span></em>` : `<em>Until turned off</em>`}</span><button type="button" class="btn-mini" data-alert-end>End now</button></div>` : "";
+}
+function renderPreview() {
+  const d = AL.draft, el = $("#ac-preview"); if (!el) return;
+  el.innerHTML = `<div class="alert-banner is-preview lv-${d.level}"><div class="alert-stripes"></div><div class="alert-shine"></div><div class="alert-inner">
+    <span class="alert-siren"><span class="siren-ring"></span>${MSGR_ICONS.alert}</span><span class="alert-tag">${ALERT_LEVELS[d.level].tag}</span>
+    <span class="alert-copy"><strong class="alert-title">${esc(d.title || "Your headline appears here")}</strong>${d.message ? `<span class="alert-msg">${esc(d.message)}</span>` : ""}</span>
+    ${d.minutes ? `<span class="alert-side"><span class="alert-timer">${d.minutes >= 60 ? d.minutes / 60 + "h 00m" : d.minutes + ":00"}</span></span>` : ""}</div></div>`;
+}
+async function sendAlert(btn) {
+  const d = AL.draft;
+  d.title = $("#ac-title").value.trim(); d.message = $("#ac-msg").value.trim();
+  if (!d.title) { $("#ac-error").textContent = "Add a headline so people know what's happening."; $("#ac-title").focus(); return; }
+  const yes = await confirmDialog({ title: "Alert everyone now?", body: `Everyone signed in to the dashboard will see <strong>${esc(d.title)}</strong> right away${d.minutes ? `, for ${esc(ALERT_DURATIONS.find(([m]) => m === d.minutes)[1])}` : " until you turn it off"}.`, confirm: "Send alert", danger: false });
+  if (!yes) return;
+  closeOverlay($("#confirm"));
+  btn.classList.add("is-loading");
+  const now = new Date();
+  const data = { active: true, id: Math.random().toString(36).slice(2, 10) + now.getTime().toString(36), level: d.level, title: d.title, message: d.message,
+    startedAt: now.toISOString(), endsAt: d.minutes ? new Date(now.getTime() + d.minutes * 60e3).toISOString() : null, by: state.user.name, byUid: state.user.uid };
+  try {
+    await state.store.setBroadcast(data);
+    AL.draft = null;
+    closeOverlay($("#modal"));
+    toast("Alert sent to everyone", "var(--s-done)");
+  } catch (e) {
+    console.error(e); btn.classList.remove("is-loading");
+    $("#ac-error").textContent = e?.code === "permission-denied" ? "Only admins can send alerts." : "The alert didn't send. Check your connection and try again.";
+  }
+}
+async function endAlert() {
+  const a = AL.cur; if (!a) return;
+  const yes = await confirmDialog({ title: "End this alert?", body: `The banner <strong>${esc(a.title)}</strong> will disappear for everyone.`, confirm: "End alert", danger: true });
+  if (!yes) return;
+  closeOverlay($("#confirm"));
+  try { await state.store.setBroadcast({ ...a, active: false, endedAt: new Date().toISOString(), endedBy: state.user.name }); toast("Alert ended", "var(--muted)"); }
+  catch (e) { console.error(e); toast("Couldn't end the alert. Try again.", "#E2632B"); }
 }

@@ -9,6 +9,9 @@ Internal tools for the team, switched from the left panel:
 - **Who to contact**: search a problem ("password reset", "payroll") and see who to reach, with one-click Teams chat, email, call and copy buttons plus what to include. Edit the people and topics in `config.js` → `contacts`.
 - **SharePoint**: opens the team site (`config.js` → `links`).
 
+- **All-employees alert** (admins only): the megaphone button in the top bar sends a full-screen alert to everyone, then keeps a large animated banner at the top of the dashboard for 5 minutes up to "until I turn it off". Admins can end it from the banner. Stored in Firestore at `broadcast/current`.
+- **Notifications**: messenger-style pop-ups with a chime, plus Windows notifications when allowed. Sent for new all-employee alerts, new requests (to admins) and completed requests (to the requester). Each person sets their preferences with the bell button. They arrive while the dashboard is open in a browser tab, even in the background.
+
 Until Firebase and Workable are connected, the dashboard runs on fictional demo data.
 
 ## Request Center

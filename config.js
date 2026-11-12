@@ -312,5 +312,13 @@ window.HRA_CONFIG = {
         response: "Same business day",
         tips: ["A short description of what you need"] }
     ]
+  },
+
+  /* 10) Microsoft 365 (test). Used by ms-test.html to sign in with Microsoft and
+         send an email through your own Outlook. Fill in after registering the app
+         in Microsoft Entra (see MICROSOFT-TEST.md). Both are safe to be public. */
+  microsoft: {
+    clientId: "",      // Application (client) ID
+    tenantId: ""       // Directory (tenant) ID
   }
 };
