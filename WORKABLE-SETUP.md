@@ -101,6 +101,12 @@ From then on it runs **every 30 minutes, Monday to Friday, about 6am to 7pm East
 
 ---
 
+## Refreshing one client right away
+
+Besides the automatic schedule, anyone with access to the repo can refresh immediately: **Actions** → **Workable sync** → **Run workflow**. Type a client name in **client** to refresh only that client (about 1 to 2 minutes), or leave it empty to refresh everything.
+
+---
+
 ## Personal column layouts
 
 Each person can choose which columns they see and their order (**Columns** button above the table). Their layout is saved to their account (`user_prefs` in Firestore), so it follows them to any computer. **Download spreadsheet** uses the columns they're viewing, and **Reset to spreadsheet** restores the standard layout.

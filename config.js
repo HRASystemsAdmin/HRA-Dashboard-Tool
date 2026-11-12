@@ -217,6 +217,7 @@ window.HRA_CONFIG = {
     fellThroughWords: ["declined offer", "offer declined", "quit", "fired", "rescinded", "no show to start", "didn't start"],
 
     lookbackDays: 365,                  // ignore candidates older than this
-    syncEveryMinutes: 30                // shown on the page; the schedule itself is in the workflow file
+    syncEveryMinutes: 30,               // shown on the page; the schedule itself is in the workflow file
+    sourcingWeeks: 8                    // weeks of sourcing numbers kept (the page lets people pick how many to show)
   }
 };

@@ -318,6 +318,7 @@ function handleUser(u) {
   renderTypes();
   renderAll();
   showView("view-app");
+  $('[data-tool="insights"]').hidden = !isAdmin;
   let savedTool = "requests";
   try { savedTool = localStorage.getItem(TOOL_KEY) || "requests"; } catch {}
   setTool(savedTool, true);
@@ -1522,6 +1523,17 @@ function bind() {
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (t.matches?.("input[type=file]")) return;
+    const ddT = t.closest("[data-dd-toggle]");
+    if (ddT) {
+      const dd = ddT.closest(".dd"), open = !dd.classList.contains("is-open");
+      closeDropdowns(dd);
+      dd.classList.toggle("is-open", open); ddT.setAttribute("aria-expanded", String(open));
+      if (open) ($(".dd-opt.is-selected", dd) || $(".dd-opt", dd))?.focus();
+      return;
+    }
+    const ddO = t.closest("[data-dd-opt]");
+    if (ddO) { const dd = ddO.closest(".dd"); closeDropdowns(); $(".dd-trigger", dd)?.focus(); ddSelect(dd.dataset.dd, ddO.dataset.ddOpt); return; }
+    if (!t.closest(".dd")) closeDropdowns();
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
     const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
     const popBtn = t.closest("[data-pop]"); if (popBtn) { PL.pop = PL.pop === popBtn.dataset.pop ? null : popBtn.dataset.pop; renderPipeline(); if (PL.pop === "am") $(".am-option.is-selected")?.focus(); return; }
@@ -1534,7 +1546,18 @@ function bind() {
     const sf = t.closest("[data-status-filter]"); if (sf) { const k = sf.dataset.statusFilter; PL.filter.has(k) ? PL.filter.delete(k) : PL.filter.add(k); renderSheet(); return; }
     if (t.closest("[data-sort-toggle]")) { PL.newest = !PL.newest; renderSheet(); return; }
     const dlw = t.closest("[data-pl-download]"); if (dlw) { downloadWorkbook(dlw); return; }
-    const prow = t.closest(".pl-row"); if (prow && !t.closest("a")) { prow.classList.toggle("is-open"); return; }
+    const nb = t.closest("[data-note]"); if (nb) { openNote(nb.dataset.note); return; }
+    const ser = t.closest("[data-series]"); if (ser) { const k = ser.dataset.series; IN.hidden.has(k) ? IN.hidden.delete(k) : IN.hidden.add(k); if (IN.hidden.size === 3) IN.hidden.delete(k); ser.classList.toggle("is-off", IN.hidden.has(k)); ser.setAttribute("aria-pressed", String(!IN.hidden.has(k))); drawTrend(); return; }
+    const dim = t.closest("[data-in-dim]"); if (dim) { IN.dim = dim.dataset.inDim; IN.showAll = false; IN.animate = true; renderInsights(); return; }
+    const pickE = t.closest("[data-in-pick]"); if (pickE) {
+      const v = pickE.dataset.inPick, k = IN.dim === "am" ? "am" : IN.dim;
+      if (k === "am") { IN.am = IN.am === v ? "" : v; IN.client = ""; IN.recruiter = ""; }
+      else if (k === "client") { IN.client = IN.client === v ? "" : v; IN.recruiter = ""; }
+      else IN.recruiter = IN.recruiter === v ? "" : v;
+      IN.animate = true; renderInsights(); return;
+    }
+    if (t.closest("[data-in-more]")) { IN.showAll = !IN.showAll; IN.animate = true; renderInsights(); return; }
+    if (t.closest("[data-in-clear]")) { IN.am = IN.client = IN.recruiter = ""; IN.animate = true; renderInsights(); return; }
     const tab = t.closest(".tab"); if (tab) { setTab(tab.dataset.tab); return; }
     const seg = t.closest(".seg-btn"); if (seg) { setSeg(seg.closest(".seg").id, seg.dataset.filter); return; }
     const meter = t.closest(".meter"); if (meter) { setSeg(meter.closest(".panel").dataset.panel + "-filter", meter.dataset.filter); return; }
@@ -1648,6 +1671,12 @@ function bind() {
   document.addEventListener("pointerdown", (e) => { const g = e.target.closest?.("[data-col-grip]"); if (g) startColDrag(e, g); });
 
   document.addEventListener("keydown", (e) => {
+    const openDd = $(".dd.is-open");
+    if (openDd && e.key === "Escape") { closeDropdowns(); $(".dd-trigger", openDd)?.focus(); e.stopPropagation(); return; }
+    if (openDd && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      const opts = $$(".dd-opt", openDd); const i = opts.indexOf(document.activeElement);
+      opts[(i + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length]?.focus(); e.preventDefault(); return;
+    }
     // Pipeline popovers: Escape closes; arrows move through the account manager list and columns
     if (PL.pop && e.key === "Escape") { const which = PL.pop; PL.pop = null; renderPipeline(); $(`[data-pop="${which}"]`)?.focus(); e.stopPropagation(); return; }
     if (PL.pop === "am" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -1660,7 +1689,6 @@ function bind() {
     if (e.key === "Escape") { const o = $$(".overlay:not([hidden])").pop(); if (o && o.id !== "confirm") closeOverlay(o); }
     if (!$("#lightbox").hidden && (e.key === "ArrowRight" || e.key === "ArrowLeft")) stepViewer(e.key === "ArrowRight" ? 1 : -1);
     if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("drop")) { e.preventDefault(); $(".drop-input", e.target).click(); }
-    if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("pl-row")) { e.preventDefault(); e.target.classList.toggle("is-open"); }
     if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("ticket")) { e.preventDefault(); openTicket(e.target.dataset.id); }
   });
 
@@ -1695,6 +1723,13 @@ function bind() {
   }
 
   addEventListener("resize", () => { $$(".tabs, .seg").forEach(moveIndicator); moveRailGlow(); });
+  // Donut: hovering a legend item or a segment highlights both
+  document.addEventListener("pointerover", (e) => {
+    const k = e.target.closest?.("[data-seg-key]")?.dataset.segKey || e.target.closest?.("[data-seg]")?.dataset.seg;
+    const d = e.target.closest?.(".donut"); if (!d) return;
+    d.classList.toggle("is-hovering", Boolean(k));
+    $$("[data-seg], [data-seg-key]", d).forEach((x) => x.classList.toggle("is-hot", (x.dataset.seg || x.dataset.segKey) === k));
+  });
   document.fonts?.ready.then(() => $$(".tabs, .seg").forEach(moveIndicator));
   setInterval(() => { if (state.user && state.loaded) renderAll(); }, 60000); // keep "x min ago" fresh
 }
@@ -1732,6 +1767,7 @@ function moveRailGlow() {
 
 function setTool(id, silent) {
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
+  if (id === "insights" && !state.isAdmin) id = "requests";
   const changed = id !== currentTool;
   currentTool = id;
   try { localStorage.setItem(TOOL_KEY, id); } catch {}
@@ -1741,11 +1777,38 @@ function setTool(id, silent) {
     m.hidden = !on;
     if (on && changed && !reduceMotion) { m.classList.remove("tool-in"); void m.offsetWidth; m.classList.add("tool-in"); }
   });
-  $(".topbar").classList.toggle("is-tool-pipeline", id === "pipeline");
+  $(".topbar").classList.toggle("is-tool-pipeline", id === "pipeline" || id === "insights");
   moveRailGlow();
   if (id === "pipeline") startPipeline();
+  if (id === "insights") { IN.animate = true; startInsights(); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
   if (!silent) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+}
+
+/* ==========================================================================
+   Dropdown (shared by the pipeline and Insights)
+   ========================================================================== */
+const CHECK = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+function ddHTML(id, { label, value, options, align = "left", wide = false }) {
+  const cur = options.find((o) => String(o.value) === String(value)) || options[0] || { label: "" };
+  return `<div class="dd dd-${align}${wide ? " dd-wide" : ""}" data-dd="${esc(id)}">
+    <button type="button" class="dd-trigger" data-dd-toggle aria-haspopup="listbox" aria-expanded="false">
+      ${label ? `<span class="dd-label">${esc(label)}</span>` : ""}<span class="dd-value">${esc(cur.label)}</span>
+      <span class="dd-chev" aria-hidden="true">${CHEV}</span>
+    </button>
+    <div class="dd-menu pop" role="listbox" aria-label="${esc(label || "Options")}">
+      ${options.map((o) => `<button type="button" role="option" class="dd-opt${String(o.value) === String(value) ? " is-selected" : ""}" data-dd-opt="${esc(String(o.value))}" aria-selected="${String(o.value) === String(value)}">
+        ${o.dot ? `<span class="dd-dot" style="background:${o.dot}"></span>` : ""}<span class="dd-opt-text"><span>${esc(o.label)}</span>${o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span><span class="dd-check">${CHECK}</span>
+      </button>`).join("")}
+    </div>
+  </div>`;
+}
+function closeDropdowns(except) {
+  $$(".dd.is-open").forEach((d) => { if (d !== except) { d.classList.remove("is-open"); $(".dd-trigger", d)?.setAttribute("aria-expanded", "false"); } });
+}
+function ddSelect(id, value) {
+  if (id === "weeks") { PL.weeks = Number(value) || 2; saveViewPrefs({ pipelineWeeks: PL.weeks }); renderSheet(); return; }
+  if (id.startsWith("in-")) { onInsightsSelect(id.slice(3), value); }
 }
 
 /* ==========================================================================
@@ -1802,11 +1865,17 @@ function normalizeCols(saved) {
 async function loadColPrefs() {
   const key = "hra_cols_" + state.user.uid;
   try { const cached = JSON.parse(localStorage.getItem(key)); if (cached) PL.cols = normalizeCols(cached); } catch {}
+  try { const v = JSON.parse(localStorage.getItem("hra_view_" + state.user.uid)); if (v?.pipelineWeeks) PL.weeks = v.pipelineWeeks; } catch {}
   if (!PL.cols) PL.cols = defaultCols();
   try {
     const prefs = await state.store.getPrefs(state.user.uid);
+    if (prefs?.pipelineWeeks) { PL.weeks = Number(prefs.pipelineWeeks) || 2; if (PL.started) renderSheet(); }
     if (prefs?.pipelineColumns) { PL.cols = normalizeCols(prefs.pipelineColumns); try { localStorage.setItem(key, JSON.stringify(PL.cols)); } catch {} if (PL.started) renderSheet(); }
   } catch (e) { console.warn("Column preferences not loaded", e); }
+}
+function saveViewPrefs(data) {
+  try { localStorage.setItem("hra_view_" + state.user.uid, JSON.stringify({ ...(JSON.parse(localStorage.getItem("hra_view_" + state.user.uid)) || {}), ...data })); } catch {}
+  state.store.setPrefs(state.user.uid, data).catch((e) => console.warn(e));
 }
 let colSaveTimer = null;
 function saveColPrefs() {
@@ -1814,7 +1883,7 @@ function saveColPrefs() {
   clearTimeout(colSaveTimer);
   colSaveTimer = setTimeout(() => state.store.setPrefs(state.user.uid, { pipelineColumns: PL.cols }).catch((e) => console.warn(e)), 600);
 }
-const PL = { pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
+const PL = { weeks: 2, pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
 
 const fmtDay = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number); return y ? `${m}/${d}/${y}` : String(iso); };
 const sameName = (a, b) => lower(a) === lower(b);
@@ -1836,7 +1905,8 @@ function startPipeline() {
   PL.store = state.store.demo ? "demo" : "firebase";
   renderPipelineLoading();
   if (PL.store === "demo") {
-    setTimeout(() => onPipelineData(demoClients(), { ok: true, lastSync: new Date(Date.now() - 11 * 60e3).toISOString(), demo: true }), 450);
+    const synced = new Date(Date.now() - 11 * 60e3).toISOString();
+    setTimeout(() => onPipelineData(demoClients().map((c) => ({ ...c, updatedAt: synced })), { ok: true, lastSync: synced, demo: true }), 450);
   } else {
     PL.unsub = state.store.watchPipeline(onPipelineData);
   }
@@ -1845,6 +1915,7 @@ function startPipeline() {
 }
 
 function stopPipeline() {
+  Object.assign(IN, { am: "", client: "", recruiter: "", showAll: false, animate: true, data: null });
   PL.unsub?.(); PL.unsub = null; clearInterval(PL.timer);
   Object.assign(PL, { pop: null, cols: null, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "" });
 }
@@ -1856,6 +1927,7 @@ function onPipelineData(clients, meta) {
   PL.ams = buildAms();
   if (!PL.am || !PL.ams.some((a) => a.name === PL.am)) PL.am = (PL.ams.find((a) => a.isMe) || PL.ams[0])?.name || null;
   renderPipeline();
+  if (currentTool === "insights") renderInsights();
 }
 
 function amObj() { return PL.ams.find((a) => a.name === PL.am); }
@@ -1864,10 +1936,21 @@ function amClients() {
   return (am?.clients || []).map((n) => PL.clients.find((c) => sameName(c.name, n)) || { name: n, candidates: [], sourcing: [], empty: true });
 }
 
+const clientDoc = (name) => PL.clients.find((c) => sameName(c.name, name));
+function freshness() {
+  const times = [PL.meta?.lastSync, clientDoc(PL.client)?.updatedAt].filter(Boolean).map((t) => new Date(t).getTime());
+  return times.length ? new Date(Math.max(...times)).toISOString() : null;
+}
+
 function renderSync() {
   const el = $("#pl-sync"); if (!el) return;
-  const m = PL.meta;
+  const m = PL.meta ? { ...PL.meta, lastSync: freshness() || PL.meta.lastSync } : null;
   el.className = "sync-chip";
+  if (m?.running) {
+    el.classList.add("is-running");
+    $("span", el).textContent = "Updating from Workable";
+    return;
+  }
   if (m?.error === "permission-denied") { el.classList.add("is-bad"); $("span", el).textContent = "No access to Workable data"; return; }
   if (!m || !m.lastSync) { el.classList.add("is-wait"); $("span", el).textContent = PL.store === "demo" ? "Demo data" : "Waiting for first sync"; return; }
   if (m.ok === false) { el.classList.add("is-bad"); $("span", el).textContent = `Last sync failed, showing ${ago(m.lastSync)} data`; el.title = m.message || ""; return; }
@@ -1985,7 +2068,7 @@ function renderSheet() {
             <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
             <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col">${esc(col.label)}</th>`).join("")}</tr></thead>
             <tbody>${shown.length ? shown.map((r, i) => `
-              <tr class="pl-row" data-status="${r.status}" style="--sw:#${PSTATUS[r.status]?.fill || "FFFFFF"};--bar:${PSTATUS[r.status]?.bar || "#A3B1C6"};--i:${Math.min(i, 18)}" tabindex="0" title="${esc(PSTATUS[r.status]?.label || "")}">
+              <tr class="pl-row" data-status="${r.status}" style="--sw:#${PSTATUS[r.status]?.fill || "FFFFFF"};--bar:${PSTATUS[r.status]?.bar || "#A3B1C6"};--i:${Math.min(i, 18)}" title="${esc(PSTATUS[r.status]?.label || "")}">
                 ${cols.map((col, ci) => cellHTML(r, col, ci === 0)).join("")}
               </tr>`).join("") : `<tr><td colspan="${cols.length}" class="pl-none">No candidates match. Clear the filters or search.</td></tr>`}
             </tbody></table></div>`}
@@ -2002,7 +2085,9 @@ function cellHTML(r, col, first) {
     const inner = col.key === "name" && r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v);
     return `<th scope="row" class="col-${col.key}">${inner}</th>`;
   }
-  if (col.key === "notes") return `<td class="col-notes"><div class="notes">${esc(v)}</div></td>`;
+  if (col.key === "notes") return v
+    ? `<td class="col-notes"><button type="button" class="note-btn" data-note="${esc(r.id)}" aria-label="Read the full notes for ${esc(r.name)}"><span class="notes">${esc(v)}</span><span class="note-open" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></span></button></td>`
+    : `<td class="col-notes"></td>`;
   if (col.key === "statusLabel") return `<td class="col-statusLabel"><span class="st-dot" style="--bar:${PSTATUS[r.status]?.bar}"></span>${esc(v)}</td>`;
   return `<td class="col-${col.key}${col.num ? " num" : ""}">${esc(v)}</td>`;
 }
@@ -2069,19 +2154,46 @@ function startColDrag(e, grip) {
   window.addEventListener("pointermove", move, { passive: false }); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
 }
 
+function openNote(id) {
+  const c = clientDoc(PL.client);
+  const r = (c?.candidates || []).find((x) => String(x.id) === String(id));
+  if (!r) return;
+  const st = PSTATUS[r.status] || PSTATUS.in_process;
+  const fields = [["Date submitted", fmtDay(r.submitted)], ["Wants to interview", r.interview], ["Hired", r.hired], ["Role hired for", r.roleHired],
+    ["Start date", /^\d{4}-/.test(r.startDate || "") ? fmtDay(r.startDate) : r.startDate], ["Recruiter", r.recruiter], ["Workable stage", r.stage]].filter(([, v]) => v);
+  $("#note-body").innerHTML = `
+    <div class="note-head">
+      <span class="note-status" style="--sw:#${st.fill};--bar:${st.bar}"><i></i>${esc(st.short)}</span>
+      <h2 id="note-title">${esc(r.name)}</h2>
+      <p class="note-sub"><span>${esc(r.role)}</span><span class="note-sep" aria-hidden="true"></span><span>${esc(c.name)}</span></p>
+    </div>
+    <div class="note-text">${esc(r.notes || "No notes yet.")}</div>
+    <dl class="note-meta">${fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>
+    ${r.link ? `<a class="btn btn-ghost note-link" href="${esc(r.link)}" target="_blank" rel="noopener">Open in Workable</a>` : ""}`;
+  openOverlay($("#note-modal"));
+  setTimeout(() => $("#note-modal .sheet-close")?.focus(), 60);
+}
+
 function emptyBlock(title, text) {
   return `<div class="empty"><div class="empty-mark">${ICONS.inbox}</div><strong>${esc(title)}</strong>${esc(text)}</div>`;
 }
 
 function sourcingHTML(c) {
-  const weeks = (c.sourcing || []).slice(0, 2);
-  if (!weeks.length) return "";
+  const all = c.sourcing || [];
+  if (!all.length) return "";
+  const n = Math.min(PL.weeks || 2, all.length);
+  const choices = [1, 2, 3, 4, 6, 8, 12, 26].filter((k) => k <= all.length);
+  if (!choices.includes(all.length)) choices.push(all.length);
+  const weeks = all.slice(0, n);
   return `<div class="sourcing">
-    <h3 class="sourcing-title">Weekly sourcing numbers</h3>
+    <div class="sourcing-head">
+      <h3 class="sourcing-title">Weekly sourcing numbers</h3>
+      ${ddHTML("weeks", { label: "Show", value: n, align: "right", options: choices.map((k) => ({ value: k, label: k === 1 ? "This week" : `Last ${k} weeks` })) })}
+    </div>
     <div class="sourcing-grid">
-      ${weeks.map((w) => `
-        <div class="sheet-card sourcing-card">
-          <div class="sourcing-week">Week ending ${esc(fmtDay(w.weekEnding))}</div>
+      ${weeks.map((w, i) => `
+        <div class="sheet-card sourcing-card" style="--i:${i}">
+          <div class="sourcing-week">Week ending ${esc(fmtDay(w.weekEnding))}<span class="sourcing-total">${(w.rows || []).reduce((t, r) => t + (Number(r.sourced) || 0), 0)} sourced</span></div>
           ${w.rows?.length ? `<div class="pl-table-wrap"><table class="pl-table pl-mini">
             <thead><tr><th scope="col">Day and role</th><th scope="col"># Sourced</th><th scope="col">Screened</th><th scope="col">Submitted</th></tr></thead>
             <tbody>${w.rows.map((r) => `<tr><th scope="row">${esc(r.day)} <span class="muted">${esc(r.role)}</span></th><td class="num">${r.sourced || ""}</td><td>${esc((r.screened || []).join(", "))}</td><td>${esc((r.submitted || []).join(", "))}</td></tr>`).join("")}</tbody>
@@ -2165,7 +2277,7 @@ async function downloadWorkbook(btn) {
         r++;
       }
 
-      for (const w of (c.sourcing || []).slice(0, 2)) {
+      for (const w of (c.sourcing || []).slice(0, PL.weeks || 2)) {
         r += 2;
         ws.mergeCells(`A${r}:E${r}`);
         ws.getCell(`A${r}`).value = "Weekly Sourcing Numbers"; ws.getCell(`A${r}`).font = { bold: true, name: "Arial" };
@@ -2204,61 +2316,446 @@ async function downloadWorkbook(btn) {
 /* ---------- demo data (fictional; real candidate data never ships with the page) ---------- */
 function demoAms() {
   return [
-    { name: "Alex Morgan",  email: ADMINS[0] || "admin@demo.local",     clients: ["Northwind Plumbing", "Summit Heating & Air", "Harbor Drain & Sewer"] },
-    { name: "Jordan Reyes", email: MEMBERS[0] || "employee@demo.local", clients: ["Bright Spark Electric", "Evergreen Climate"] },
-    { name: "Taylor Brooks", email: "taylor@demo.local",               clients: ["Lakeside Home Builders"] }
+    { name: "Alex Morgan",   email: ADMINS[0] || "admin@demo.local",     clients: ["Northwind Plumbing", "Summit Heating & Air", "Harbor Drain & Sewer"] },
+    { name: "Jordan Reyes",  email: MEMBERS[0] || "employee@demo.local", clients: ["Bright Spark Electric", "Evergreen Climate", "Copperline Plumbing"] },
+    { name: "Taylor Brooks", email: "taylor@demo.local",                 clients: ["Lakeside Home Builders", "Redwood Roofing"] },
+    { name: "Morgan Lee",    email: "morgan@demo.local",                 clients: ["Blue Ridge HVAC", "Keystone Electric"] }
   ];
 }
 
+// A year of fictional activity so the pipeline and Insights have something real-looking to show.
 function demoClients() {
-  let seed = 7;
+  let seed = 11;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
   const pick = (a) => a[Math.floor(rnd() * a.length)];
-  const first = ["Avery", "Blake", "Cameron", "Dakota", "Elliot", "Finley", "Gray", "Harper", "Jules", "Kendall", "Logan", "Morgan", "Noel", "Parker", "Quinn", "Rowan", "Sawyer", "Toby", "Val", "Wren"];
-  const last = ["Adler", "Brennan", "Castillo", "Dorsey", "Ellison", "Fairbanks", "Gallo", "Hendrix", "Ibarra", "Jansen", "Kowalski", "Lindqvist", "Marsh", "Novak", "Ortega", "Pruitt", "Quintero", "Rhodes", "Sterling", "Thorne"];
-  const recruiters = ["Sam", "Riley", "Casey", "Jordan"];
+  const first = ["Avery", "Blake", "Cameron", "Dakota", "Elliot", "Finley", "Gray", "Harper", "Jules", "Kendall", "Logan", "Morgan", "Noel", "Parker", "Quinn", "Rowan", "Sawyer", "Toby", "Val", "Wren", "Micah", "Reese", "Shay", "Tatum"];
+  const last = ["Adler", "Brennan", "Castillo", "Dorsey", "Ellison", "Fairbanks", "Gallo", "Hendrix", "Ibarra", "Jansen", "Kowalski", "Lindqvist", "Marsh", "Novak", "Ortega", "Pruitt", "Quintero", "Rhodes", "Sterling", "Thorne", "Vance", "Whitaker"];
+  // recruiter: [name, skill] (skill nudges interview and hire odds so the leaderboard has a story)
+  const R = { sam: ["Sam Carter", 1.25], riley: ["Riley Park", 1.0], casey: ["Casey Nguyen", .85], jordan: ["Jordan Ellis", 1.1], dana: ["Dana Ruiz", .95], avery: ["Avery Cole", 1.15] };
   const defs = [
-    ["Northwind Plumbing", "Austin, TX", "15 hours/wk", ["Residential Service Plumber", "CSR", "Inside Sales"]],
-    ["Summit Heating & Air", "Quincy, MA", "20 hours/wk", ["HVAC Service Technician", "HVAC Comfort Advisor"]],
-    ["Harbor Drain & Sewer", "Buffalo, NY", "4 hours/wk", ["Sewer Technician", "Dispatcher"]],
-    ["Bright Spark Electric", "Romeo, MI", "10 hours/wk", ["Journeyman Electrician", "Generator Technician"]],
-    ["Evergreen Climate", "Elgin, IL", "20 hours/wk", ["HVAC Tech", "Lead HVAC Installer"]],
-    ["Lakeside Home Builders", "Chattanooga, TN", "20 hours/wk", ["Project Manager", "Production Manager"]]
+    ["Northwind Plumbing", "Austin, TX", "15 hours/wk", ["Residential Service Plumber", "CSR", "Inside Sales"], ["sam", "riley"], 1.2],
+    ["Summit Heating & Air", "Quincy, MA", "20 hours/wk", ["HVAC Service Technician", "HVAC Comfort Advisor"], ["casey", "sam"], 1.0],
+    ["Harbor Drain & Sewer", "Buffalo, NY", "4 hours/wk", ["Sewer Technician", "Dispatcher"], ["dana"], .6],
+    ["Bright Spark Electric", "Romeo, MI", "10 hours/wk", ["Journeyman Electrician", "Generator Technician"], ["jordan", "casey"], .9],
+    ["Evergreen Climate", "Elgin, IL", "20 hours/wk", ["HVAC Tech", "Lead HVAC Installer"], ["avery", "jordan"], 1.1],
+    ["Copperline Plumbing", "Arlington Heights, IL", "30 hours/wk", ["Service Plumber", "Sewer Technician"], ["sam", "avery"], 1.3],
+    ["Lakeside Home Builders", "Chattanooga, TN", "20 hours/wk", ["Project Manager", "Production Manager"], ["riley"], .7],
+    ["Redwood Roofing", "Sacramento, CA", "10 hours/wk", ["Roofing Foreman", "Estimator"], ["dana", "riley"], .8],
+    ["Blue Ridge HVAC", "Asheville, NC", "15 hours/wk", ["HVAC Service Technician", "CSR"], ["avery", "casey"], 1.0],
+    ["Keystone Electric", "Harrisburg, PA", "15 hours/wk", ["Residential Electrician", "Service Manager"], ["jordan", "dana"], .9]
   ];
   const notesBy = {
-    passed: ["HM passed. Rejection sent.", "Pass, not enough residential experience.", "Commute too far per client.", "Client passed after phone screen."],
-    in_process: ["Submitted to HM, waiting for feedback.", "Client likes the resume, scheduling next step.", "2nd interview being scheduled.", ""],
-    no_show: ["No show to in person interview.", "No call no show to Zoom."],
-    hired: ["Offer accepted.", "Started Monday, going well."],
-    fell_through: ["Declined offer for higher pay elsewhere.", "Accepted, then no show on first day."]
+    passed: ["HM passed. Rejection sent.", "Pass, not enough residential experience.", "Commute too far per client.", "Client passed after phone screen.", "Salary expectations too high for the role."],
+    in_process: ["Submitted to HM, waiting for feedback.", "Client likes the resume, scheduling next step.", "2nd interview being scheduled.", "Background check in progress."],
+    no_show: ["No show to in person interview.", "No call no show to Zoom.", "Confirmed the day before, then didn't show."],
+    hired: ["Offer accepted. Great culture fit, the team loved him.", "Started Monday, going well.", "Offer accepted after second interview with the owner."],
+    fell_through: ["Declined offer for higher pay elsewhere.", "Accepted, then no show on first day.", "Current employer countered and he stayed."]
   };
-  const today = new Date();
-  const iso = (daysAgo) => new Date(today.getTime() - daysAgo * 86400e3).toISOString().slice(0, 10);
-  return defs.map(([name, location, hours, roles], ci) => {
-    const n = 7 + Math.floor(rnd() * 9);
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const iso = (d) => { const x = new Date(today.getTime() - d * 86400e3); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+  const md = (d) => { const x = new Date(today.getTime() - d * 86400e3); return `${x.getMonth() + 1}/${x.getDate()}`; };
+
+  return defs.map(([name, location, hours, roles, recs, volume], ci) => {
+    const n = Math.round((22 + rnd() * 20) * volume);
     const candidates = Array.from({ length: n }, (_, i) => {
-      const daysAgo = Math.floor((n - i) * (80 / n) + rnd() * 5);
-      const recent = daysAgo < 18;
-      const r = rnd();
-      const status = recent ? (r < .65 ? "in_process" : r < .85 ? "passed" : "no_show")
-        : r < .48 ? "passed" : r < .62 ? "in_process" : r < .74 ? "no_show" : r < .9 ? "hired" : "fell_through";
+      // more activity in recent months, plus a spring bump
+      const daysAgo = Math.floor(Math.pow(rnd(), 1.35) * 360);
+      const [recruiter, skill] = R[pick(recs)];
       const role = pick(roles);
-      const iv = status === "passed" && rnd() < .5 ? "N" : (status !== "in_process" || rnd() < .5) ? `Y - ${pick(["In person", "Zoom", "Phone"])} ${new Date(today - (daysAgo - 4) * 86400e3).getMonth() + 1}/${new Date(today - (daysAgo - 4) * 86400e3).getDate()}` : "";
+      const interviewed = rnd() < .5 * skill;
+      let status;
+      if (daysAgo < 14) status = rnd() < .75 ? "in_process" : "passed";
+      else if (!interviewed) status = rnd() < .9 ? "passed" : "in_process";
+      else {
+        const r = rnd() / skill;
+        status = r < .30 ? "hired" : r < .40 ? "fell_through" : r < .54 ? "no_show" : r < .64 && daysAgo < 45 ? "in_process" : "passed";
+      }
+      const ivDay = daysAgo - (2 + Math.floor(rnd() * 6));
+      const hireDay = ivDay - (5 + Math.floor(rnd() * 16));
+      const reachedInterview = interviewed && ivDay >= 0;
+      const isHire = (status === "hired" || status === "fell_through") && hireDay >= 0;
+      if ((status === "hired" || status === "fell_through") && !isHire) status = "in_process";
       return {
         id: `d${ci}-${i}`, name: `${pick(first)} ${pick(last)}`, role, submitted: iso(daysAgo),
-        interview: status === "no_show" ? iv.replace(/^Y/, "Y") || "Y" : iv,
-        hired: status === "hired" ? "Y" : status === "fell_through" ? "N - " + pick(["declined offer", "no show day 1"]) : "",
-        roleHired: status === "hired" ? role : "", startDate: status === "hired" ? iso(Math.max(daysAgo - 14, -10)) : "",
-        recruiter: pick(recruiters), notes: pick(notesBy[status]), status, link: ""
+        interview: reachedInterview ? `Y - ${pick(["In person", "Zoom", "Phone"])} ${md(ivDay)}` : status === "passed" && rnd() < .6 ? "N" : "",
+        interviewAt: reachedInterview ? iso(ivDay) : "",
+        hired: status === "hired" ? "Y" : status === "fell_through" ? "N - " + pick(["declined offer", "no show day 1", "stayed with employer"]) : "",
+        hiredAt: isHire ? iso(hireDay) : "",
+        roleHired: status === "hired" ? role : "",
+        startDate: status === "hired" ? iso(Math.max(hireDay - 14, -21)) : "",
+        recruiter, notes: pick(notesBy[status]) + (rnd() < .3 ? `\n${md(Math.max(daysAgo - 3, 0))} Follow-up: ${pick(["candidate confirmed availability", "client asked for a second interview", "sent reminder text", "references checked, all positive"])}.` : ""),
+        status, link: ""
+      };
+    }).sort((a, b) => a.submitted.localeCompare(b.submitted));
+
+    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + ((5 - weekEnd.getDay() + 7) % 7));
+    const sourcing = Array.from({ length: 8 }, (_, w) => {
+      const end = new Date(weekEnd.getTime() - w * 7 * 86400e3);
+      return {
+        weekEnding: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
+        rows: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].flatMap((day) => roles.slice(0, 2).map((role) => ({
+          day, role, sourced: Math.floor(rnd() * 14 * volume), screened: rnd() < .35 ? [`${pick(first)} ${pick(last)}`] : [], submitted: rnd() < .2 ? [`${pick(first)} ${pick(last)}`] : []
+        })))
       };
     });
-    const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + ((5 - weekEnd.getDay() + 7) % 7));
-    const sourcing = [0, 1].map((w) => ({
-      weekEnding: new Date(weekEnd.getTime() - w * 7 * 86400e3).toISOString().slice(0, 10),
-      rows: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].flatMap((day) => roles.slice(0, 2).map((role) => ({
-        day, role, sourced: Math.floor(rnd() * 14), screened: rnd() < .35 ? [`${pick(first)} ${pick(last)}`] : [], submitted: rnd() < .2 ? [`${pick(first)} ${pick(last)}`] : []
-      })))
-    }));
     return { id: `demo-${ci}`, name, location, hours, candidates, sourcing };
   });
+}
+
+/* ==========================================================================
+   Insights (admins only): a summary of the Client Pipeline data
+   ========================================================================== */
+const IN = { period: "180d", am: "", client: "", recruiter: "", dim: "recruiter", metric: "hires", hidden: new Set(), showAll: false, ro: null, animate: true };
+const PERIODS = [
+  { value: "30d", label: "Last 30 days", days: 30 }, { value: "90d", label: "Last 90 days", days: 90 },
+  { value: "180d", label: "Last 6 months", days: 182 }, { value: "365d", label: "Last 12 months", days: 365 },
+  { value: "ytd", label: "Year to date" }, { value: "all", label: "All time" }
+];
+const METRICS = {
+  hires:      { label: "Hires", short: "hires", color: "#F26A26", fmt: "int" },
+  submitted:  { label: "Submitted", short: "submitted", color: "#00377F", fmt: "int" },
+  interviews: { label: "Interviews", short: "interviews", color: "#2D6BFF", fmt: "int" },
+  rate:       { label: "Hire rate", short: "hire rate", color: "#0E9F7E", fmt: "pct" }
+};
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const parseDay = (s) => { const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1, 12); };
+const addDays = (s, n) => { const d = parseDay(s); d.setDate(d.getDate() + n); return isoDay(d); };
+const dayDiff = (a, b) => Math.round((parseDay(b) - parseDay(a)) / 86400e3);
+
+function insightRows() {
+  const amOf = (client) => PL.ams.find((a) => !a.unassigned && (a.clients || []).some((n) => sameName(n, client)))?.name || "Unassigned";
+  return PL.clients.flatMap((c) => (c.candidates || []).map((r) => ({ ...r, client: c.name, am: amOf(c.name), recruiter: (r.recruiter || "").trim() || "Not recorded" })));
+}
+function periodRange(rows) {
+  const e = isoDay(new Date());
+  const p = PERIODS.find((x) => x.value === IN.period) || PERIODS[2];
+  let s;
+  if (p.days) s = addDays(e, -(p.days - 1));
+  else if (p.value === "ytd") s = `${new Date().getFullYear()}-01-01`;
+  else s = rows.reduce((m, r) => (r.submitted && r.submitted < m ? r.submitted : m), e);
+  const len = dayDiff(s, e) + 1;
+  return { s, e, len, prev: p.value === "all" ? null : { s: addDays(s, -len), e: addDays(s, -1) } };
+}
+function filteredRows(rows) {
+  return rows.filter((r) => (!IN.am || r.am === IN.am) && (!IN.client || sameName(r.client, IN.client)) && (!IN.recruiter || r.recruiter === IN.recruiter));
+}
+const isY = (r) => /^y/i.test(r.interview || "") || Boolean(r.interviewAt);
+function metricsFor(rows, rg) {
+  const inR = (d) => Boolean(d) && d >= rg.s && d <= rg.e;
+  const cohort = rows.filter((r) => inR(r.submitted));
+  const hiresRows = rows.filter((r) => r.status === "hired" && inR(r.hiredAt || r.submitted));
+  const days = hiresRows.filter((r) => r.hiredAt && r.submitted).map((r) => dayDiff(r.submitted, r.hiredAt)).filter((d) => d >= 0);
+  return {
+    submitted: cohort.length,
+    interviews: rows.filter((r) => inR(r.interviewAt || (isY(r) ? r.submitted : ""))).length,
+    hires: hiresRows.length,
+    rate: cohort.length ? cohort.filter((r) => r.status === "hired").length / cohort.length : null,
+    days: days.length ? days.reduce((a, b) => a + b, 0) / days.length : null,
+    noShows: rows.filter((r) => r.status === "no_show" && inR(r.interviewAt || r.submitted)).length,
+    fell: rows.filter((r) => r.status === "fell_through" && inR(r.hiredAt || r.submitted)).length,
+    cohort
+  };
+}
+function bucketsFor(rg) {
+  const out = [];
+  if (rg.len <= 120) {
+    let d = parseDay(rg.s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7));     // Monday
+    while (isoDay(d) <= rg.e) {
+      const s = isoDay(d), e = addDays(s, 6);
+      out.push({ s, e, label: `${d.getMonth() + 1}/${d.getDate()}`, long: `Week of ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}` });
+      d.setDate(d.getDate() + 7);
+    }
+  } else {
+    let d = parseDay(rg.s); d.setDate(1);
+    while (isoDay(d) <= rg.e) {
+      const s = isoDay(d), end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 12);
+      out.push({ s, e: isoDay(end), label: d.toLocaleDateString(undefined, { month: "short" }), long: d.toLocaleDateString(undefined, { month: "long", year: "numeric" }) });
+      d.setMonth(d.getMonth() + 1);
+    }
+  }
+  return out;
+}
+function seriesFor(rows, buckets) {
+  return {
+    submitted: buckets.map((b) => rows.filter((r) => r.submitted >= b.s && r.submitted <= b.e).length),
+    interviews: buckets.map((b) => rows.filter((r) => { const d = r.interviewAt || (isY(r) ? r.submitted : ""); return d && d >= b.s && d <= b.e; }).length),
+    hires: buckets.map((b) => rows.filter((r) => r.status === "hired" && (r.hiredAt || r.submitted) >= b.s && (r.hiredAt || r.submitted) <= b.e).length)
+  };
+}
+const fmtMetric = (v, fmt) => v == null ? "–" : fmt === "pct" ? `${Math.round(v * 100)}%` : fmt === "days" ? `${Math.round(v)}` : String(Math.round(v));
+
+function startInsights() { startPipeline(); renderInsights(); }
+
+function onInsightsSelect(key, value) {
+  if (key === "period") IN.period = value;
+  if (key === "am") { IN.am = value; IN.client = ""; IN.recruiter = ""; }
+  if (key === "client") { IN.client = value; IN.recruiter = ""; }
+  if (key === "recruiter") IN.recruiter = value;
+  if (key === "metric") IN.metric = value;
+  IN.showAll = false; IN.animate = true;
+  renderInsights();
+}
+
+function renderInsights() {
+  const root = $("#insights-root");
+  if (!root || currentTool !== "insights") return;
+  if (!PL.clients.length) {
+    root.innerHTML = `<div class="in-hero"><div><h1 class="hero-title">Insights</h1><p class="hero-sub">Loading pipeline data</p></div></div><div class="kpis">${Array.from({ length: 6 }, () => `<div class="kpi"><span class="sk" style="width:60%"></span><span class="sk" style="width:40%;height:28px;margin-top:12px"></span></div>`).join("")}</div>`;
+    return;
+  }
+  const all = insightRows();
+  const rows = filteredRows(all);
+  const rg = periodRange(all);
+  const cur = metricsFor(rows, rg);
+  const prevRaw = rg.prev ? metricsFor(rows, rg.prev) : null;
+  const prev = prevRaw && prevRaw.submitted ? prevRaw : null;     // no comparison when the previous period has no data
+  const buckets = bucketsFor(rg);
+  const series = seriesFor(rows, buckets);
+  IN.data = { rows, rg, buckets, series, cur };
+
+  // filter options
+  const amOpts = [{ value: "", label: "All account managers" }, ...PL.ams.filter((a) => !a.unassigned).map((a) => ({ value: a.name, label: a.name, sub: `${(a.clients || []).length} clients` }))];
+  const clientPool = all.filter((r) => !IN.am || r.am === IN.am);
+  const clientOpts = [{ value: "", label: "All clients" }, ...[...new Set(clientPool.map((r) => r.client))].sort().map((n) => ({ value: n, label: n }))];
+  const recPool = clientPool.filter((r) => !IN.client || sameName(r.client, IN.client));
+  const recOpts = [{ value: "", label: "All recruiters" }, ...[...new Set(recPool.map((r) => r.recruiter))].sort().map((n) => ({ value: n, label: n }))];
+  const chips = [["am", IN.am], ["client", IN.client], ["recruiter", IN.recruiter]].filter(([, v]) => v);
+
+  const kpi = (key, label, value, prevValue, fmt, opts = {}) => {
+    let delta = "";
+    if (prevValue != null && value != null && !opts.noDelta && !(fmt !== "pct" && prevValue === 0 && value > 0)) {
+      const diff = fmt === "pct" ? (value - prevValue) * 100 : prevValue ? ((value - prevValue) / prevValue) * 100 : 0;
+      const good = opts.lowerBetter ? diff < 0 : diff > 0;
+      const flat = Math.abs(diff) < 0.5;
+      delta = `<span class="kpi-delta ${flat ? "is-flat" : good ? "is-up" : "is-down"}" title="Compared with the previous ${rg.len} days">${flat ? "No change" : `${diff > 0 ? "▲" : "▼"} ${Math.abs(Math.round(diff))}${fmt === "pct" ? " pts" : "%"}`}</span>`;
+    }
+    return `<div class="kpi" style="--accent:${opts.color || "#00377F"};--i:${opts.i || 0}">
+      <div class="kpi-top"><span class="kpi-label">${esc(label)}</span>${delta}</div>
+      <div class="kpi-value" data-count="${value == null ? "" : value}" data-fmt="${fmt}">${fmtMetric(value, fmt)}</div>
+      <div class="kpi-foot">${opts.foot || ""}</div>
+      ${opts.spark ? `<svg class="kpi-spark" data-spark="${opts.spark}" preserveAspectRatio="none" viewBox="0 0 100 30" aria-hidden="true"></svg>` : ""}
+    </div>`;
+  };
+
+  root.innerHTML = `
+    <div class="in-hero">
+      <div class="in-hero-text">
+        <h1 class="hero-title">Insights</h1>
+        <p class="hero-sub">How every client, account manager and recruiter is performing. Pick a period and drill in.</p>
+      </div>
+      <span class="sync-chip in-asof"><i></i><span>${PL.meta?.demo ? "Demo data" : "Data"} as of ${esc(ago(freshness() || new Date().toISOString()))}</span></span>
+    </div>
+
+    <div class="in-filters">
+      ${ddHTML("in-period", { label: "Period", value: IN.period, options: PERIODS })}
+      ${ddHTML("in-am", { label: "Account manager", value: IN.am, options: amOpts })}
+      ${ddHTML("in-client", { label: "Client", value: IN.client, options: clientOpts })}
+      ${ddHTML("in-recruiter", { label: "Recruiter", value: IN.recruiter, options: recOpts })}
+      ${chips.length ? `<button type="button" class="link-btn in-clear" data-in-clear>Clear filters</button>` : ""}
+    </div>
+
+    <div class="kpis">
+      ${kpi("submitted", "Submitted", cur.submitted, prev?.submitted, "int", { color: "#00377F", spark: "submitted", i: 0, foot: "candidates sent to clients" })}
+      ${kpi("interviews", "Interviews", cur.interviews, prev?.interviews, "int", { color: "#2D6BFF", spark: "interviews", i: 1, foot: "client interviews held" })}
+      ${kpi("hires", "Hires", cur.hires, prev?.hires, "int", { color: "#F26A26", spark: "hires", i: 2, foot: "offers accepted" })}
+      ${kpi("rate", "Hire rate", cur.rate, prev?.rate, "pct", { color: "#0E9F7E", i: 3, foot: "of submitted candidates hired" })}
+      ${kpi("days", "Days to hire", cur.days, prev?.days, "days", { color: "#7C5CFF", i: 4, lowerBetter: true, foot: "average, submitted to hired" })}
+      ${kpi("noShows", "No-shows", cur.noShows, prev?.noShows, "int", { color: "#E5484D", i: 5, lowerBetter: true, foot: `${cur.fell} more fell through after offer` })}
+    </div>
+
+    <div class="in-grid">
+      <section class="in-card in-trend">
+        <header class="in-card-head">
+          <div><h2>Activity over time</h2><p>${buckets.length && rg.len <= 120 ? "Weekly" : "Monthly"}, ${esc((PERIODS.find((p) => p.value === IN.period) || {}).label || "").toLowerCase()}</p></div>
+          <div class="legend-toggles">
+            ${["submitted", "interviews", "hires"].map((k) => `<button type="button" class="lt${IN.hidden.has(k) ? " is-off" : ""}" data-series="${k}" style="--c:${METRICS[k].color}" aria-pressed="${!IN.hidden.has(k)}"><i></i>${METRICS[k].label}</button>`).join("")}
+          </div>
+        </header>
+        <div class="chart" id="in-chart"></div>
+      </section>
+
+      <section class="in-card in-funnel">
+        <header class="in-card-head"><div><h2>Hiring funnel</h2><p>What happened to candidates submitted in this period</p></div></header>
+        ${funnelHTML(cur.cohort)}
+      </section>
+
+      <section class="in-card in-board">
+        <header class="in-card-head">
+          <div><h2>Leaderboard</h2><p>Select a name to filter everything by it</p></div>
+          <div class="in-board-tools">
+            <div class="seg in-seg" role="tablist" aria-label="Rank by">
+              ${[["recruiter", "Recruiters"], ["am", "Account managers"], ["client", "Clients"]].map(([k, l]) => `<button class="seg-btn${IN.dim === k ? " is-active" : ""}" data-in-dim="${k}">${l}</button>`).join("")}
+              <span class="seg-indicator" aria-hidden="true"></span>
+            </div>
+            ${ddHTML("in-metric", { label: "By", value: IN.metric, align: "right", options: Object.entries(METRICS).map(([k, m]) => ({ value: k, label: m.label, dot: m.color })) })}
+          </div>
+        </header>
+        ${leaderboardHTML(all, rg)}
+      </section>
+
+      <section class="in-card in-donut">
+        <header class="in-card-head"><div><h2>Where candidates ended up</h2><p>Current status of this period's submissions</p></div></header>
+        ${donutHTML(cur.cohort)}
+      </section>
+    </div>`;
+
+  requestAnimationFrame(() => {
+    $$(".in-seg").forEach(moveIndicator);
+    drawTrend();
+    $$("[data-spark]", root).forEach((svg) => drawSpark(svg, series[svg.dataset.spark], svg.closest(".kpi").style.getPropertyValue("--accent")));
+    if (IN.animate && !reduceMotion) {
+      root.classList.remove("in-enter"); void root.offsetWidth; root.classList.add("in-enter");
+      $$(".kpi-value[data-count]", root).forEach((el) => countUp(el));
+      requestAnimationFrame(() => {
+        $$(".funnel-bar, .ldr-bar", root).forEach((b) => b.style.setProperty("--w", b.dataset.w));
+        $$(".donut-seg", root).forEach((c) => c.style.strokeDasharray = c.dataset.dash);
+      });
+    } else {
+      $$(".funnel-bar, .ldr-bar", root).forEach((b) => b.style.setProperty("--w", b.dataset.w));
+      $$(".donut-seg", root).forEach((c) => c.style.strokeDasharray = c.dataset.dash);
+    }
+    IN.animate = false;
+  });
+
+  if (!IN.ro && window.ResizeObserver) {
+    let t = 0;
+    IN.ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => { if (currentTool === "insights") drawTrend(true); }, 120); });
+    IN.ro.observe(root);
+  }
+}
+
+function countUp(el) {
+  const to = Number(el.dataset.count), fmt = el.dataset.fmt;
+  if (!isFinite(to) || el.dataset.count === "") return;
+  const start = performance.now(), dur = 1100;
+  const step = (now) => {
+    const k = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - k, 4);
+    el.textContent = fmtMetric(to * e, fmt);
+    if (k < 1) requestAnimationFrame(step); else el.textContent = fmtMetric(to, fmt);
+  };
+  requestAnimationFrame(step);
+}
+
+function drawSpark(svg, values, color) {
+  if (!values?.length) return;
+  const max = Math.max(1, ...values), n = values.length;
+  const pts = values.map((v, i) => [n === 1 ? 50 : (i / (n - 1)) * 100, 28 - (v / max) * 24]);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join("");
+  const id = "sg" + Math.random().toString(36).slice(2, 7);
+  svg.innerHTML = `<defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".28"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${line}L100,30L0,30Z" fill="url(#${id})" class="spark-area"/><path d="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" pathLength="1" class="spark-line"/>`;
+}
+
+function niceScale(v, ticks = 4) {
+  const raw = Math.max(v, 1) / ticks;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = Math.max(1, [1, 2, 2.5, 5, 10].map((f) => f * mag).find((x) => x >= raw && (x >= 1 ? Number.isInteger(x) : true)) || 10 * mag);
+  return { step, max: step * Math.ceil(Math.max(v, 1) / step) };
+}
+
+function drawTrend(resizing) {
+  const el = $("#in-chart"); if (!el || !IN.data) return;
+  const { buckets, series } = IN.data;
+  const W = Math.max(320, el.clientWidth), H = W < 520 ? 230 : 290;
+  const P = { l: 38, r: 14, t: 16, b: 30 };
+  const iw = W - P.l - P.r, ih = H - P.t - P.b;
+  const keys = ["submitted", "interviews", "hires"].filter((k) => !IN.hidden.has(k));
+  const { step, max } = niceScale(Math.max(1, ...keys.flatMap((k) => series[k])));
+  const n = buckets.length;
+  const x = (i) => P.l + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+  const y = (v) => P.t + ih - (v / max) * ih;
+  const smooth = (vals) => vals.map((v, i) => [x(i), y(v)]).reduce((d, p, i, a) => {
+    if (!i) return `M${p[0]},${p[1]}`;
+    const [px, py] = a[i - 1], cx = (px + p[0]) / 2;
+    return d + ` C${cx},${py} ${cx},${p[1]} ${p[0]},${p[1]}`;
+  }, "");
+  const every = Math.max(1, Math.ceil(n / Math.floor(iw / 56)));
+  const grid = Array.from({ length: Math.round(max / step) + 1 }, (_, i) => i * step).map((v) => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" class="grid-line"/><text x="${P.l - 8}" y="${y(v) + 4}" class="axis-y">${v}</text>`).join("");
+  const xl = buckets.map((b, i) => (i % every === 0 || i === n - 1) ? `<text x="${x(i)}" y="${H - 8}" class="axis-x">${esc(b.label)}</text>` : "").join("");
+  const paths = keys.map((k, si) => {
+    const c = METRICS[k].color, d = smooth(series[k]);
+    const area = k === "submitted" ? `<path d="${d} L${x(n - 1)},${P.t + ih} L${x(0)},${P.t + ih} Z" fill="url(#ga-${k})" class="tr-area"/>` : "";
+    const dots = k === "hires" ? series[k].map((v, i) => v ? `<circle cx="${x(i)}" cy="${y(v)}" r="3.6" fill="#fff" stroke="${c}" stroke-width="2.2" class="tr-dot" style="--i:${i}"/>` : "").join("") : "";
+    return `${area}<path d="${d}" fill="none" stroke="${c}" stroke-width="${k === "hires" ? 3 : 2.4}" ${k === "interviews" ? 'stroke-dasharray="1 0"' : ""} stroke-linecap="round" pathLength="1" class="tr-line" style="--d:${si * 120}ms"/>${dots}`;
+  }).join("");
+  el.innerHTML = `<svg class="${resizing ? "no-anim" : ""}" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Activity over time">
+      <defs>${["submitted"].map((k) => `<linearGradient id="ga-${k}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${METRICS[k].color}" stop-opacity=".22"/><stop offset="1" stop-color="${METRICS[k].color}" stop-opacity="0"/></linearGradient>`).join("")}</defs>
+      ${grid}${xl}${paths}
+      <line class="tr-cross" x1="0" x2="0" y1="${P.t}" y2="${P.t + ih}" opacity="0"/>
+      ${buckets.map((b, i) => `<rect class="tr-hit" data-b="${i}" x="${x(i) - (n === 1 ? iw / 2 : iw / (n - 1) / 2)}" y="${P.t}" width="${n === 1 ? iw : iw / (n - 1)}" height="${ih}" fill="transparent"/>`).join("")}
+    </svg><div class="tr-tip" hidden></div>`;
+  const svg = $("svg", el), tip = $(".tr-tip", el), cross = $(".tr-cross", el);
+  const show = (i) => {
+    const b = buckets[i];
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("opacity", "1");
+    tip.innerHTML = `<strong>${esc(b.long)}</strong>${["submitted", "interviews", "hires"].map((k) => `<span><i style="background:${METRICS[k].color}"></i>${METRICS[k].label}<b>${series[k][i]}</b></span>`).join("")}`;
+    tip.hidden = false;
+    const left = Math.min(Math.max(x(i) / W * el.clientWidth - tip.offsetWidth / 2, 0), el.clientWidth - tip.offsetWidth);
+    tip.style.transform = `translate(${left}px, 0)`;
+  };
+  svg.addEventListener("pointermove", (e) => { const r = e.target.closest?.(".tr-hit"); if (r) show(Number(r.dataset.b)); });
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("opacity", "0"); });
+}
+
+function funnelHTML(cohort) {
+  const sub = cohort.length, iv = cohort.filter(isY).length, hired = cohort.filter((r) => r.status === "hired").length;
+  const steps = [["Submitted", sub, "#00377F"], ["Interviewed", iv, "#2D6BFF"], ["Hired", hired, "#F26A26"]];
+  if (!sub) return `<p class="in-empty">No candidates were submitted in this period.</p>`;
+  return `<div class="funnel">${steps.map(([l, v, c], i) => `
+    ${i ? `<div class="funnel-conv"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>${steps[i - 1][1] ? Math.round(v / steps[i - 1][1] * 100) : 0}% moved on</div>` : ""}
+    <div class="funnel-step" style="--c:${c};--i:${i}">
+      <div class="funnel-label"><span>${l}</span><strong>${v}</strong></div>
+      <div class="funnel-track"><div class="funnel-bar" data-w="${sub ? Math.max(v / sub * 100, v ? 4 : 0) : 0}%"></div></div>
+    </div>`).join("")}</div>`;
+}
+
+function donutHTML(cohort) {
+  const total = cohort.length;
+  if (!total) return `<p class="in-empty">No candidates were submitted in this period.</p>`;
+  let off = 0;
+  const segs = Object.entries(PSTATUS).map(([k, v]) => {
+    const n = cohort.filter((r) => r.status === k).length, pct = n / total * 100;
+    const color = k === "passed" ? "#A3B1C6" : v.bar;
+    const seg = { k, n, pct, color, label: v.short, off };
+    off += pct;
+    return seg;
+  });
+  return `<div class="donut">
+    <svg viewBox="0 0 180 180" class="donut-svg" role="img" aria-label="Status breakdown">
+      <circle cx="90" cy="90" r="68" class="donut-bg"/>
+      ${segs.filter((s) => s.n).map((s, i) => `<circle cx="90" cy="90" r="68" pathLength="100" class="donut-seg" data-seg="${s.k}" stroke="${s.color}" data-dash="${Math.max(s.pct - .6, .4)} ${100 - Math.max(s.pct - .6, .4)}" style="stroke-dashoffset:${25 - s.off};--i:${i}"/>`).join("")}
+      <text x="90" y="86" class="donut-total">${total}</text><text x="90" y="106" class="donut-cap">submitted</text>
+    </svg>
+    <ul class="donut-legend">${segs.map((s) => `<li data-seg-key="${s.k}"><i style="background:${s.color}"></i><span>${esc(s.label)}</span><b>${s.n}</b><em>${Math.round(s.pct)}%</em></li>`).join("")}</ul>
+  </div>`;
+}
+
+function leaderboardHTML(all, rg) {
+  const key = IN.dim;
+  const base = all.filter((r) => (!IN.am || key === "am" || r.am === IN.am) && (!IN.client || key === "client" || key === "am" || sameName(r.client, IN.client)) && (!IN.recruiter || key === "recruiter" || r.recruiter === IN.recruiter));
+  const groups = new Map();
+  base.forEach((r) => { const g = r[key]; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(r); });
+  const m = METRICS[IN.metric];
+  let list = [...groups.entries()].map(([name, rs]) => ({ name, ...metricsFor(rs, rg) }))
+    .filter((e) => e.submitted || e.hires || e.interviews);
+  list.forEach((e) => { e.value = IN.metric === "rate" ? (e.submitted >= 3 ? e.rate : null) : e[IN.metric]; });
+  list.sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || b.hires - a.hires || b.submitted - a.submitted);
+  if (!list.length) return `<p class="in-empty">Nothing to rank in this period.</p>`;
+  const top = Math.max(...list.map((e) => e.value || 0)) || 1;
+  const selected = key === "recruiter" ? IN.recruiter : key === "am" ? IN.am : IN.client;
+  const shown = IN.showAll ? list : list.slice(0, 7);
+  return `<ol class="ldr">${shown.map((e, i) => `
+      <li class="ldr-row${i < 3 && e.value ? " is-top ldr-" + (i + 1) : ""}${selected && e.name === selected ? " is-selected" : ""}" style="--i:${i};--c:${m.color}">
+        <button type="button" class="ldr-btn" data-in-pick="${esc(e.name)}" aria-pressed="${selected === e.name}" title="${selected === e.name ? "Remove filter" : `Filter by ${esc(e.name)}`}">
+          <span class="ldr-rank">${i < 3 && e.value ? `<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 2l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 15.6 6.6 18.5l1.2-6L3.3 8.3l6.1-.7z" fill="currentColor"/></svg>` : i + 1}</span>
+          <span class="ldr-avatar">${esc(initials(e.name))}</span>
+          <span class="ldr-main">
+            <span class="ldr-name">${esc(e.name)}</span>
+            <span class="ldr-stats"><span>${e.submitted} submitted</span><span>${e.interviews} interview${e.interviews === 1 ? "" : "s"}</span><span>${e.hires} hire${e.hires === 1 ? "" : "s"}</span></span>
+            <span class="ldr-track"><span class="ldr-bar" data-w="${e.value == null ? 0 : Math.max(e.value / top * 100, 2)}%"></span></span>
+          </span>
+          <span class="ldr-value">${fmtMetric(e.value, m.fmt)}<small>${e.value == null && IN.metric === "rate" ? "too few" : esc(e.value === 1 && m.fmt === "int" ? m.short.replace(/s$/, "") : m.short)}</small></span>
+        </button>
+      </li>`).join("")}</ol>
+    ${list.length > 7 ? `<button type="button" class="link-btn ldr-more" data-in-more>${IN.showAll ? "Show top 7" : `Show all ${list.length}`}</button>` : ""}`;
 }
