@@ -1588,7 +1588,18 @@ function bind() {
     const npM = t.closest("[data-np-mode]"); if (npM) { if (npM.dataset.npMode === "windows") enableWindows(); else { NP.mode = "dashboard"; saveNP(); renderNotifPanel(); refreshBell(); } return; }
     if (t.closest("[data-np-enable]")) { enableWindows(); return; }
     const ncV = t.closest("[data-nc-view]"); if (ncV) { NH.view = ncV.dataset.ncView; renderNotifPanel(); return; }
-    if (t.closest("[data-nc-readall]")) { NH.read = { all: new Date().toISOString(), ids: [] }; saveRead(); refreshBell(); renderNotifPanel(); return; }
+    if (t.closest("[data-nc-clear]")) {
+      const n = notifItems().length;
+      $("#notif-pop").hidden = true; $("#bell-btn").setAttribute("aria-expanded", "false");
+      confirmDialog({ title: "Delete all notifications?", body: `This clears all ${n} notification${n === 1 ? "" : "s"} from your list. New ones will still show up here.`, confirm: "Delete all", danger: true }).then((yes) => {
+        if (!yes) return;
+        closeOverlay($("#confirm"));
+        NH.read = { all: new Date().toISOString(), ids: [], cleared: new Date().toISOString() };
+        saveRead(); refreshBell(); toast("Notifications cleared", "var(--muted)");
+      });
+      return;
+    }
+    if (t.closest("[data-nc-readall]")) { NH.read = { ...NH.read, all: new Date().toISOString(), ids: [] }; saveRead(); refreshBell(); renderNotifPanel(); return; }
     const ncI = t.closest("[data-nc]"); if (ncI) {
       const it = notifItems().find((x) => x.id === ncI.dataset.nc);
       if (!NH.read.ids.includes(ncI.dataset.nc)) { NH.read.ids.push(ncI.dataset.nc); saveRead(); }
@@ -1633,13 +1644,14 @@ function bind() {
     const ts = t.closest("[data-tsort]"); if (ts) { const k = ts.dataset.tsort; IN.tsort = { key: k, dir: IN.tsort.key === k ? -IN.tsort.dir : (k === "name" ? 1 : -1) }; IN.animate = false; renderInsights(); return; }
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
     const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
-    const ctCat = t.closest("[data-ct-cat]"); if (ctCat) { CT.cat = ctCat.dataset.ctCat; renderContactList(); return; }
     const ctTry = t.closest("[data-ct-try]"); if (ctTry) { CT.q = ctTry.dataset.ctTry; CT.cat = ""; $("#ct-q").value = CT.q; renderContactList(); $("#ct-q").focus(); return; }
-    const ctOpen = t.closest("[data-ct-open]"); if (ctOpen) {
-      const card = ctOpen.closest(".ct-card"), idx = Number(ctOpen.dataset.ctOpen), open = !card.classList.contains("is-open");
-      $$(".ct-card.is-open").forEach((c) => { if (c !== card) { c.classList.remove("is-open"); $(".ct-more", c)?.setAttribute("aria-expanded", "false"); } });
-      card.classList.toggle("is-open", open); ctOpen.setAttribute("aria-expanded", String(open)); CT.open = open ? idx : null; return;
+    const ctP = t.closest("[data-ct-person]"); if (ctP) {
+      const idx = Number(ctP.dataset.ctPerson), card = ctP.closest(".ppl-card"), open = !card.classList.contains("is-open");
+      $$(".ppl-card.is-open").forEach((c) => { if (c !== card) { c.classList.remove("is-open"); $(".ppl-row", c).setAttribute("aria-expanded", "false"); $(".ppl-go span", c).textContent = "How to reach"; } });
+      card.classList.toggle("is-open", open); ctP.setAttribute("aria-expanded", String(open)); $(".ppl-go span", card).textContent = open ? "Hide" : "How to reach";
+      CT.open = open ? idx : null; return;
     }
+    if (t.closest("[data-ct-request]")) { setTool("requests"); setTimeout(() => openNew("general"), 250); return; }
     const ctCopy = t.closest("[data-ct-copy]"); if (ctCopy) { copyText(ctCopy.dataset.ctCopy).then((ok) => toast(ok ? `Copied ${ctCopy.dataset.ctCopy}` : "Couldn't copy the email", ok ? "var(--s-done)" : "#E2632B")); return; }
     const popBtn = t.closest("[data-pop]"); if (popBtn) { PL.pop = PL.pop === popBtn.dataset.pop ? null : popBtn.dataset.pop; renderPipeline(); if (PL.pop === "am") $(".am-option.is-selected")?.focus(); return; }
     const colT = t.closest("[data-col-toggle]"); if (colT) { const c = PL.cols.find((x) => x.key === colT.dataset.colToggle); if (c) { c.on = !c.on; saveColPrefs(); renderSheet(); $(`[data-col-toggle="${c.key}"]`)?.focus(); } return; }
@@ -3184,23 +3196,6 @@ const CT_ICONS = {
   clock: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   search: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>'
 };
-const catOf = (id) => DIR.categories.find((c) => c.id === id) || { id, label: id, icon: "help" };
-
-function contactScore(t, words) {
-  if (!words.length) return 1;
-  let score = 0;
-  const title = lower(t.topic), desc = lower(t.description), keys = (t.keywords || []).map(lower), who = lower([t.contact?.name, t.contact?.role, t.backup?.name].join(" "));
-  for (const w of words) {
-    let hit = 0;
-    if (title.includes(w)) hit = 6;
-    else if (keys.some((k) => k.includes(w) || (w.length > 3 && w.includes(k)))) hit = 5;
-    else if (desc.includes(w)) hit = 3;
-    else if (who.includes(w)) hit = 2;
-    if (!hit) return 0;                 // every word must match something
-    score += hit;
-  }
-  return score;
-}
 function hl(text, words) {
   let out = esc(text);
   for (const w of words.filter((x) => x.length > 1)) {
@@ -3208,95 +3203,107 @@ function hl(text, words) {
   }
   return out;
 }
-const mailHref = (t, person) => {
-  const first = (person.name || "").split(" ")[0];
-  const body = `Hi${first && !/support|team|admin|manager|coordinator|payroll|systems|your/i.test(person.name) ? " " + first : ""},\n\nI need help with: ${t.topic}\n\n` +
-    ((t.tips || []).length ? (t.tips.map((x) => `${x}:\n`).join("\n") + "\n") : "") + `Thank you,\n${state.user?.name || ""}`;
-  return `mailto:${encodeURIComponent(person.email).replace(/%40/g, "@")}?subject=${encodeURIComponent("Help needed: " + t.topic)}&body=${encodeURIComponent(body)}`;
-};
-const teamsHref = (t, person) => `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(person.email)}&message=${encodeURIComponent(`Hi! I need help with: ${t.topic}`)}`;
+const PEOPLE = () => DIR.people || [];
+function personScore(p, words) {
+  if (!words.length) return 1;
+  const name = lower(p.name), sum = lower([p.summary, p.role].join(" ")), handles = (p.handles || []).map(lower), keys = (p.keywords || []).map(lower);
+  let score = 0;
+  for (const w of words) {
+    let hit = 0;
+    if (name.includes(w)) hit = 6;
+    else if (handles.some((h) => h.includes(w))) hit = 5;
+    else if (keys.some((k) => k.startsWith(w) || (k.length >= 4 && w.startsWith(k)) || (w.length >= 4 && k.includes(w)))) hit = 5;
+    else if (sum.includes(w)) hit = 3;
+    if (!hit && w.length <= 2) continue;          // ignore tiny words like "my", "is"
+    if (!hit) return 0;
+    score += hit;
+  }
+  return score;
+}
+const CT_COLORS = { navy: ["#00377F", "#2D6BFF"], teal: ["#038387", "#36B6BA"], orange: ["#F26A26", "#FF9A5C"], purple: ["#7C3AED", "#A78BFA"], green: ["#0E9F7E", "#34C79E"] };
+const ARROW_R = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+const telHref = (v) => "tel:" + String(v).replace(/[^\d+]/g, "");
 
 function renderContacts() {
   const root = $("#contacts-root");
   if (!root || currentTool !== "contacts") return;
   if (!CT.built) {
     CT.built = true;
-    const hasExamples = DIR.topics.some((t) => t.example);
+    const hasExamples = PEOPLE().some((p) => p.example);
     root.innerHTML = `
       <div class="ct-hero">
         <h1 class="hero-title">Who to contact</h1>
-        <p class="hero-sub">Tell us what you need help with. We'll show you exactly who to reach and the fastest way to do it.</p>
+        <p class="hero-sub">Find the right person in seconds. Search, or pick someone below to see how to reach them.</p>
         <label class="ct-search">
           <span class="ct-search-ico">${CT_ICONS.search}</span>
           <input type="search" id="ct-q" autocomplete="off" placeholder="What do you need help with?" aria-label="What do you need help with?" />
           <kbd class="ct-kbd" aria-hidden="true">/</kbd>
           <span class="ct-search-glow" aria-hidden="true"></span>
         </label>
-        <div class="ct-try" id="ct-try"><span>Try:</span>${["password reset", "Workable", "payroll", "new hire", "phone queue"].map((x) => `<button type="button" class="ct-try-btn" data-ct-try="${esc(x)}">${esc(x)}</button>`).join("")}</div>
+        <div class="ct-try"><span>Try:</span>${["laptop", "password", "payroll", "time off", "dashboard"].map((x) => `<button type="button" class="ct-try-btn" data-ct-try="${esc(x)}">${esc(x)}</button>`).join("")}</div>
       </div>
-      ${hasExamples && state.isAdmin ? `<div class="ct-note"><strong>These are example entries.</strong> Replace them with your real people in <code>config.js</code> → <code>contacts</code>. Only admins see this note.</div>` : ""}
-      <div class="ct-cats" id="ct-cats" role="tablist" aria-label="Topics"></div>
-      <div class="ct-list" id="ct-list" aria-live="polite"></div>`;
+      ${hasExamples && state.isAdmin ? `<div class="ct-note"><strong>Some details are placeholders</strong> (marked “Example”). Update them in <code>config.js</code> → <code>contacts</code>. Only admins see this note.</div>` : ""}
+      <div class="ppl" id="ct-list" aria-live="polite"></div>
+      <p class="ppl-foot" id="ct-foot"></p>`;
   }
   renderContactList();
 }
 
 function renderContactList() {
   const words = lower(CT.q).split(/\s+/).filter(Boolean);
-  const scored = DIR.topics.map((t, i) => ({ t, i, s: contactScore(t, words) })).filter((x) => x.s > 0);
-  const counts = Object.fromEntries(DIR.categories.map((c) => [c.id, scored.filter((x) => x.t.category === c.id).length]));
-  $("#ct-cats").innerHTML = [{ id: "", label: "All topics" }, ...DIR.categories].map((c) => `
-    <button type="button" role="tab" class="ct-cat${CT.cat === c.id ? " is-active" : ""}" data-ct-cat="${esc(c.id)}" aria-selected="${CT.cat === c.id}" ${c.id && !counts[c.id] ? "disabled" : ""}>
-      ${c.id ? `<span class="ct-cat-ico">${CAT_ICONS[c.icon] || CAT_ICONS.help}</span>` : ""}${esc(c.label)}<span class="ct-cat-n">${c.id ? counts[c.id] : scored.length}</span>
-    </button>`).join("");
-  const list = scored.filter((x) => !CT.cat || x.t.category === CT.cat).sort((a, b) => b.s - a.s || a.i - b.i);
+  const list = PEOPLE().map((p, i) => ({ p, i, s: personScore(p, words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.i - b.i);
+  const am = DIR.accountManager;
+  const amScore = am ? personScore({ name: am.title, summary: am.summary, handles: [], keywords: am.keywords }, words) : 0;
+  if (words.length && list.length === 1) CT.open = list[0].i;            // one match: open it right away
   const el = $("#ct-list");
-  if (!list.length) {
-    const fallback = DIR.topics.find((t) => t.category === "general");
-    el.innerHTML = `<div class="ct-empty">
-        <div class="empty-mark">${CAT_ICONS.help}</div>
-        <strong>No exact match for “${esc(CT.q)}”</strong>
-        <p>Try a simpler word, or reach out here and they'll point you the right way.</p>
-      </div>${fallback ? contactCard(fallback, 0, [], true) : ""}`;
-    return;
-  }
-  el.innerHTML = list.map((x, k) => contactCard(x.t, k, words, false, DIR.topics.indexOf(x.t))).join("");
+  el.innerHTML = `
+    ${list.length ? list.map((x, k) => personHTML(x.p, x.i, k, words)).join("") : amScore ? "" : `<div class="ppl-none"><strong>No one matches “${esc(CT.q)}”</strong><span>Your account manager can point you in the right direction.</span></div>`}
+    ${am && (!words.length || amScore || !list.length) ? `
+      <div class="ppl-am" style="--i:${list.length}">
+        <span class="ppl-av ppl-am-av"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/></svg></span>
+        <span class="ppl-main"><span class="ppl-name">${hl(am.title, words)}</span><span class="ppl-sum">${hl(am.summary, words)}</span></span>
+        <span class="ppl-am-tag">Process, work and job details</span>
+      </div>` : ""}`;
+  $("#ct-foot").innerHTML = DIR.footer ? `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5v.7"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>${esc(DIR.footer)}` : "";
 }
 
-function contactCard(t, k, words, isFallback = false, idx = DIR.topics.indexOf(t)) {
-  const cat = catOf(t.category), p = t.contact || {}, open = CT.open === idx;
-  const btn = (href, icon, label, cls = "") => `<a class="ct-act ${cls}" href="${esc(href)}" ${href.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>${icon}<span>${label}</span></a>`;
-  return `<article class="ct-card${open ? " is-open" : ""}${isFallback ? " is-fallback" : ""}" style="--i:${Math.min(k, 12)}" data-ct-idx="${idx}">
-    ${t.example ? `<span class="ct-example" title="Example entry. Replace in config.js">Example</span>` : ""}
-    <div class="ct-top">
-      <span class="ct-ico">${CAT_ICONS[cat.icon] || CAT_ICONS.help}</span>
-      <div class="ct-topic">
-        <span class="ct-catname">${esc(cat.label)}</span>
-        <h2>${hl(t.topic, words)}</h2>
-        <p>${hl(t.description || "", words)}</p>
-      </div>
-    </div>
-    <div class="ct-person">
-      <span class="ct-avatar">${esc(initials(p.name || "?"))}</span>
-      <span class="ct-who"><span class="ct-reach">Reach out to</span><strong>${hl(p.name || "", words)}</strong>${p.role ? `<span class="ct-role">${esc(p.role)}</span>` : ""}</span>
-      ${t.response ? `<span class="ct-time" title="Usual response time">${CT_ICONS.clock}${esc(t.response)}</span>` : ""}
-    </div>
-    <div class="ct-actions">
-      ${p.teams && p.email ? btn(teamsHref(t, p), CT_ICONS.teams, "Teams chat", "is-primary") : ""}
-      ${p.email ? btn(mailHref(t, p), CT_ICONS.mail, "Email") : ""}
-      ${p.phone ? btn(`tel:${p.phone.replace(/[^\d+]/g, "")}`, CT_ICONS.phone, "Call") : ""}
-      ${p.email ? `<button type="button" class="ct-act ct-copy" data-ct-copy="${esc(p.email)}" title="Copy ${esc(p.email)}">${CT_ICONS.copy}<span>Copy email</span></button>` : ""}
-    </div>
-    ${(t.tips || []).length || t.backup ? `
-      <button type="button" class="ct-more" data-ct-open="${idx}" aria-expanded="${open}">
-        <span>Before you reach out</span><span class="ct-more-chev">${CHEV}</span>
-      </button>
-      <div class="ct-detail"><div class="ct-detail-inner">
-        ${(t.tips || []).length ? `<p class="ct-dlabel">Include this so they can help right away:</p>
-          <ol class="ct-tips">${t.tips.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : ""}
-        ${t.backup ? `<p class="ct-backup">Not available? Try <strong>${esc(t.backup.name)}</strong>${t.backup.email ? ` at <a href="mailto:${esc(t.backup.email)}">${esc(t.backup.email)}</a>` : ""}.</p>` : ""}
-      </div></div>` : ""}
+function personHTML(p, idx, k, words) {
+  const open = CT.open === idx;
+  const [c1, c2] = CT_COLORS[p.color] || CT_COLORS.navy;
+  return `<article class="ppl-card${open ? " is-open" : ""}" style="--i:${k};--c1:${c1};--c2:${c2}" data-person="${idx}">
+    <button type="button" class="ppl-row" data-ct-person="${idx}" aria-expanded="${open}">
+      <span class="ppl-av">${esc(initials(p.name))}</span>
+      <span class="ppl-main">
+        <span class="ppl-name">${hl(p.name, words)}${p.example ? `<span class="ct-example ppl-ex">Example</span>` : ""}</span>
+        <span class="ppl-sum">${hl(p.summary || "", words)}</span>
+        <span class="ppl-tags">${(p.handles || []).map((h) => `<span>${hl(h, words)}</span>`).join("")}</span>
+      </span>
+      <span class="ppl-go"><span>${open ? "Hide" : "How to reach"}</span>${CHEV}</span>
+    </button>
+    <div class="ppl-detail"><div class="ppl-detail-inner">
+      <div class="ppl-how">${(p.how || []).map((h) => howHTML(h, p)).join("")}</div>
+    </div></div>
   </article>`;
+}
+
+function howHTML(h, p) {
+  if (h.type === "request") return `<div class="how how-primary">
+      <span class="how-ico">${MSGR_ICONS.ticket}</span>
+      <span class="how-text"><strong>${esc(h.label || "Send a request")}</strong><small>${esc(h.detail || "Opens a request in the Request Center")}</small></span>
+      <button type="button" class="how-btn" data-ct-request>Start request ${ARROW_R}</button></div>`;
+  if (h.type === "link") return `<div class="how how-primary">
+      <span class="how-ico"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></span>
+      <span class="how-text"><strong>${esc(h.label || "Open website")}</strong><small>${esc(h.detail || h.url.replace(/^https?:\/\//, ""))}</small></span>
+      <a class="how-btn" href="${esc(h.url)}" target="_blank" rel="noopener">Open ${ARROW_R}</a></div>`;
+  if (h.type === "phone") return `<div class="how">
+      <span class="how-ico">${CT_ICONS.phone}</span>
+      <span class="how-text"><strong>Call on Zoom</strong><small>${esc(h.value)}</small></span>
+      <span class="how-acts"><a class="how-btn" href="${esc(telHref(h.value))}">Call</a><button type="button" class="how-copy" data-ct-copy="${esc(h.value)}" aria-label="Copy number">${CT_ICONS.copy}</button></span></div>`;
+  if (h.type === "email") return `<div class="how">
+      <span class="how-ico">${CT_ICONS.mail}</span>
+      <span class="how-text"><strong>Email</strong><small>${esc(h.value)}</small></span>
+      <span class="how-acts"><a class="how-btn" href="mailto:${esc(h.value)}?subject=${encodeURIComponent("Question from " + (state.user?.name || "a teammate"))}">Email</a><button type="button" class="how-copy" data-ct-copy="${esc(h.value)}" aria-label="Copy email">${CT_ICONS.copy}</button></span></div>`;
+  return "";
 }
 
 /* ==========================================================================
@@ -3313,14 +3320,24 @@ const desktopState = () => !desktopSupported() ? "unsupported" : Notification.pe
 let audioCtx = null;
 function unlockAudio() { if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (audioCtx?.state === "suspended") audioCtx.resume().catch(() => {}); }
 addEventListener("pointerdown", unlockAudio, { once: false, passive: true });
+let chimeOut = null;
+function chimeBus() {
+  if (chimeOut) return chimeOut;
+  const comp = audioCtx.createDynamicsCompressor();          // keeps overlapping notes from getting harsh
+  comp.threshold.value = -10; comp.knee.value = 8; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.2;
+  const master = audioCtx.createGain(); master.gain.value = 1.6; // about 60% louder than before
+  master.connect(comp).connect(audioCtx.destination);
+  return (chimeOut = master);
+}
 function chime(kind) {
   if (!NP.sound || !audioCtx) return;
+  const bus = chimeBus();
   const t0 = audioCtx.currentTime + 0.02;
   const tone = (freq, at, dur, vol = 0.16, type = "sine") => {
     const o = audioCtx.createOscillator(), g = audioCtx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t0 + at);
     g.gain.setValueAtTime(0.0001, t0 + at); g.gain.exponentialRampToValueAtTime(vol, t0 + at + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
-    o.connect(g).connect(audioCtx.destination); o.start(t0 + at); o.stop(t0 + at + dur + 0.05);
+    o.connect(g).connect(bus); o.start(t0 + at); o.stop(t0 + at + dur + 0.05);
   };
   if (kind === "party") { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, i * .09, .3, .13)); tone(1568, .5, .5, .1); tone(2093, .62, .45, .07); return; }
   if (kind === "alert") { [0, .22, .44].forEach((d) => { tone(880, d, .16, .2, "triangle"); tone(660, d + .1, .14, .16, "triangle"); }); }
@@ -3400,11 +3417,11 @@ function notify(opts) {
 }
 
 /* ---- notification center (history) ---- */
-const NH = { alerts: [], unsubLog: null, read: { all: null, ids: [] }, view: "list" };
+const NH = { alerts: [], unsubLog: null, read: { all: null, ids: [], cleared: null }, view: "list" };
 const readKey = () => "hra_notif_read_" + (state.user?.uid || "");
 function loadRead() {
-  try { const r = JSON.parse(localStorage.getItem(readKey())); if (r) NH.read = { all: r.all || null, ids: r.ids || [] }; } catch {}
-  state.store.getPrefs(state.user.uid).then((p) => { if (p?.notifRead) { NH.read = { all: p.notifRead.all || null, ids: p.notifRead.ids || [] }; refreshBell(); } }).catch(() => {});
+  try { const r = JSON.parse(localStorage.getItem(readKey())); if (r) NH.read = { all: r.all || null, ids: r.ids || [], cleared: r.cleared || null }; } catch {}
+  state.store.getPrefs(state.user.uid).then((p) => { if (p?.notifRead) { NH.read = { all: p.notifRead.all || null, ids: p.notifRead.ids || [], cleared: p.notifRead.cleared || null }; refreshBell(); } }).catch(() => {});
 }
 function saveRead() {
   NH.read.ids = NH.read.ids.slice(-150);
@@ -3430,7 +3447,7 @@ function notifItems() {
         items.push({ id: "c:" + t.id + ":" + done.at, group: "more", kind: "done", title: "Your request was completed", text: `${ref(t.id)}: ${t.title}`, who: done.by, at: done.at, open: () => { setTool("requests"); openTicket(t.id); } });
     }
   }
-  return items.sort((x, y) => y.at.localeCompare(x.at)).slice(0, 60);
+  return items.filter((x) => !NH.read.cleared || x.at > NH.read.cleared).sort((x, y) => y.at.localeCompare(x.at)).slice(0, 60);
 }
 const isUnread = (it) => !(NH.read.all && it.at <= NH.read.all) && !NH.read.ids.includes(it.id);
 
@@ -3466,6 +3483,7 @@ function notifPanelHTML() {
   return `<div class="nc-head"><strong>Notifications</strong>
       <span class="nc-tools">
         ${unread ? `<button type="button" class="link-btn" data-nc-readall>Mark all as read</button>` : ""}
+        ${items.length ? `<button type="button" class="icon-btn nc-gear nc-clear" data-nc-clear aria-label="Delete all notifications" title="Delete all notifications"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg></button>` : ""}
         <button type="button" class="icon-btn nc-gear" data-nc-view="settings" aria-label="Notification settings" title="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
       </span></div>
     ${ask ? `<div class="nc-ask"><span>${MSGR_ICONS.info}</span><span><strong>Get notifications in Windows</strong><small>See alerts and requests even when you're in another app.</small></span><button type="button" class="btn btn-primary btn-mini" data-np-enable>Turn on</button></div>` : ""}
@@ -3547,7 +3565,7 @@ function startAlerts() {
   renderNotifPanel();
 }
 function stopAlerts() {
-  NH.unsubLog?.(); NH.unsubLog = null; NH.alerts = []; NH.read = { all: null, ids: [] }; NH.view = "list";
+  NH.unsubLog?.(); NH.unsubLog = null; NH.alerts = []; NH.read = { all: null, ids: [], cleared: null }; NH.view = "list";
   AL.unsub?.(); AL.unsub = null; clearInterval(AL.tick); AL.cur = null; AL.seen = null;
   $("#alert-root").innerHTML = ""; document.body.classList.remove("has-alert");
 }

@@ -226,99 +226,50 @@ window.HRA_CONFIG = {
     sharepoint: "https://hunterrecruitmentnet.sharepoint.com/sites/TeamSite"
   },
 
-  /* 9) "Who to contact" directory. Each topic says who to reach for it.
-        Replace the examples with your real people (remove example: true when done).
-        contact fields: name, role, email, phone (optional), teams (true = show a Teams chat button)
-        backup: an optional second person. tips: what to include when reaching out.
-        category: one of the ids in categories. keywords: other words people might search for. */
+  /* 9) "Who to contact" directory. Each person lists what they help with and how to reach them.
+        how: list of contact options, any of:
+          { type: "request" }                          opens a General help request in the Request Center
+          { type: "link", label, url }                 opens a website (e.g. a ticket portal)
+          { type: "phone", value }                     Zoom Phone number (call + copy)
+          { type: "email", value }                     email address (email + copy)
+        keywords: extra words people might search for. example: true marks placeholder details. */
   contacts: {
-    categories: [
-      { id: "systems",  label: "Systems and tech",    icon: "chip" },
-      { id: "access",   label: "Logins and access",   icon: "key" },
-      { id: "people",   label: "HR and payroll",      icon: "people" },
-      { id: "clients",  label: "Clients and recruiting", icon: "brief" },
-      { id: "general",  label: "Everything else",     icon: "help" }
+    people: [
+      { name: "Juan Rochin", role: "Systems", color: "navy",
+        summary: "Systems, how things work, connections between tools, and our systems overall.",
+        handles: ["Systems", "Functionality", "Connections", "Dashboard and tools"],
+        keywords: ["system", "systems", "dashboard", "workable", "zoom", "integration", "connection", "automation", "not working", "feature", "tool", "sharepoint", "request center", "pipeline"],
+        how: [{ type: "request", label: "Send a request", detail: "Opens a General help request. Juan gets it right away." }] },
+
+      { name: "Vector Choice", role: "IT support partner", color: "teal",
+        summary: "Everything IT: account problems, passwords, laptops and equipment.",
+        handles: ["All IT", "Accounts and passwords", "Laptops and equipment"],
+        keywords: ["it", "laptop", "computer", "password", "locked out", "login", "account", "equipment", "printer", "headset", "monitor", "outlook", "email", "teams", "mfa", "vpn", "wifi", "internet", "software"],
+        how: [{ type: "link", label: "Open an IT ticket", url: "https://support.vectorchoice.com/app", detail: "Vector Choice's support portal" }] },
+
+      { name: "Kristin Cooney", role: "Company questions", color: "orange", example: true,
+        summary: "All questions about the company.",
+        handles: ["Company questions", "Policies", "General"],
+        keywords: ["company", "policy", "policies", "holiday", "office", "question", "general"],
+        how: [{ type: "phone", value: "(480) 555-0142" }, { type: "email", value: "kristin.cooney@hunterrecruitment.net" }] },
+
+      { name: "Jane Doe", role: "Human resources", color: "purple", example: true,
+        summary: "HR questions.",
+        handles: ["HR", "Time off", "Benefits"],
+        keywords: ["hr", "human resources", "benefits", "pto", "time off", "vacation", "sick", "leave", "onboarding", "handbook"],
+        how: [{ type: "phone", value: "(480) 555-0167" }, { type: "email", value: "jane.doe@hunterrecruitment.net" }] },
+
+      { name: "Selina Kyle", role: "Accounts and payroll", color: "green", example: true,
+        summary: "Questions about your account or payroll.",
+        handles: ["Payroll", "Paychecks", "Account questions"],
+        keywords: ["payroll", "pay", "paycheck", "salary", "w2", "w-2", "tax", "direct deposit", "invoice", "account", "billing", "commission"],
+        how: [{ type: "phone", value: "(480) 555-0189" }, { type: "email", value: "selina.kyle@hunterrecruitment.net" }] }
     ],
-    topics: [
-      { example: true, category: "access", topic: "I can't log in or I'm locked out",
-        description: "Password resets, locked accounts and two-step verification codes that don't arrive.",
-        keywords: ["password", "reset", "locked out", "login", "sign in", "mfa", "2fa", "authenticator", "verification code"],
-        contact: { name: "IT Support", role: "Systems administrator", email: "it@hunterrecruitment.net", phone: "", teams: true },
-        response: "Same business day",
-        tips: ["Which system you're trying to open", "The exact error message (a screenshot helps)", "When it started"] },
-
-      { example: true, category: "access", topic: "I need access to a system or shared mailbox",
-        description: "New access to Workable, Zoom, shared mailboxes, Teams channels or SharePoint folders.",
-        keywords: ["access", "permission", "shared mailbox", "workable", "zoom", "sharepoint", "teams", "license"],
-        contact: { name: "IT Support", role: "Systems administrator", email: "it@hunterrecruitment.net", teams: true },
-        response: "1 to 2 business days",
-        tips: ["What you need access to", "Why you need it", "Your manager's approval, if needed"] },
-
-      { example: true, category: "systems", topic: "Something isn't working (computer, email, Teams)",
-        description: "Errors, crashes, slow computer, Outlook or Teams problems, printers and headsets.",
-        keywords: ["error", "broken", "crash", "slow", "outlook", "email", "teams", "laptop", "computer", "printer", "headset", "audio", "camera"],
-        contact: { name: "IT Support", role: "Systems administrator", email: "it@hunterrecruitment.net", teams: true },
-        backup: { name: "Operations Manager", email: "operations@hunterrecruitment.net" },
-        response: "Same business day",
-        tips: ["What you were doing when it happened", "A screenshot of the problem", "Whether you already restarted"] },
-
-      { example: true, category: "systems", topic: "Workable problems",
-        description: "Pipelines, job posts, candidate stages, email templates or integrations not behaving.",
-        keywords: ["workable", "ats", "pipeline", "job post", "candidate", "stage", "template", "jeanie", "classet", "indeed"],
-        contact: { name: "Workable Admin", role: "ATS administrator", email: "workable@hunterrecruitment.net", teams: true },
-        response: "Same business day",
-        tips: ["The job or candidate involved", "What you expected vs. what happened"] },
-
-      { example: true, category: "systems", topic: "Phone, Zoom or call queue issues",
-        description: "Calls not ringing, call queues, voicemail, Zoom meetings or recordings.",
-        keywords: ["phone", "zoom", "call", "queue", "voicemail", "recording", "dial", "extension"],
-        contact: { name: "Phone Systems", role: "Zoom administrator", email: "phones@hunterrecruitment.net", teams: true },
-        response: "Same business day",
-        tips: ["Your extension or queue name", "Time the issue happened"] },
-
-      { example: true, category: "people", topic: "Payroll, time off or benefits",
-        description: "Paychecks, time off requests, benefits enrollment and tax forms.",
-        keywords: ["payroll", "pay", "paycheck", "pto", "time off", "vacation", "sick", "benefits", "w2", "w-2", "tax", "401k"],
-        contact: { name: "HR and Payroll", role: "People team", email: "hr@hunterrecruitment.net", teams: true },
-        response: "1 to 2 business days",
-        tips: ["Pay period or dates involved", "Keep personal details out of group chats"] },
-
-      { example: true, category: "people", topic: "Onboarding a new team member",
-        description: "Accounts, equipment and first-day setup for someone joining the team.",
-        keywords: ["new hire", "onboarding", "new employee", "start date", "laptop", "equipment", "setup"],
-        contact: { name: "Operations Manager", role: "Operations", email: "operations@hunterrecruitment.net", teams: true },
-        response: "At least 1 week before the start date",
-        tips: ["Use the New employee request in the Request Center for the details"] },
-
-      { example: true, category: "clients", topic: "Client questions or escalations",
-        description: "Contract questions, unhappy clients, new roles or pausing an account.",
-        keywords: ["client", "contract", "escalation", "complaint", "pause", "new role", "account manager"],
-        contact: { name: "Your Account Manager", role: "Account management", email: "accounts@hunterrecruitment.net", teams: true },
-        backup: { name: "Director of Recruiting", email: "director@hunterrecruitment.net" },
-        response: "Same business day",
-        tips: ["The client name", "What happened and what the client asked for"] },
-
-      { example: true, category: "clients", topic: "Candidate background checks or MVRs",
-        description: "Ordering, status and results of background checks and driving records.",
-        keywords: ["background", "check", "mvr", "driving record", "drug test", "screening", "references"],
-        contact: { name: "Recruiting Coordinator", role: "Recruiting operations", email: "coordinator@hunterrecruitment.net", teams: true },
-        response: "1 business day",
-        tips: ["Candidate name and client", "Which check you need"] },
-
-      { example: true, category: "general", topic: "Not sure who to ask",
-        description: "Anything that isn't listed here. We'll point you to the right person.",
-        keywords: ["help", "question", "other", "not sure", "don't know", "anything"],
-        contact: { name: "Operations Manager", role: "Operations", email: "operations@hunterrecruitment.net", teams: true },
-        response: "Same business day",
-        tips: ["A short description of what you need"] }
-    ]
-  },
-
-  /* 10) Microsoft 365 (test). Used by ms-test.html to sign in with Microsoft and
-         send an email through your own Outlook. Fill in after registering the app
-         in Microsoft Entra (see MICROSOFT-TEST.md). Both are safe to be public. */
-  microsoft: {
-    clientId: "",      // Application (client) ID
-    tenantId: ""       // Directory (tenant) ID
+    accountManager: {
+      title: "Your account manager",
+      summary: "Anything about your process, your work, or the details of your job.",
+      keywords: ["process", "job", "work", "client", "candidate", "schedule", "task", "how do i", "role", "duties", "account manager"]
+    },
+    footer: "Still unsure? Contact your account manager."
   }
 };
