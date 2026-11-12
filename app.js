@@ -17,6 +17,9 @@ const STATUS = {
 };
 
 const ICONS = {
+  bot:    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="3.5"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16h5"/><circle cx="12" cy="3.5" r="1"/><path d="M2 12v3M22 12v3"/></svg>',
+  coins:  '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="9" cy="7" rx="6" ry="2.6"/><path d="M3 7v4c0 1.4 2.7 2.6 6 2.6s6-1.2 6-2.6V7"/><path d="M3 11v4c0 1.4 2.7 2.6 6 2.6 1 0 2-.1 2.8-.3"/><circle cx="17" cy="16" r="4.5"/><path d="M17 14v4M15.5 16h3"/></svg>',
+  ledger: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M12 6.5v5M10.3 7.8c0-.7.8-1.2 1.7-1.2s1.7.4 1.7 1.1c0 1.6-3.4.9-3.4 2.4 0 .7.8 1.2 1.7 1.2s1.7-.5 1.7-1.2"/></svg>',
   phone: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/><path d="M15 3.5a6 6 0 0 1 5.5 5.5"/><path d="M15 7a2.5 2.5 0 0 1 2 2"/></svg>',
   queue: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h10M4 18h7"/><circle cx="18" cy="6" r="1.4"/><circle cx="18" cy="12" r="1.4"/><path d="M18 16v5M15.5 18.5h5"/></svg>',
   userplus: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0 1 12.5-4.3"/><path d="M19 14v6M16 17h6"/></svg>',
@@ -1646,10 +1649,9 @@ function bind() {
     const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
     const ctTry = t.closest("[data-ct-try]"); if (ctTry) { CT.q = ctTry.dataset.ctTry; CT.cat = ""; $("#ct-q").value = CT.q; renderContactList(); $("#ct-q").focus(); return; }
     const ctP = t.closest("[data-ct-person]"); if (ctP) {
-      const idx = Number(ctP.dataset.ctPerson), card = ctP.closest(".ppl-card"), open = !card.classList.contains("is-open");
-      $$(".ppl-card.is-open").forEach((c) => { if (c !== card) { c.classList.remove("is-open"); $(".ppl-row", c).setAttribute("aria-expanded", "false"); $(".ppl-go span", c).textContent = "How to reach"; } });
-      card.classList.toggle("is-open", open); ctP.setAttribute("aria-expanded", String(open)); $(".ppl-go span", card).textContent = open ? "Hide" : "How to reach";
-      CT.open = open ? idx : null; return;
+      const card = ctP.closest(".fc"), on = !card.classList.contains("is-flipped");
+      if (on) $$(".fc.is-flipped").forEach((c) => { if (c !== card) flipCard(c, false); });
+      flipCard(card, on); return;
     }
     if (t.closest("[data-ct-request]")) { setTool("requests"); setTimeout(() => openNew("general"), 250); return; }
     const ctCopy = t.closest("[data-ct-copy]"); if (ctCopy) { copyText(ctCopy.dataset.ctCopy).then((ok) => toast(ok ? `Copied ${ctCopy.dataset.ctCopy}` : "Couldn't copy the email", ok ? "var(--s-done)" : "#E2632B")); return; }
@@ -1845,6 +1847,11 @@ function bind() {
       raf = requestAnimationFrame(() => {
         amb.style.setProperty("--cx", e.clientX + "px");
         amb.style.setProperty("--cy", e.clientY + "px");
+        const fc = e.target.closest?.(".fc:not(.fc-am)");
+        $$(".fc.is-tilting").forEach((c) => { if (c !== fc) { c.classList.remove("is-tilting"); c.style.removeProperty("--rx"); c.style.removeProperty("--ry"); } });
+        if (fc) { const r = fc.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
+          fc.classList.add("is-tilting"); fc.style.setProperty("--ry", (x * 10).toFixed(2) + "deg"); fc.style.setProperty("--rx", (-y * 8).toFixed(2) + "deg");
+          fc.style.setProperty("--mx", (x + .5) * 100 + "%"); fc.style.setProperty("--my", (y + .5) * 100 + "%"); }
         const tile = e.target.closest?.(".type-tile, .ct-card");
         if (tile) {
           const r = tile.getBoundingClientRect();
@@ -3243,7 +3250,7 @@ function renderContacts() {
         <div class="ct-try"><span>Try:</span>${["laptop", "password", "payroll", "time off", "dashboard"].map((x) => `<button type="button" class="ct-try-btn" data-ct-try="${esc(x)}">${esc(x)}</button>`).join("")}</div>
       </div>
       ${hasExamples && state.isAdmin ? `<div class="ct-note"><strong>Some details are placeholders</strong> (marked “Example”). Update them in <code>config.js</code> → <code>contacts</code>. Only admins see this note.</div>` : ""}
-      <div class="ppl" id="ct-list" aria-live="polite"></div>
+      <div class="fc-grid" id="ct-list" aria-live="polite"></div>
       <p class="ppl-foot" id="ct-foot"></p>`;
   }
   renderContactList();
@@ -3254,36 +3261,62 @@ function renderContactList() {
   const list = PEOPLE().map((p, i) => ({ p, i, s: personScore(p, words) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.i - b.i);
   const am = DIR.accountManager;
   const amScore = am ? personScore({ name: am.title, summary: am.summary, handles: [], keywords: am.keywords }, words) : 0;
-  if (words.length && list.length === 1) CT.open = list[0].i;            // one match: open it right away
+  const autoFlip = words.length && list.length === 1 ? list[0].i : null;   // one match: flip it automatically
+  if (autoFlip === null && words.length) CT.open = null;
   const el = $("#ct-list");
   el.innerHTML = `
     ${list.length ? list.map((x, k) => personHTML(x.p, x.i, k, words)).join("") : amScore ? "" : `<div class="ppl-none"><strong>No one matches “${esc(CT.q)}”</strong><span>Your account manager can point you in the right direction.</span></div>`}
     ${am && (!words.length || amScore || !list.length) ? `
-      <div class="ppl-am" style="--i:${list.length}">
-        <span class="ppl-av ppl-am-av"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/></svg></span>
-        <span class="ppl-main"><span class="ppl-name">${hl(am.title, words)}</span><span class="ppl-sum">${hl(am.summary, words)}</span></span>
-        <span class="ppl-am-tag">Process, work and job details</span>
-      </div>` : ""}`;
+      <article class="fc fc-am" style="--i:${list.length};--c1:#F26A26;--c2:#FF9A5C">
+        <div class="fc-inner"><div class="fc-face fc-front fc-static">
+          <span class="fc-shine" aria-hidden="true"></span>
+          <span class="fc-av"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/></svg></span>
+          <span class="fc-name">${hl(am.title, words)}</span>
+          <span class="fc-sum">${hl(am.summary, words)}</span>
+          <span class="fc-tags"><span>Process</span><span>Your work</span><span>Job details</span></span>
+          <span class="fc-hint fc-hint-am">Reach out to them directly</span>
+        </div></div>
+      </article>` : ""}`;
+  if (autoFlip !== null && CT.open !== autoFlip) { CT.open = null; setTimeout(() => { const c = $(`.fc[data-person="${autoFlip}"]`); if (c && !c.classList.contains("is-flipped")) flipCard(c, true); }, 380); }
   $("#ct-foot").innerHTML = DIR.footer ? `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5v.7"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>${esc(DIR.footer)}` : "";
 }
 
+const FLIP_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>';
 function personHTML(p, idx, k, words) {
   const open = CT.open === idx;
   const [c1, c2] = CT_COLORS[p.color] || CT_COLORS.navy;
-  return `<article class="ppl-card${open ? " is-open" : ""}" style="--i:${k};--c1:${c1};--c2:${c2}" data-person="${idx}">
-    <button type="button" class="ppl-row" data-ct-person="${idx}" aria-expanded="${open}">
-      <span class="ppl-av">${esc(initials(p.name))}</span>
-      <span class="ppl-main">
-        <span class="ppl-name">${hl(p.name, words)}${p.example ? `<span class="ct-example ppl-ex">Example</span>` : ""}</span>
-        <span class="ppl-sum">${hl(p.summary || "", words)}</span>
-        <span class="ppl-tags">${(p.handles || []).map((h) => `<span>${hl(h, words)}</span>`).join("")}</span>
-      </span>
-      <span class="ppl-go"><span>${open ? "Hide" : "How to reach"}</span>${CHEV}</span>
-    </button>
-    <div class="ppl-detail"><div class="ppl-detail-inner">
-      <div class="ppl-how">${(p.how || []).map((h) => howHTML(h, p)).join("")}</div>
-    </div></div>
+  return `<article class="fc${open ? " is-flipped" : ""}" style="--i:${k};--c1:${c1};--c2:${c2}" data-person="${idx}">
+    <div class="fc-inner">
+      <button type="button" class="fc-face fc-front" data-ct-person="${idx}" aria-label="${esc(p.name)}: see how to reach" ${open ? "inert" : ""}>
+        <span class="fc-shine" aria-hidden="true"></span>
+        ${p.example ? `<span class="ct-example fc-ex">Example</span>` : ""}
+        <span class="fc-av">${esc(initials(p.name))}</span>
+        <span class="fc-name">${hl(p.name, words)}</span>
+        <span class="fc-sum">${hl(p.summary || "", words)}</span>
+        <span class="fc-tags">${(p.handles || []).map((h) => `<span>${hl(h, words)}</span>`).join("")}</span>
+        <span class="fc-hint">${FLIP_ICON}How to reach</span>
+      </button>
+      <div class="fc-face fc-back" ${open ? "" : "inert"} role="group" aria-label="How to reach ${esc(p.name)}">
+        <span class="fc-shine" aria-hidden="true"></span>
+        <div class="fc-back-head">
+          <span class="fc-av fc-av-sm">${esc(initials(p.name))}</span>
+          <span class="fc-back-title"><strong>${esc(p.name)}</strong><small>How to reach</small></span>
+          <button type="button" class="fc-flipback" data-ct-person="${idx}" aria-label="Flip back" title="Flip back">${FLIP_ICON}</button>
+        </div>
+        <div class="fc-how">${(p.how || []).map((h) => howHTML(h, p)).join("")}</div>
+      </div>
+    </div>
   </article>`;
+}
+
+function flipCard(card, on) {
+  const front = $(".fc-front", card), back = $(".fc-back", card);
+  card.classList.toggle("is-flipped", on);
+  card.classList.remove("is-flipping"); void card.offsetWidth; card.classList.add("is-flipping");
+  setTimeout(() => card.classList.remove("is-flipping"), 800);
+  if (on) { front.setAttribute("inert", ""); back.removeAttribute("inert"); setTimeout(() => $(".how-btn, .fc-flipback", back)?.focus({ preventScroll: true }), 420); }
+  else { back.setAttribute("inert", ""); front.removeAttribute("inert"); setTimeout(() => front.focus({ preventScroll: true }), 420); }
+  CT.open = on ? Number(card.dataset.person) : (CT.open === Number(card.dataset.person) ? null : CT.open);
 }
 
 function howHTML(h, p) {

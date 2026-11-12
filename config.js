@@ -3,6 +3,13 @@
    Edit this file only. Everything else reads from it.
    ========================================================================== */
 
+// The General help form, reused by request types that only need categorizing.
+const GENERAL_FIELDS = [
+  { name: "subject",     label: "What do you need help with", type: "text",     required: true,  placeholder: "One line summary" },
+  { name: "description", label: "Details",                    type: "textarea", required: true,  placeholder: "What's happening, what you've tried, any deadlines" },
+  { name: "priority",    label: "How urgent is it",           type: "select",   required: true,  options: ["Normal", "Soon", "Urgent"] }
+];
+
 window.HRA_CONFIG = {
 
   /* 1) Firebase project keys (Firebase console → Project settings → Your apps → Web app).
@@ -166,15 +173,35 @@ window.HRA_CONFIG = {
       title: (d) => `New employee: ${d.fullName || "new hire"}`
     },
 
+    jeanie: {
+      label: "Jeanie / Classet",
+      blurb: "Help with the Jeanie or Classet recruiting assistant.",
+      icon: "bot",
+      fields: GENERAL_FIELDS,
+      title: (d) => d.subject || "Jeanie / Classet"
+    },
+
+    indeed_credits: {
+      label: "Credits for Indeed",
+      blurb: "Request Indeed credits or ask about sponsored jobs.",
+      icon: "coins",
+      fields: GENERAL_FIELDS,
+      title: (d) => d.subject || "Indeed credits"
+    },
+
+    quickbooks: {
+      label: "QuickBooks",
+      blurb: "Access, invoices or anything in QuickBooks.",
+      icon: "ledger",
+      fields: GENERAL_FIELDS,
+      title: (d) => d.subject || "QuickBooks"
+    },
+
     general: {
       label: "General help",
       blurb: "Ask for help with anything that isn't listed.",
       icon: "spark",
-      fields: [
-        { name: "subject",     label: "What do you need help with", type: "text",     required: true,  placeholder: "One line summary" },
-        { name: "description", label: "Details",                    type: "textarea", required: true,  placeholder: "What's happening, what you've tried, any deadlines" },
-        { name: "priority",    label: "How urgent is it",           type: "select",   required: true,  options: ["Normal", "Soon", "Urgent"] }
-      ],
+      fields: GENERAL_FIELDS,
       title: (d) => d.subject || "General help"
     }
   },
