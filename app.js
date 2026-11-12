@@ -139,6 +139,8 @@ function createDemoStore() {
     async setEmailStatus(id, emailStatus) {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
+    async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    async setPrefs(uid, data) { const cur = await this.getPrefs(uid); localStorage.setItem("hra_prefs_" + uid, JSON.stringify({ ...cur, ...data })); },
     async addAttachments(id, metas) {
       save(load().map((t) => t.id === id ? { ...t, attachments: [...(t.attachments || []), ...metas], updatedAt: Date.now() } : t));
     },
@@ -197,6 +199,13 @@ async function createFirebaseStore() {
       const snap = await fsMod.getDoc(fsMod.doc(db, "tickets", ticketId, "chunks", chunkId));
       if (!snap.exists()) throw { code: "not-found" };
       return snap.data().data;
+    },
+    async getPrefs(uid) {
+      const snap = await fsMod.getDoc(fsMod.doc(db, "user_prefs", uid));
+      return snap.exists() ? snap.data() : {};
+    },
+    setPrefs(uid, data) {
+      return fsMod.setDoc(fsMod.doc(db, "user_prefs", uid), data, { merge: true });
     },
     watchPipeline(cb) {
       let clients = [], meta = null;
@@ -1515,7 +1524,12 @@ function bind() {
     if (t.matches?.("input[type=file]")) return;
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
     const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
-    const amb = t.closest("[data-am]"); if (amb) { PL.animate = true; PL.am = amb.dataset.am; PL.client = null; PL.filter.clear(); PL.search = ""; renderPipeline(); return; }
+    const popBtn = t.closest("[data-pop]"); if (popBtn) { PL.pop = PL.pop === popBtn.dataset.pop ? null : popBtn.dataset.pop; renderPipeline(); if (PL.pop === "am") $(".am-option.is-selected")?.focus(); return; }
+    const colT = t.closest("[data-col-toggle]"); if (colT) { const c = PL.cols.find((x) => x.key === colT.dataset.colToggle); if (c) { c.on = !c.on; saveColPrefs(); renderSheet(); $(`[data-col-toggle="${c.key}"]`)?.focus(); } return; }
+    if (t.closest("[data-cols-reset]")) { PL.cols = defaultCols(); saveColPrefs(); renderSheet(); toast("Columns reset to the spreadsheet layout", "var(--s-progress)"); return; }
+    const amb = t.closest("[data-am]"); if (amb) { PL.pop = null; PL.animate = true; PL.am = amb.dataset.am; PL.client = null; PL.filter.clear(); PL.search = ""; renderPipeline(); $('[data-pop="am"]')?.focus(); return; }
+    if (t.closest(".pop")) return;
+    if (PL.pop) { PL.pop = null; renderPipeline(); }
     const ct = t.closest("[data-client]"); if (ct) { PL.animate = true; PL.client = ct.dataset.client; PL.filter.clear(); PL.search = ""; renderPipeline(); return; }
     const sf = t.closest("[data-status-filter]"); if (sf) { const k = sf.dataset.statusFilter; PL.filter.has(k) ? PL.filter.delete(k) : PL.filter.add(k); renderSheet(); return; }
     if (t.closest("[data-sort-toggle]")) { PL.newest = !PL.newest; renderSheet(); return; }
@@ -1631,7 +1645,18 @@ function bind() {
     e.target.closest?.(".field.is-invalid")?.classList.remove("is-invalid");
   });
 
+  document.addEventListener("pointerdown", (e) => { const g = e.target.closest?.("[data-col-grip]"); if (g) startColDrag(e, g); });
+
   document.addEventListener("keydown", (e) => {
+    // Pipeline popovers: Escape closes; arrows move through the account manager list and columns
+    if (PL.pop && e.key === "Escape") { const which = PL.pop; PL.pop = null; renderPipeline(); $(`[data-pop="${which}"]`)?.focus(); e.stopPropagation(); return; }
+    if (PL.pop === "am" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      const opts = $$(".am-option"); const i = opts.indexOf(document.activeElement);
+      const n = opts[(i + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length]; n?.focus(); e.preventDefault(); return;
+    }
+    if (!PL.pop && e.target.matches?.('[data-pop="am"]') && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); PL.pop = "am"; renderPipeline(); $(".am-option.is-selected")?.focus(); return; }
+    const grip = e.target.closest?.("[data-col-grip]");
+    if (grip && (e.key === "ArrowUp" || e.key === "ArrowDown")) { e.preventDefault(); moveCol(grip.closest(".col-item").dataset.col, e.key === "ArrowUp" ? -1 : 1); return; }
     if (e.key === "Escape") { const o = $$(".overlay:not([hidden])").pop(); if (o && o.id !== "confirm") closeOverlay(o); }
     if (!$("#lightbox").hidden && (e.key === "ArrowRight" || e.key === "ArrowLeft")) stepViewer(e.key === "ArrowRight" ? 1 : -1);
     if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("drop")) { e.preventDefault(); $(".drop-input", e.target).click(); }
@@ -1734,12 +1759,62 @@ const PSTATUS = {
   hired:        { label: "Hired", short: "Hired", fill: "D9EAD3", bar: "#2F9E44" },
   fell_through: { label: "Hired no-show or quit/fired/declined offer", short: "Fell through", fill: "CFE2F3", bar: "#3B82C4" }
 };
-const COLUMNS = [
-  ["name", "Candidate Submitted"], ["role", "Role Submitted"], ["submitted", "Date Submitted"],
-  ["interview", "Wants to Interview (Y/N), When?"], ["hired", "Hired (Y/N)"], ["roleHired", "Role hired for"],
-  ["startDate", "Start Date"], ["recruiter", "Recruiter"], ["notes", "Notes"]
+// Every column a person can show. The first nine are the spreadsheet's columns, in its order.
+const PL_COLS = [
+  { key: "name",        label: "Candidate Submitted",             w: 14,   xw: 24, locked: true },
+  { key: "role",        label: "Role Submitted",                  w: 12.5, xw: 30 },
+  { key: "submitted",   label: "Date Submitted",                  w: 8.5,  xw: 14, date: true },
+  { key: "interview",   label: "Wants to Interview (Y/N), When?", w: 13.5, xw: 34, wrap: true },
+  { key: "hired",       label: "Hired (Y/N)",                     w: 9,    xw: 22, wrap: true },
+  { key: "roleHired",   label: "Role hired for",                  w: 10,   xw: 24 },
+  { key: "startDate",   label: "Start Date",                      w: 8,    xw: 14, date: true },
+  { key: "recruiter",   label: "Recruiter",                       w: 8,    xw: 16 },
+  { key: "notes",       label: "Notes",                           w: 16.5, xw: 60, wrap: true },
+  { key: "stage",       label: "Workable stage",                  w: 10,   xw: 22, extra: true },
+  { key: "statusLabel", label: "Status",                          w: 9,    xw: 18, extra: true },
+  { key: "daysOpen",    label: "Days since submitted",            w: 7,    xw: 12, extra: true, num: true }
 ];
-const PL = { animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
+const COL_BY_KEY = Object.fromEntries(PL_COLS.map((c) => [c.key, c]));
+const defaultCols = () => PL_COLS.map((c) => ({ key: c.key, on: !c.extra }));
+
+function cellValue(r, key) {
+  if (key === "statusLabel") return PSTATUS[r.status]?.short || "";
+  if (key === "daysOpen") {
+    if (!r.submitted) return "";
+    const [y, m, d] = r.submitted.slice(0, 10).split("-").map(Number);
+    return Math.max(0, Math.floor((Date.now() - new Date(y, m - 1, d)) / 86400e3));
+  }
+  return r[key] ?? "";
+}
+function visibleCols() {
+  const list = (PL.cols || defaultCols()).filter((c) => c.on && COL_BY_KEY[c.key]).map((c) => COL_BY_KEY[c.key]);
+  return list.length ? list : [COL_BY_KEY.name];
+}
+
+/* ---- per-person column layout: saved to their account (and cached in this browser) ---- */
+function normalizeCols(saved) {
+  const known = (Array.isArray(saved) ? saved : []).filter((c) => COL_BY_KEY[c?.key]);
+  const missing = PL_COLS.filter((c) => !known.some((k) => k.key === c.key)).map((c) => ({ key: c.key, on: !c.extra && !known.length }));
+  const out = [...known.map((c) => ({ key: c.key, on: Boolean(c.on) })), ...missing];
+  const name = out.find((c) => c.key === "name"); if (name) name.on = true;
+  return out;
+}
+async function loadColPrefs() {
+  const key = "hra_cols_" + state.user.uid;
+  try { const cached = JSON.parse(localStorage.getItem(key)); if (cached) PL.cols = normalizeCols(cached); } catch {}
+  if (!PL.cols) PL.cols = defaultCols();
+  try {
+    const prefs = await state.store.getPrefs(state.user.uid);
+    if (prefs?.pipelineColumns) { PL.cols = normalizeCols(prefs.pipelineColumns); try { localStorage.setItem(key, JSON.stringify(PL.cols)); } catch {} if (PL.started) renderSheet(); }
+  } catch (e) { console.warn("Column preferences not loaded", e); }
+}
+let colSaveTimer = null;
+function saveColPrefs() {
+  try { localStorage.setItem("hra_cols_" + state.user.uid, JSON.stringify(PL.cols)); } catch {}
+  clearTimeout(colSaveTimer);
+  colSaveTimer = setTimeout(() => state.store.setPrefs(state.user.uid, { pipelineColumns: PL.cols }).catch((e) => console.warn(e)), 600);
+}
+const PL = { pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
 
 const fmtDay = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number); return y ? `${m}/${d}/${y}` : String(iso); };
 const sameName = (a, b) => lower(a) === lower(b);
@@ -1756,6 +1831,8 @@ function buildAms() {
 function startPipeline() {
   if (PL.started) return;
   PL.started = true;
+  PL.cols = null;
+  loadColPrefs();
   PL.store = state.store.demo ? "demo" : "firebase";
   renderPipelineLoading();
   if (PL.store === "demo") {
@@ -1769,7 +1846,7 @@ function startPipeline() {
 
 function stopPipeline() {
   PL.unsub?.(); PL.unsub = null; clearInterval(PL.timer);
-  Object.assign(PL, { started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "" });
+  Object.assign(PL, { pop: null, cols: null, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "" });
 }
 
 function onPipelineData(clients, meta) {
@@ -1801,7 +1878,7 @@ function renderSync() {
 }
 
 function renderPipelineLoading() {
-  $("#pl-ams").innerHTML = Array.from({ length: 3 }, () => `<span class="am-pill is-skel"><span class="sk" style="width:90px"></span></span>`).join("");
+  $("#pl-ams").innerHTML = `<span class="am-trigger is-skel"><span class="sk" style="width:150px"></span></span>`;
   $("#pl-clients").innerHTML = "";
   $("#pl-sheet").innerHTML = `<div class="sheet-card">${skeleton()}</div>`;
   renderSync();
@@ -1816,13 +1893,25 @@ function renderPipeline() {
     $("#pl-sheet").innerHTML = `<div class="sheet-card">${empty("No account managers set up yet", "Add account managers and their clients in config.js, under workable.accountManagers.").replace(/<li/g, "<div").replace(/<\/li>/g, "</div>")}</div>`;
     return;
   }
-  amsEl.innerHTML = PL.ams.map((a, i) => `
-    <button type="button" role="tab" class="am-pill${a.name === PL.am ? " is-active" : ""}${a.isMe ? " is-me" : ""}${a.unassigned ? " is-loose" : ""}" data-am="${esc(a.name)}" aria-selected="${a.name === PL.am}" style="--i:${i}">
-      <span class="am-avatar">${esc(a.unassigned ? "?" : initials(a.name))}</span>
-      <span class="am-name">${esc(a.name)}</span>
-      ${a.isMe ? `<span class="am-you">You</span>` : ""}
-      <span class="am-count">${(a.clients || []).length}</span>
-    </button>`).join("");
+  const cur = amObj();
+  const open = PL.pop === "am";
+  const amLine = (a) => `<span class="am-avatar">${esc(a.unassigned ? "?" : initials(a.name))}</span>
+      <span class="am-text"><span class="am-name">${esc(a.name)}</span><span class="am-sub">${(a.clients || []).length} client${(a.clients || []).length === 1 ? "" : "s"}</span></span>
+      ${a.isMe ? `<span class="am-you">You</span>` : ""}`;
+  amsEl.innerHTML = `
+    <div class="am-select${open ? " is-open" : ""}">
+      <button type="button" class="am-trigger${cur?.isMe ? " is-me" : ""}" data-pop="am" aria-haspopup="listbox" aria-expanded="${open}" aria-labelledby="pl-am-label">
+        ${cur ? amLine(cur) : ""}
+        <span class="am-chev" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
+      </button>
+      <div class="am-menu pop" role="listbox" aria-label="Account managers" ${open ? "" : "hidden"}>
+        ${PL.ams.map((a, i) => `
+          <button type="button" role="option" class="am-option${a.name === PL.am ? " is-selected" : ""}${a.isMe ? " is-me" : ""}${a.unassigned ? " is-loose" : ""}" data-am="${esc(a.name)}" aria-selected="${a.name === PL.am}" style="--i:${i}">
+            ${amLine(a)}
+            <span class="am-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+          </button>`).join("")}
+      </div>
+    </div>`;
 
   const list = amClients();
   if (!PL.client || !list.some((c) => sameName(c.name, PL.client))) PL.client = list[0]?.name || null;
@@ -1850,6 +1939,8 @@ function renderSheet() {
   shown = shown.slice().sort((a, b) => (a.submitted || "").localeCompare(b.submitted || "") * (PL.newest ? -1 : 1));
   const interviewed = rows.filter((r) => /^y/i.test(r.interview || "")).length;
   const loc = c.location || extra.location, hrs = c.hours || extra.hours;
+  const cols = visibleCols();
+  const totalW = cols.reduce((n, col) => n + col.w, 0);
 
   el.innerHTML = `
     <div class="sheet-card">
@@ -1874,6 +1965,12 @@ function renderSheet() {
             </button>`).join("")}
         </div>
         <div class="sheet-tools-right">
+          <div class="cols-wrap">
+            <button type="button" class="btn-mini" data-pop="cols" aria-haspopup="dialog" aria-expanded="${PL.pop === "cols"}">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M9.5 4v16M15 4v16"/></svg>Columns<span class="cols-n">${cols.length}</span>
+            </button>
+            ${PL.pop === "cols" ? colsPopHTML() : ""}
+          </div>
           <button type="button" class="btn-mini" data-sort-toggle title="Change order">${PL.newest ? "Newest first" : "Oldest first"}</button>
           <label class="search search-sm">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg>
@@ -1884,25 +1981,92 @@ function renderSheet() {
 
       ${c.empty || !rows.length
         ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
-        : `<div class="pl-table-wrap"><table class="pl-table${PL.animate ? " is-enter" : ""}">
-            <thead><tr>${COLUMNS.map(([k, t]) => `<th class="col-${k}" scope="col">${esc(t)}</th>`).join("")}</tr></thead>
+        : `<div class="pl-table-wrap"><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, cols.length * 92)}px">
+            <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
+            <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col">${esc(col.label)}</th>`).join("")}</tr></thead>
             <tbody>${shown.length ? shown.map((r, i) => `
               <tr class="pl-row" data-status="${r.status}" style="--sw:#${PSTATUS[r.status]?.fill || "FFFFFF"};--bar:${PSTATUS[r.status]?.bar || "#A3B1C6"};--i:${Math.min(i, 18)}" tabindex="0" title="${esc(PSTATUS[r.status]?.label || "")}">
-                <th scope="row" class="col-name">${r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(r.name)}</a>` : esc(r.name)}</th>
-                <td class="col-role">${esc(r.role)}</td>
-                <td class="col-submitted">${esc(fmtDay(r.submitted))}</td>
-                <td class="col-interview">${esc(r.interview)}</td>
-                <td class="col-hired">${esc(r.hired)}</td>
-                <td class="col-roleHired">${esc(r.roleHired)}</td>
-                <td class="col-startDate">${esc(/^\d{4}-/.test(r.startDate || "") ? fmtDay(r.startDate) : r.startDate)}</td>
-                <td class="col-recruiter">${esc(r.recruiter)}</td>
-                <td class="col-notes"><div class="notes">${esc(r.notes)}</div></td>
-              </tr>`).join("") : `<tr><td colspan="9" class="pl-none">No candidates match. Clear the filters or search.</td></tr>`}
+                ${cols.map((col, ci) => cellHTML(r, col, ci === 0)).join("")}
+              </tr>`).join("") : `<tr><td colspan="${cols.length}" class="pl-none">No candidates match. Clear the filters or search.</td></tr>`}
             </tbody></table></div>`}
     </div>
 
     ${sourcingHTML(c)}`;
   PL.animate = false;
+}
+
+function cellHTML(r, col, first) {
+  let v = cellValue(r, col.key);
+  if (col.date && /^\d{4}-/.test(v || "")) v = fmtDay(v);
+  if (first) {
+    const inner = col.key === "name" && r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v);
+    return `<th scope="row" class="col-${col.key}">${inner}</th>`;
+  }
+  if (col.key === "notes") return `<td class="col-notes"><div class="notes">${esc(v)}</div></td>`;
+  if (col.key === "statusLabel") return `<td class="col-statusLabel"><span class="st-dot" style="--bar:${PSTATUS[r.status]?.bar}"></span>${esc(v)}</td>`;
+  return `<td class="col-${col.key}${col.num ? " num" : ""}">${esc(v)}</td>`;
+}
+
+const GRIP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+function colsPopHTML() {
+  return `<div class="cols-pop pop" role="dialog" aria-label="Choose columns">
+    <div class="cols-head">
+      <strong>Columns</strong>
+      <button type="button" class="link-btn" data-cols-reset>Reset to spreadsheet</button>
+    </div>
+    <p class="cols-hint">Drag to reorder, switch to show or hide. Saved to your account.</p>
+    <ul class="cols-list" id="cols-list">
+      ${PL.cols.map((c, i) => {
+        const def = COL_BY_KEY[c.key];
+        return `<li class="col-item${c.on ? " is-on" : ""}" data-col="${c.key}">
+          <button type="button" class="col-grip" data-col-grip aria-label="Move ${esc(def.label)}" title="Drag, or use the arrow keys">${GRIP}</button>
+          <span class="col-label">${esc(def.label)}${def.extra ? `<span class="col-new">Extra</span>` : ""}</span>
+          ${def.locked
+            ? `<span class="col-lock" title="Always shown">Always on</span>`
+            : `<button type="button" class="switch" role="switch" aria-checked="${c.on}" data-col-toggle="${c.key}" aria-label="Show ${esc(def.label)}"><span></span></button>`}
+        </li>`;
+      }).join("")}
+    </ul>
+  </div>`;
+}
+
+function moveCol(key, delta) {
+  const i = PL.cols.findIndex((c) => c.key === key), j = i + delta;
+  if (i < 0 || j < 0 || j >= PL.cols.length) return;
+  const [it] = PL.cols.splice(i, 1); PL.cols.splice(j, 0, it);
+  saveColPrefs(); renderSheet();
+  $(`#cols-list [data-col="${key}"] .col-grip`)?.focus();
+}
+
+// Pointer-based drag so it works with mouse, touch and pen.
+function startColDrag(e, grip) {
+  const li = grip.closest(".col-item"), list = li.parentElement;
+  e.preventDefault();
+  li.classList.add("is-dragging"); list.classList.add("is-sorting");
+  document.body.classList.add("is-col-dragging");
+  const move = (ev) => {
+    if (ev.pointerId !== e.pointerId) return;
+    ev.preventDefault();
+    // auto-scroll the list near its edges
+    const lr = list.getBoundingClientRect();
+    if (ev.clientY < lr.top + 24) list.scrollTop -= 12; else if (ev.clientY > lr.bottom - 24) list.scrollTop += 12;
+    const items = [...list.children].filter((x) => x !== li);
+    const after = items.find((x) => { const r = x.getBoundingClientRect(); return ev.clientY < r.top + r.height / 2; });
+    const first = [...list.children].map((x) => [x, x.getBoundingClientRect().top]);
+    after ? list.insertBefore(li, after) : list.appendChild(li);
+    // FLIP: animate the items that moved
+    first.forEach(([x, top]) => { if (x === li) return; const d = top - x.getBoundingClientRect().top; if (d) { x.animate([{ transform: `translateY(${d}px)` }, { transform: "none" }], { duration: 180, easing: "cubic-bezier(.16,1,.3,1)" }); } });
+  };
+  const up = (ev) => {
+    if (ev && ev.pointerId !== e.pointerId) return;
+    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+    li.classList.remove("is-dragging"); list.classList.remove("is-sorting");
+    document.body.classList.remove("is-col-dragging");
+    const order = [...list.children].map((x) => x.dataset.col);
+    PL.cols.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+    saveColPrefs(); renderSheet();
+  };
+  window.addEventListener("pointermove", move, { passive: false }); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
 }
 
 function emptyBlock(title, text) {
@@ -1960,32 +2124,36 @@ async function downloadWorkbook(btn) {
       while (used.has(name)) name = name.slice(0, 28) + " " + (used.size + 1);
       used.add(name);
       const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 2 }] });
-      ws.columns = [24, 30, 14, 34, 22, 24, 14, 16, 60].map((w) => ({ width: w }));
+      const xcols = visibleCols();
+      const lastCol = String.fromCharCode(64 + Math.min(xcols.length, 26));
+      ws.columns = xcols.map((col) => ({ width: col.xw }));
       const extra = (WK.clients || {})[c.name] || {};
       const loc = c.location || extra.location, hrs = c.hours || extra.hours;
 
-      ws.mergeCells("A1:I1");
+      ws.mergeCells(`A1:${xcols.length > 1 ? lastCol : "B"}1`);
       const t = ws.getCell("A1");
       t.value = `${c.name}${loc ? ` (${loc})` : ""}${hrs ? ` ${hrs}` : ""}`;
       t.font = { bold: true, size: 16, name: "Arial" }; t.fill = fill("FFF2CC");
       ws.getRow(1).height = 26;
 
       const head = ws.getRow(2);
-      COLUMNS.forEach(([, label], i) => { const cell = head.getCell(i + 1); cell.value = label; cell.font = { bold: true, name: "Arial" }; cell.fill = fill("CFE2F3"); cell.border = box; cell.alignment = { vertical: "middle", wrapText: true }; });
+      xcols.forEach((col, i) => { const cell = head.getCell(i + 1); cell.value = col.label; cell.font = { bold: true, name: "Arial" }; cell.fill = fill("CFE2F3"); cell.border = box; cell.alignment = { vertical: "middle", wrapText: true }; });
       head.height = 32;
 
       let r = 3;
       for (const row of (c.candidates || []).slice().sort((a, b) => (a.submitted || "").localeCompare(b.submitted || ""))) {
         const xr = ws.getRow(r++);
-        COLUMNS.forEach(([k], i) => {
+        xcols.forEach((col, i) => {
+          const k = col.key;
           const cell = xr.getCell(i + 1);
-          let v = row[k] || "";
-          if ((k === "submitted" || k === "startDate") && /^\d{4}-\d{2}-\d{2}/.test(v)) { const [y, m, d] = v.slice(0, 10).split("-").map(Number); v = new Date(Date.UTC(y, m - 1, d)); cell.numFmt = "m/d/yyyy"; }
+          let v = cellValue(row, k);
+          if (v === "" || v == null) v = "";
+          if (col.date && /^\d{4}-\d{2}-\d{2}/.test(v)) { const [y, m, d] = v.slice(0, 10).split("-").map(Number); v = new Date(Date.UTC(y, m - 1, d)); cell.numFmt = "m/d/yyyy"; }
           cell.value = v;
           cell.font = { name: "Arial", size: 10 };
           cell.fill = fill(PSTATUS[row.status]?.fill || "FFFFFF");
           cell.border = box;
-          cell.alignment = { vertical: "top", wrapText: ["interview", "hired", "notes"].includes(k) };
+          cell.alignment = { vertical: "top", wrapText: Boolean(col.wrap) };
         });
       }
 

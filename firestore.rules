@@ -86,6 +86,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Each person's own dashboard preferences (like their column layout).
+    match /user_prefs/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
     // Everything else is closed.
     match /{document=**} {
       allow read, write: if false;

@@ -101,6 +101,12 @@ From then on it runs **every 30 minutes, Monday to Friday, about 6am to 7pm East
 
 ---
 
+## Personal column layouts
+
+Each person can choose which columns they see and their order (**Columns** button above the table). Their layout is saved to their account (`user_prefs` in Firestore), so it follows them to any computer. **Download spreadsheet** uses the columns they're viewing, and **Reset to spreadsheet** restores the standard layout.
+
+Extra columns anyone can switch on: **Workable stage**, **Status**, **Days since submitted**.
+
 ## How each spreadsheet column is filled
 
 | Column | Comes from Workable |
