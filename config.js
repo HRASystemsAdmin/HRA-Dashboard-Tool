@@ -219,5 +219,98 @@ window.HRA_CONFIG = {
     lookbackDays: 365,                  // ignore candidates older than this
     syncEveryMinutes: 30,               // shown on the page; the schedule itself is in the workflow file
     sourcingWeeks: 8                    // weeks of sourcing numbers kept (the page lets people pick how many to show)
+  },
+
+  /* 8) Links in the left panel. */
+  links: {
+    sharepoint: "https://hunterrecruitmentnet.sharepoint.com/sites/TeamSite"
+  },
+
+  /* 9) "Who to contact" directory. Each topic says who to reach for it.
+        Replace the examples with your real people (remove example: true when done).
+        contact fields: name, role, email, phone (optional), teams (true = show a Teams chat button)
+        backup: an optional second person. tips: what to include when reaching out.
+        category: one of the ids in categories. keywords: other words people might search for. */
+  contacts: {
+    categories: [
+      { id: "systems",  label: "Systems and tech",    icon: "chip" },
+      { id: "access",   label: "Logins and access",   icon: "key" },
+      { id: "people",   label: "HR and payroll",      icon: "people" },
+      { id: "clients",  label: "Clients and recruiting", icon: "brief" },
+      { id: "general",  label: "Everything else",     icon: "help" }
+    ],
+    topics: [
+      { example: true, category: "access", topic: "I can't log in or I'm locked out",
+        description: "Password resets, locked accounts and two-step verification codes that don't arrive.",
+        keywords: ["password", "reset", "locked out", "login", "sign in", "mfa", "2fa", "authenticator", "verification code"],
+        contact: { name: "IT Support", role: "Systems administrator", email: "it@hunterrecruitment.net", phone: "", teams: true },
+        response: "Same business day",
+        tips: ["Which system you're trying to open", "The exact error message (a screenshot helps)", "When it started"] },
+
+      { example: true, category: "access", topic: "I need access to a system or shared mailbox",
+        description: "New access to Workable, Zoom, shared mailboxes, Teams channels or SharePoint folders.",
+        keywords: ["access", "permission", "shared mailbox", "workable", "zoom", "sharepoint", "teams", "license"],
+        contact: { name: "IT Support", role: "Systems administrator", email: "it@hunterrecruitment.net", teams: true },
+        response: "1 to 2 business days",
+        tips: ["What you need access to", "Why you need it", "Your manager's approval, if needed"] },
+
+      { example: true, category: "systems", topic: "Something isn't working (computer, email, Teams)",
+        description: "Errors, crashes, slow computer, Outlook or Teams problems, printers and headsets.",
+        keywords: ["error", "broken", "crash", "slow", "outlook", "email", "teams", "laptop", "computer", "printer", "headset", "audio", "camera"],
+        contact: { name: "IT Support", role: "Systems administrator", email: "it@hunterrecruitment.net", teams: true },
+        backup: { name: "Operations Manager", email: "operations@hunterrecruitment.net" },
+        response: "Same business day",
+        tips: ["What you were doing when it happened", "A screenshot of the problem", "Whether you already restarted"] },
+
+      { example: true, category: "systems", topic: "Workable problems",
+        description: "Pipelines, job posts, candidate stages, email templates or integrations not behaving.",
+        keywords: ["workable", "ats", "pipeline", "job post", "candidate", "stage", "template", "jeanie", "classet", "indeed"],
+        contact: { name: "Workable Admin", role: "ATS administrator", email: "workable@hunterrecruitment.net", teams: true },
+        response: "Same business day",
+        tips: ["The job or candidate involved", "What you expected vs. what happened"] },
+
+      { example: true, category: "systems", topic: "Phone, Zoom or call queue issues",
+        description: "Calls not ringing, call queues, voicemail, Zoom meetings or recordings.",
+        keywords: ["phone", "zoom", "call", "queue", "voicemail", "recording", "dial", "extension"],
+        contact: { name: "Phone Systems", role: "Zoom administrator", email: "phones@hunterrecruitment.net", teams: true },
+        response: "Same business day",
+        tips: ["Your extension or queue name", "Time the issue happened"] },
+
+      { example: true, category: "people", topic: "Payroll, time off or benefits",
+        description: "Paychecks, time off requests, benefits enrollment and tax forms.",
+        keywords: ["payroll", "pay", "paycheck", "pto", "time off", "vacation", "sick", "benefits", "w2", "w-2", "tax", "401k"],
+        contact: { name: "HR and Payroll", role: "People team", email: "hr@hunterrecruitment.net", teams: true },
+        response: "1 to 2 business days",
+        tips: ["Pay period or dates involved", "Keep personal details out of group chats"] },
+
+      { example: true, category: "people", topic: "Onboarding a new team member",
+        description: "Accounts, equipment and first-day setup for someone joining the team.",
+        keywords: ["new hire", "onboarding", "new employee", "start date", "laptop", "equipment", "setup"],
+        contact: { name: "Operations Manager", role: "Operations", email: "operations@hunterrecruitment.net", teams: true },
+        response: "At least 1 week before the start date",
+        tips: ["Use the New employee request in the Request Center for the details"] },
+
+      { example: true, category: "clients", topic: "Client questions or escalations",
+        description: "Contract questions, unhappy clients, new roles or pausing an account.",
+        keywords: ["client", "contract", "escalation", "complaint", "pause", "new role", "account manager"],
+        contact: { name: "Your Account Manager", role: "Account management", email: "accounts@hunterrecruitment.net", teams: true },
+        backup: { name: "Director of Recruiting", email: "director@hunterrecruitment.net" },
+        response: "Same business day",
+        tips: ["The client name", "What happened and what the client asked for"] },
+
+      { example: true, category: "clients", topic: "Candidate background checks or MVRs",
+        description: "Ordering, status and results of background checks and driving records.",
+        keywords: ["background", "check", "mvr", "driving record", "drug test", "screening", "references"],
+        contact: { name: "Recruiting Coordinator", role: "Recruiting operations", email: "coordinator@hunterrecruitment.net", teams: true },
+        response: "1 business day",
+        tips: ["Candidate name and client", "Which check you need"] },
+
+      { example: true, category: "general", topic: "Not sure who to ask",
+        description: "Anything that isn't listed here. We'll point you to the right person.",
+        keywords: ["help", "question", "other", "not sure", "don't know", "anything"],
+        contact: { name: "Operations Manager", role: "Operations", email: "operations@hunterrecruitment.net", teams: true },
+        response: "Same business day",
+        tips: ["A short description of what you need"] }
+    ]
   }
 };

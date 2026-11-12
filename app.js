@@ -69,7 +69,7 @@ function toast(msg, color, action) {
    Data stores
    -------------------------------------------------------------------------- */
 function createDemoStore() {
-  const KEY = "hra_demo_tickets_v2", UKEY = "hra_demo_user_v1", FKEY = "hra_demo_files_v1";
+  const KEY = "hra_demo_tickets_v3", UKEY = "hra_demo_user_v2", FKEY = "hra_demo_files_v1";
   const loadFiles = () => { try { return JSON.parse(localStorage.getItem(FKEY)) || {}; } catch { return {}; } };
   const listeners = new Set();
   let onUser = () => {};
@@ -79,8 +79,8 @@ function createDemoStore() {
   addEventListener("storage", (e) => { if (e.key === KEY) emit(); });
 
   const people = {
-    member: { uid: "demo-member", email: MEMBERS[0] || "employee@demo.local", name: "Jordan Reyes", role: "member" },
-    admin:  { uid: "demo-admin",  email: ADMINS[0]  || "admin@demo.local",    name: "Alex Morgan",  role: "admin" }
+    member: { uid: "demo-member", email: MEMBERS[0] || "employee@demo.local", name: "Jen Omohundro", role: "member" },
+    admin:  { uid: "demo-admin",  email: ADMINS[0]  || "admin@demo.local",    name: "Juan Rochin",  role: "admin" }
   };
 
   if (!localStorage.getItem(KEY)) {
@@ -281,6 +281,8 @@ function hideBoot() {
    Auth flow
    -------------------------------------------------------------------------- */
 function handleUser(u) {
+  if (typeof CT !== "undefined") Object.assign(CT, { built: false, q: "", cat: "", open: null });
+  const ctRoot = document.getElementById("contacts-root"); if (ctRoot) ctRoot.innerHTML = "";
   if (state.unsub) { state.unsub(); state.unsub = null; }
   closeAll(true);
   state.tickets = []; state.loaded = false; state.known.clear();
@@ -321,6 +323,8 @@ function handleUser(u) {
   renderAll();
   showView("view-app");
   $('[data-tool="insights"]').hidden = !isAdmin;
+  const sp = $("#rail-sharepoint");
+  if (sp) { sp.href = CFG.links?.sharepoint || "#"; sp.hidden = !CFG.links?.sharepoint; }
   let savedTool = "requests";
   try { savedTool = localStorage.getItem(TOOL_KEY) || "requests"; } catch {}
   setTool(savedTool, true);
@@ -1549,6 +1553,14 @@ function bind() {
     const ts = t.closest("[data-tsort]"); if (ts) { const k = ts.dataset.tsort; IN.tsort = { key: k, dir: IN.tsort.key === k ? -IN.tsort.dir : (k === "name" ? 1 : -1) }; IN.animate = false; renderInsights(); return; }
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
     const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
+    const ctCat = t.closest("[data-ct-cat]"); if (ctCat) { CT.cat = ctCat.dataset.ctCat; renderContactList(); return; }
+    const ctTry = t.closest("[data-ct-try]"); if (ctTry) { CT.q = ctTry.dataset.ctTry; CT.cat = ""; $("#ct-q").value = CT.q; renderContactList(); $("#ct-q").focus(); return; }
+    const ctOpen = t.closest("[data-ct-open]"); if (ctOpen) {
+      const card = ctOpen.closest(".ct-card"), idx = Number(ctOpen.dataset.ctOpen), open = !card.classList.contains("is-open");
+      $$(".ct-card.is-open").forEach((c) => { if (c !== card) { c.classList.remove("is-open"); $(".ct-more", c)?.setAttribute("aria-expanded", "false"); } });
+      card.classList.toggle("is-open", open); ctOpen.setAttribute("aria-expanded", String(open)); CT.open = open ? idx : null; return;
+    }
+    const ctCopy = t.closest("[data-ct-copy]"); if (ctCopy) { copyText(ctCopy.dataset.ctCopy).then((ok) => toast(ok ? `Copied ${ctCopy.dataset.ctCopy}` : "Couldn't copy the email", ok ? "var(--s-done)" : "#E2632B")); return; }
     const popBtn = t.closest("[data-pop]"); if (popBtn) { PL.pop = PL.pop === popBtn.dataset.pop ? null : popBtn.dataset.pop; renderPipeline(); if (PL.pop === "am") $(".am-option.is-selected")?.focus(); return; }
     const colT = t.closest("[data-col-toggle]"); if (colT) { const c = PL.cols.find((x) => x.key === colT.dataset.colToggle); if (c) { c.on = !c.on; saveColPrefs(); renderSheet(); $(`[data-col-toggle="${c.key}"]`)?.focus(); } return; }
     if (t.closest("[data-cols-reset]")) { PL.cols = defaultCols(); saveColPrefs(); renderSheet(); toast("Columns reset to the spreadsheet layout", "var(--s-progress)"); return; }
@@ -1675,6 +1687,7 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
+    if (e.target.id === "ct-q") { CT.q = e.target.value; CT.open = null; renderContactList(); return; }
     if (e.target.id === "pl-search") {
       PL.search = e.target.value;
       const pos = e.target.selectionStart;
@@ -1694,6 +1707,8 @@ function bind() {
 
   document.addEventListener("keydown", (e) => {
     if (IN.pop && e.key === "Escape") { IN.pop = null; const pop = $(".cust-pop"); if (pop) pop.hidden = true; $("[data-in-customize]")?.focus(); return; }
+    if (e.key === "/" && currentTool === "contacts" && !e.target.closest?.("input, textarea, select, [contenteditable]")) { e.preventDefault(); $("#ct-q")?.focus(); return; }
+    if (e.key === "Escape" && e.target.id === "ct-q" && e.target.value) { e.target.value = ""; CT.q = ""; renderContactList(); return; }
     const openDd = $(".dd.is-open");
     if (openDd && e.key === "Escape") { closeDropdowns(); $(".dd-trigger", openDd)?.focus(); e.stopPropagation(); return; }
     if (openDd && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -1735,7 +1750,7 @@ function bind() {
       raf = requestAnimationFrame(() => {
         amb.style.setProperty("--cx", e.clientX + "px");
         amb.style.setProperty("--cy", e.clientY + "px");
-        const tile = e.target.closest?.(".type-tile");
+        const tile = e.target.closest?.(".type-tile, .ct-card");
         if (tile) {
           const r = tile.getBoundingClientRect();
           tile.style.setProperty("--mx", e.clientX - r.left + "px");
@@ -1800,10 +1815,11 @@ function setTool(id, silent) {
     m.hidden = !on;
     if (on && changed && !reduceMotion) { m.classList.remove("tool-in"); void m.offsetWidth; m.classList.add("tool-in"); }
   });
-  $(".topbar").classList.toggle("is-tool-pipeline", id === "pipeline" || id === "insights");
+  $(".topbar").classList.toggle("is-tool-pipeline", id !== "requests");
   moveRailGlow();
   if (id === "pipeline") startPipeline();
   if (id === "insights") { IN.animate = true; startInsights(); }
+  if (id === "contacts") { renderContacts(); if (!silent && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#ct-q")?.focus({ preventScroll: true }), 350); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
   if (!silent) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
 }
@@ -2394,10 +2410,10 @@ async function downloadWorkbook(btn) {
 /* ---------- demo data (fictional; real candidate data never ships with the page) ---------- */
 function demoAms() {
   return [
-    { name: "Alex Morgan",   email: ADMINS[0] || "admin@demo.local",     clients: ["Northwind Plumbing", "Summit Heating & Air", "Harbor Drain & Sewer"] },
-    { name: "Jordan Reyes",  email: MEMBERS[0] || "employee@demo.local", clients: ["Bright Spark Electric", "Evergreen Climate", "Copperline Plumbing"] },
-    { name: "Taylor Brooks", email: "taylor@demo.local",                 clients: ["Lakeside Home Builders", "Redwood Roofing"] },
-    { name: "Morgan Lee",    email: "morgan@demo.local",                 clients: ["Blue Ridge HVAC", "Keystone Electric"] }
+    { name: "Jennifer Whittle", email: "jennifer.whittle@demo.local", clients: ["Northwind Plumbing", "Summit Heating & Air", "Harbor Drain & Sewer"] },
+    { name: "Jen Omohundro",    email: MEMBERS[0] || "employee@demo.local", clients: ["Bright Spark Electric", "Evergreen Climate", "Copperline Plumbing"] },
+    { name: "Katlin O’Steen",  email: "katlin.osteen@demo.local",    clients: ["Lakeside Home Builders", "Redwood Roofing"] },
+    { name: "Megan Whitmyer",   email: "megan.whitmyer@demo.local",   clients: ["Blue Ridge HVAC", "Keystone Electric"] }
   ];
 }
 
@@ -3063,4 +3079,139 @@ async function exportInsights(kind) {
     console.error(e);
     toast("The Excel file couldn't be created. Check your connection and try again.", "#E2632B");
   } finally { btn?.classList.remove("is-loading"); }
+}
+
+/* ==========================================================================
+   Who to contact (directory from config.js → contacts)
+   ========================================================================== */
+const DIR = CFG.contacts || { categories: [], topics: [] };
+const CT = { q: "", cat: "", open: null, built: false, hintTimer: null };
+const CAT_ICONS = {
+  chip:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg>',
+  key:    '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M14 9l2 2"/></svg>',
+  people: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.2A5 5 0 0 1 21.5 19"/></svg>',
+  brief:  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 12.5h18"/></svg>',
+  help:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5v.7"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>'
+};
+const CT_ICONS = {
+  teams: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5z"/><path d="M8.5 9h7M8.5 12h4.5"/></svg>',
+  mail:  '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>',
+  copy:  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>'
+};
+const catOf = (id) => DIR.categories.find((c) => c.id === id) || { id, label: id, icon: "help" };
+
+function contactScore(t, words) {
+  if (!words.length) return 1;
+  let score = 0;
+  const title = lower(t.topic), desc = lower(t.description), keys = (t.keywords || []).map(lower), who = lower([t.contact?.name, t.contact?.role, t.backup?.name].join(" "));
+  for (const w of words) {
+    let hit = 0;
+    if (title.includes(w)) hit = 6;
+    else if (keys.some((k) => k.includes(w) || (w.length > 3 && w.includes(k)))) hit = 5;
+    else if (desc.includes(w)) hit = 3;
+    else if (who.includes(w)) hit = 2;
+    if (!hit) return 0;                 // every word must match something
+    score += hit;
+  }
+  return score;
+}
+function hl(text, words) {
+  let out = esc(text);
+  for (const w of words.filter((x) => x.length > 1)) {
+    out = out.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![^<]*>)`, "gi"), "<mark>$1</mark>");
+  }
+  return out;
+}
+const mailHref = (t, person) => {
+  const first = (person.name || "").split(" ")[0];
+  const body = `Hi${first && !/support|team|admin|manager|coordinator|payroll|systems|your/i.test(person.name) ? " " + first : ""},\n\nI need help with: ${t.topic}\n\n` +
+    ((t.tips || []).length ? (t.tips.map((x) => `${x}:\n`).join("\n") + "\n") : "") + `Thank you,\n${state.user?.name || ""}`;
+  return `mailto:${encodeURIComponent(person.email).replace(/%40/g, "@")}?subject=${encodeURIComponent("Help needed: " + t.topic)}&body=${encodeURIComponent(body)}`;
+};
+const teamsHref = (t, person) => `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(person.email)}&message=${encodeURIComponent(`Hi! I need help with: ${t.topic}`)}`;
+
+function renderContacts() {
+  const root = $("#contacts-root");
+  if (!root || currentTool !== "contacts") return;
+  if (!CT.built) {
+    CT.built = true;
+    const hasExamples = DIR.topics.some((t) => t.example);
+    root.innerHTML = `
+      <div class="ct-hero">
+        <h1 class="hero-title">Who to contact</h1>
+        <p class="hero-sub">Tell us what you need help with. We'll show you exactly who to reach and the fastest way to do it.</p>
+        <label class="ct-search">
+          <span class="ct-search-ico">${CT_ICONS.search}</span>
+          <input type="search" id="ct-q" autocomplete="off" placeholder="What do you need help with?" aria-label="What do you need help with?" />
+          <kbd class="ct-kbd" aria-hidden="true">/</kbd>
+          <span class="ct-search-glow" aria-hidden="true"></span>
+        </label>
+        <div class="ct-try" id="ct-try"><span>Try:</span>${["password reset", "Workable", "payroll", "new hire", "phone queue"].map((x) => `<button type="button" class="ct-try-btn" data-ct-try="${esc(x)}">${esc(x)}</button>`).join("")}</div>
+      </div>
+      ${hasExamples && state.isAdmin ? `<div class="ct-note"><strong>These are example entries.</strong> Replace them with your real people in <code>config.js</code> → <code>contacts</code>. Only admins see this note.</div>` : ""}
+      <div class="ct-cats" id="ct-cats" role="tablist" aria-label="Topics"></div>
+      <div class="ct-list" id="ct-list" aria-live="polite"></div>`;
+  }
+  renderContactList();
+}
+
+function renderContactList() {
+  const words = lower(CT.q).split(/\s+/).filter(Boolean);
+  const scored = DIR.topics.map((t, i) => ({ t, i, s: contactScore(t, words) })).filter((x) => x.s > 0);
+  const counts = Object.fromEntries(DIR.categories.map((c) => [c.id, scored.filter((x) => x.t.category === c.id).length]));
+  $("#ct-cats").innerHTML = [{ id: "", label: "All topics" }, ...DIR.categories].map((c) => `
+    <button type="button" role="tab" class="ct-cat${CT.cat === c.id ? " is-active" : ""}" data-ct-cat="${esc(c.id)}" aria-selected="${CT.cat === c.id}" ${c.id && !counts[c.id] ? "disabled" : ""}>
+      ${c.id ? `<span class="ct-cat-ico">${CAT_ICONS[c.icon] || CAT_ICONS.help}</span>` : ""}${esc(c.label)}<span class="ct-cat-n">${c.id ? counts[c.id] : scored.length}</span>
+    </button>`).join("");
+  const list = scored.filter((x) => !CT.cat || x.t.category === CT.cat).sort((a, b) => b.s - a.s || a.i - b.i);
+  const el = $("#ct-list");
+  if (!list.length) {
+    const fallback = DIR.topics.find((t) => t.category === "general");
+    el.innerHTML = `<div class="ct-empty">
+        <div class="empty-mark">${CAT_ICONS.help}</div>
+        <strong>No exact match for “${esc(CT.q)}”</strong>
+        <p>Try a simpler word, or reach out here and they'll point you the right way.</p>
+      </div>${fallback ? contactCard(fallback, 0, [], true) : ""}`;
+    return;
+  }
+  el.innerHTML = list.map((x, k) => contactCard(x.t, k, words, false, DIR.topics.indexOf(x.t))).join("");
+}
+
+function contactCard(t, k, words, isFallback = false, idx = DIR.topics.indexOf(t)) {
+  const cat = catOf(t.category), p = t.contact || {}, open = CT.open === idx;
+  const btn = (href, icon, label, cls = "") => `<a class="ct-act ${cls}" href="${esc(href)}" ${href.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>${icon}<span>${label}</span></a>`;
+  return `<article class="ct-card${open ? " is-open" : ""}${isFallback ? " is-fallback" : ""}" style="--i:${Math.min(k, 12)}" data-ct-idx="${idx}">
+    ${t.example ? `<span class="ct-example" title="Example entry. Replace in config.js">Example</span>` : ""}
+    <div class="ct-top">
+      <span class="ct-ico">${CAT_ICONS[cat.icon] || CAT_ICONS.help}</span>
+      <div class="ct-topic">
+        <span class="ct-catname">${esc(cat.label)}</span>
+        <h2>${hl(t.topic, words)}</h2>
+        <p>${hl(t.description || "", words)}</p>
+      </div>
+    </div>
+    <div class="ct-person">
+      <span class="ct-avatar">${esc(initials(p.name || "?"))}</span>
+      <span class="ct-who"><span class="ct-reach">Reach out to</span><strong>${hl(p.name || "", words)}</strong>${p.role ? `<span class="ct-role">${esc(p.role)}</span>` : ""}</span>
+      ${t.response ? `<span class="ct-time" title="Usual response time">${CT_ICONS.clock}${esc(t.response)}</span>` : ""}
+    </div>
+    <div class="ct-actions">
+      ${p.teams && p.email ? btn(teamsHref(t, p), CT_ICONS.teams, "Teams chat", "is-primary") : ""}
+      ${p.email ? btn(mailHref(t, p), CT_ICONS.mail, "Email") : ""}
+      ${p.phone ? btn(`tel:${p.phone.replace(/[^\d+]/g, "")}`, CT_ICONS.phone, "Call") : ""}
+      ${p.email ? `<button type="button" class="ct-act ct-copy" data-ct-copy="${esc(p.email)}" title="Copy ${esc(p.email)}">${CT_ICONS.copy}<span>Copy email</span></button>` : ""}
+    </div>
+    ${(t.tips || []).length || t.backup ? `
+      <button type="button" class="ct-more" data-ct-open="${idx}" aria-expanded="${open}">
+        <span>Before you reach out</span><span class="ct-more-chev">${CHEV}</span>
+      </button>
+      <div class="ct-detail"><div class="ct-detail-inner">
+        ${(t.tips || []).length ? `<p class="ct-dlabel">Include this so they can help right away:</p>
+          <ol class="ct-tips">${t.tips.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>` : ""}
+        ${t.backup ? `<p class="ct-backup">Not available? Try <strong>${esc(t.backup.name)}</strong>${t.backup.email ? ` at <a href="mailto:${esc(t.backup.email)}">${esc(t.backup.email)}</a>` : ""}.</p>` : ""}
+      </div></div>` : ""}
+  </article>`;
 }

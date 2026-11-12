@@ -6,6 +6,9 @@ Internal tools for the team, switched from the left panel:
 - **Client Pipeline**: submitted candidates per client from Workable, in the Weekly Hiring Update layout, with **Download spreadsheet**. Setup: **[WORKABLE-SETUP.md](WORKABLE-SETUP.md)**.
 - **Insights** (admins only): totals, trends, hiring funnel, status breakdown, leaderboard and a performance table for recruiters, account managers and clients, built from the Client Pipeline data. Filter by period, account manager, client or recruiter. Each admin can remove or add any box (**Customize**), and **Export to Excel** saves either the current view or a full archive of every candidate.
 
+- **Who to contact**: search a problem ("password reset", "payroll") and see who to reach, with one-click Teams chat, email, call and copy buttons plus what to include. Edit the people and topics in `config.js` → `contacts`.
+- **SharePoint**: opens the team site (`config.js` → `links`).
+
 Until Firebase and Workable are connected, the dashboard runs on fictional demo data.
 
 ## Request Center
