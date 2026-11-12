@@ -302,14 +302,13 @@ window.HRA_CONFIG = {
 
   /* 10) Helper chat (bubble in the bottom-right corner).
          resources: the SharePoint links it knows. Ask a question and it answers with the best match.
-         Replace each url with the direct link to the page or file (open it in SharePoint → Copy link).
-         Until then the examples open a SharePoint search for that topic, which already works.
+         Add each url as the direct link to the page or file (open it in SharePoint → Copy link).
+         Topics without a url are recognized, but the helper says their link hasn't been added yet.
          microsoft (optional): turns on full SharePoint search with each person's Microsoft sign-in.
          Leave empty to keep the helper using only the links below. */
   helper: {
     name: "HRA Helper",
     greeting: "Hi! I can find SharePoint documents, the right person to contact, or the right request form. What do you need?",
-    suggestions: ["Contractor onboarding", "Employee handbook", "Time off policy", "Who handles payroll?"],
     resources: [
       { example: true, title: "Contractor onboarding", description: "Steps, forms and checklist for onboarding a new contractor.",
         keywords: ["onboarding", "onboard", "contractor", "contractors", "1099", "new contractor", "third party"] },

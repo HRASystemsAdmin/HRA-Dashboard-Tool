@@ -3843,8 +3843,7 @@ const HC = CFG.helper || {};
 const SP_SITE = (CFG.links?.sharepoint || "").replace(/\/$/, "");
 const HP = { msgs: [], open: false, busy: false, msal: null, account: null };
 const STOP = new Set(["what", "whats", "what's", "is", "our", "the", "a", "an", "for", "to", "of", "how", "do", "i", "we", "my", "me", "where", "can", "find", "get", "hey", "hi", "hello", "please", "need", "about", "with", "on", "in", "and", "or", "who", "handles", "it", "there", "this", "that", "you", "your", "does", "should", "be", "are", "any", "have", "has", "help", "question", "questions"]);
-const spSearchUrl = (q) => SP_SITE ? `${SP_SITE}/_layouts/15/search.aspx?q=${encodeURIComponent(q)}` : "";
-const resUrl = (r) => r.url || spSearchUrl(r.title);
+const resUrl = (r) => r.url || "";
 const qWords = (q) => lower(q).replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
 const stem = (w) => w.replace(/(ings|ing|ers|er|es|s)$/i, "");
 
@@ -3896,7 +3895,7 @@ function answerFor(q) {
 
   const docScore = res[0]?.s || 0, personTop = people[0]?.s || 0;
   if (people.length && personTop > docScore) parts.push({ kind: "person", p: people[0].p, i: people[0].i });
-  if (res.length) parts.push({ kind: "doc", top: res[0].r, more: res.slice(1, 3).map((x) => x.r) });
+  if (res.length) parts.push({ kind: "doc", top: res[0].r });
   if (rt && (!res.length || rt.sc >= 7)) parts.push({ kind: "request", key: rt.key, t: rt.t });
   if (people.length && personTop <= docScore && !res.length) parts.push({ kind: "person", p: people[0].p, i: people[0].i });
   return { q, parts, words };
@@ -3912,12 +3911,12 @@ function botReplyHTML(a) {
   const out = [];
   const docCard = (r, big) => `<a class="hp-doc${big ? " is-top" : ""}" href="${esc(resUrl(r))}" target="_blank" rel="noopener">
       <span class="hp-doc-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
-      <span class="hp-doc-text"><strong>${esc(r.title)}</strong>${big && r.description ? `<small>${esc(r.description)}</small>` : ""}<em>${r.url ? "Open in SharePoint" : "Find it in SharePoint"}</em></span>
+      <span class="hp-doc-text"><strong>${esc(r.title)}</strong>${big && r.description ? `<small>${esc(r.description)}</small>` : ""}<em>Open in SharePoint</em></span>
       <span class="hp-doc-go">${ARROW_R}</span></a>`;
   for (const p of a.parts) {
     if (p.kind === "doc") {
-      out.push(`<div class="hp-bubble-text">Here it is! 👉</div>${docCard(p.top, true)}`);
-      if (p.more.length) out.push(`<div class="hp-related"><span>Related</span>${p.more.map((r) => docCard(r, false)).join("")}</div>`);
+      if (p.top.url) out.push(`<div class="hp-bubble-text">Here it is! 👉</div>${docCard(p.top, true)}`);
+      else out.push(`<div class="hp-bubble-text">I know about <strong>${esc(p.top.title)}</strong>, but its SharePoint link hasn't been added yet.${state.isAdmin ? ` <span class="hp-admin">Admins: add it in <code>config.js</code> → <code>helper.resources</code>.</span>` : " Your account manager can share it with you."}</div>`);
     }
     if (p.kind === "request") out.push(`<div class="hp-bubble-text">You can send a request for that:</div>
       <button type="button" class="hp-action" data-hp-request="${esc(p.key)}"><span class="hp-doc-ico">${ICONS[p.t.icon] || ICONS.spark}</span><span class="hp-doc-text"><strong>${esc(p.t.label)}</strong><small>${esc(p.t.blurb)}</small><em>Open the request form</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`);
@@ -3925,12 +3924,13 @@ function botReplyHTML(a) {
       <button type="button" class="hp-action" data-hp-person="${p.i}"><span class="hp-doc-ico hp-person-ico">${esc(initials(p.p.name))}</span><span class="hp-doc-text"><strong>${esc(p.p.name)}</strong><small>${esc(p.p.summary || "")}</small><em>See how to reach them</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`);
   }
   if (!out.length) {
-    out.push(`<div class="hp-bubble-text">I couldn't find an exact match for that.${SP_SITE ? " Here's a search of our SharePoint:" : ""}</div>`);
-    if (SP_SITE) out.push(docCard({ title: `Search SharePoint for “${a.q}”`, url: spSearchUrl(a.q) }, false));
-    out.push(`<div class="hp-bubble-text hp-soft">Still stuck? Your account manager can point you the right way, or check <button type="button" class="hp-inline" data-hp-contacts>Who to contact</button>.</div>`);
+    out.push(`<div class="hp-bubble-text">I couldn't find that one. Try different words, like “onboarding” or “handbook”, or check <button type="button" class="hp-inline" data-hp-contacts>Who to contact</button>. Your account manager can also point you the right way.</div>`);
+    if (SP_SITE) out.push(docCard({ title: "Open the SharePoint team site", url: SP_SITE }, false));
   }
   if (a.graph?.length) {
-    out.push(`<div class="hp-related"><span>Found in SharePoint</span>${a.graph.map((g) => `<a class="hp-doc" href="${esc(g.url)}" target="_blank" rel="noopener"><span class="hp-doc-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></span><span class="hp-doc-text"><strong>${esc(g.name)}</strong>${g.snippet ? `<small>${esc(g.snippet)}</small>` : ""}</span><span class="hp-doc-go">${ARROW_R}</span></a>`).join("")}</div>`);
+    out.length = 0;
+    out.push(`<div class="hp-bubble-text">Here it is! 👉</div>`);
+    out.push(`${a.graph.slice(0, 1).map((g) => `<a class="hp-doc" href="${esc(g.url)}" target="_blank" rel="noopener"><span class="hp-doc-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></span><span class="hp-doc-text"><strong>${esc(g.name)}</strong>${g.snippet ? `<small>${esc(g.snippet)}</small>` : ""}</span><span class="hp-doc-go">${ARROW_R}</span></a>`).join("")}`);
   }
   return out.join("");
 }
@@ -3938,7 +3938,6 @@ function botReplyHTML(a) {
 function renderHelper() {
   const box = $("#hp-msgs"); if (!box) return;
   const welcome = `<div class="hp-msg hp-bot"><div class="hp-bubble-text">${esc(HC.greeting || "Hi! What do you need?")}</div>
-    <div class="hp-chips">${(HC.suggestions || []).map((x) => `<button type="button" class="hp-chip" data-hp-ask="${esc(x)}">${esc(x)}</button>`).join("")}</div>
     ${msConfigured() && !HP.account ? `<button type="button" class="hp-connect" data-hp-connect><svg width="14" height="14" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/><rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/></svg>Connect Microsoft to search all of SharePoint</button>` : ""}</div>`;
   box.innerHTML = welcome + HP.msgs.map(hpMsgHTML).join("");
   box.scrollTop = box.scrollHeight;
@@ -3950,7 +3949,7 @@ async function askHelper(q) {
   HP.msgs.push({ from: "me", text: q }, { from: "bot", typing: true });
   renderHelper();
   const a = answerFor(q);
-  if (HP.account && (!a.parts.length || a.parts[0].kind !== "doc")) { try { a.graph = await graphSearch(q); } catch (e) { console.warn("SharePoint search failed", e); } }
+  if (HP.account && (!a.parts.length || (a.parts[0].kind === "doc" && !a.parts[0].top.url))) { try { a.graph = await graphSearch(q); } catch (e) { console.warn("SharePoint search failed", e); } }
   await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 650));
   HP.msgs.pop();
   HP.msgs.push({ from: "bot", html: botReplyHTML(a) });
