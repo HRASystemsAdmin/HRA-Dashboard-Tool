@@ -13,7 +13,20 @@ Internal tools for the team, switched from the left panel:
 - **Notifications**: shown as Windows notifications (or inside the dashboard if Windows notifications are off or blocked), with a chime. Sent for new alerts, new requests (to admins) and completed requests (to the requester). They arrive while the dashboard is open in a browser tab, even minimized.
 - **Notification center** (bell button): a history of alerts and request updates with unread dots, so nothing is missed even if the dashboard was closed. Read status is saved to each person's account. The gear opens notification settings, and the trash button deletes all notifications from your list.
 
+- **Helper chat** (bubble, bottom-right): ask things like "what is our onboarding for contractors?" and it answers with the SharePoint link, the right person from Who to contact, or the right request form. Setup below.
+
 Until Firebase and Workable are connected, the dashboard runs on fictional demo data.
+
+## Helper chat setup
+
+**Add your SharePoint links (no setup needed):** in `config.js` → `helper.resources`, each entry has a title, a short description and keywords people might type. For each one, open the page or file in SharePoint, select **Copy link**, and paste it as `url: "..."`. Remove `example: true` once it's real. Entries without a `url` open a SharePoint search for their title, which already works.
+
+**Optional: search all of SharePoint.** This lets the helper also find any document, using each person's own SharePoint permissions (people only see what they already have access to).
+1. In Microsoft Entra (entra.microsoft.com) → App registrations, use the test app from the email test or create a new one ("HRA Dashboard"), *Accounts in this organizational directory only*.
+2. **Authentication** → add a *Single-page application* redirect URI with the dashboard's exact address (for example `https://hrasystemsadmin.github.io/HRA-Dashboard-Tool/`).
+3. **API permissions** → Microsoft Graph → Delegated → add **Sites.Read.All** and **Files.Read.All** → **Grant admin consent**.
+4. Copy the **Application (client) ID** and **Directory (tenant) ID** into `config.js` → `helper.microsoft`.
+5. People click **Connect Microsoft** once in the helper, and their questions then search all of SharePoint too.
 
 ## Request Center
 

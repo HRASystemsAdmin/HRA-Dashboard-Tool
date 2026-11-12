@@ -298,5 +298,36 @@ window.HRA_CONFIG = {
       keywords: ["process", "job", "work", "client", "candidate", "schedule", "task", "how do i", "role", "duties", "account manager"]
     },
     footer: "Still unsure? Contact your account manager."
+  },
+
+  /* 10) Helper chat (bubble in the bottom-right corner).
+         resources: the SharePoint links it knows. Ask a question and it answers with the best match.
+         Replace each url with the direct link to the page or file (open it in SharePoint → Copy link).
+         Until then the examples open a SharePoint search for that topic, which already works.
+         microsoft (optional): turns on full SharePoint search with each person's Microsoft sign-in.
+         Leave empty to keep the helper using only the links below. */
+  helper: {
+    name: "HRA Helper",
+    greeting: "Hi! I can find SharePoint documents, the right person to contact, or the right request form. What do you need?",
+    suggestions: ["Contractor onboarding", "Employee handbook", "Time off policy", "Who handles payroll?"],
+    resources: [
+      { example: true, title: "Contractor onboarding", description: "Steps, forms and checklist for onboarding a new contractor.",
+        keywords: ["onboarding", "onboard", "contractor", "contractors", "1099", "new contractor", "third party"] },
+      { example: true, title: "Employee onboarding", description: "First-week checklist and setup for a new full-time employee.",
+        keywords: ["onboarding", "onboard", "new hire", "new employee", "first day", "first week", "orientation", "full time"] },
+      { example: true, title: "Employee handbook", description: "Company policies, expectations and benefits overview.",
+        keywords: ["handbook", "policies", "policy", "rules", "code of conduct", "dress code"] },
+      { example: true, title: "Time off policy", description: "How PTO, sick days and holidays work, and how to request them.",
+        keywords: ["pto", "time off", "vacation", "sick", "holiday", "holidays", "leave", "day off"] },
+      { example: true, title: "Expense reimbursement", description: "What can be reimbursed and how to submit expenses.",
+        keywords: ["expense", "expenses", "reimbursement", "reimburse", "receipt", "receipts", "mileage"] },
+      { example: true, title: "Brand and logo files", description: "Logos, colors and templates for client-facing materials.",
+        keywords: ["logo", "logos", "brand", "branding", "template", "templates", "letterhead", "colors"] },
+      { example: true, title: "Org chart", description: "Who's who and who reports to whom.",
+        keywords: ["org chart", "organization", "team", "who reports", "structure", "directory"] },
+      { example: true, title: "IT and security policy", description: "Passwords, devices, phishing and data security rules.",
+        keywords: ["security", "it policy", "phishing", "password policy", "device", "data", "mfa"] }
+    ],
+    microsoft: { clientId: "", tenantId: "" }
   }
 };

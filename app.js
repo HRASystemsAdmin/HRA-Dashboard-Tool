@@ -328,6 +328,7 @@ function handleUser(u) {
   state.tickets = []; state.loaded = false; state.known.clear();
 
   if (!u) {
+    stopHelper();
     stopAlerts();
     stopPipeline();
     state.user = null;
@@ -366,6 +367,7 @@ function handleUser(u) {
   $('[data-tool="insights"]').hidden = !isAdmin;
   $("#alert-btn").hidden = !isAdmin;
   startAlerts();
+  startHelper();
   const sp = $("#rail-sharepoint");
   if (sp) { sp.href = CFG.links?.sharepoint || "#"; sp.hidden = !CFG.links?.sharepoint; }
   let savedTool = "requests";
@@ -1574,6 +1576,17 @@ function bind() {
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (t.matches?.("input[type=file]")) return;
+    if (t.closest("[data-hp-toggle]")) { toggleHelper(); return; }
+    if (t.closest("[data-hp-clear]")) { HP.msgs = []; try { sessionStorage.removeItem("hra_helper_" + state.user.uid); } catch {} renderHelper(); $("#hp-q")?.focus(); return; }
+    const hpAsk = t.closest("[data-hp-ask]"); if (hpAsk) { askHelper(hpAsk.dataset.hpAsk); return; }
+    if (t.closest("[data-hp-connect]")) { connectMicrosoft(); return; }
+    const hpReq = t.closest("[data-hp-request]"); if (hpReq) { toggleHelper(false); setTool("requests"); setTimeout(() => openNew(hpReq.dataset.hpRequest), 250); return; }
+    const hpPer = t.closest("[data-hp-person]"); if (hpPer) {
+      toggleHelper(false); setTool("contacts");
+      setTimeout(() => { const c = $(`.fc[data-person="${hpPer.dataset.hpPerson}"]`); if (c) { c.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" }); if (!c.classList.contains("is-flipped")) setTimeout(() => flipCard(c, true), 450); } }, 300);
+      return;
+    }
+    if (t.closest("[data-hp-contacts]")) { toggleHelper(false); setTool("contacts"); return; }
     if (t.closest("[data-alert-compose]")) { openAlertComposer(); return; }
     if (t.closest("[data-alert-end]")) { endAlert(); return; }
     if (t.closest("[data-alert-ack]")) { ackTakeover(); return; }
@@ -1744,6 +1757,7 @@ function bind() {
   });
 
   document.addEventListener("submit", (e) => {
+    if (e.target.id === "hp-form") { e.preventDefault(); const i = $("#hp-q"); const v = i.value; i.value = ""; askHelper(v); return; }
     if (e.target.id === "ac-form") { e.preventDefault(); sendAlert($(".ac-send", e.target)); return; }
     if (e.target.id === "new-form") { e.preventDefault(); submitNew(e.target); }
   });
@@ -1806,6 +1820,7 @@ function bind() {
     if (e.key === "/" && currentTool === "contacts" && !e.target.closest?.("input, textarea, select, [contenteditable]")) { e.preventDefault(); $("#ct-q")?.focus(); return; }
     if (e.key === "Escape" && e.target.id === "ct-q" && e.target.value) { e.target.value = ""; CT.q = ""; renderContactList(); return; }
     if (e.key === "Escape" && $(".alert-takeover")) { ackTakeover(); return; }
+    if (e.key === "Escape" && HP.open && !$(".overlay.is-open")) { toggleHelper(false); $("#hp-bubble")?.focus(); return; }
     const openDd = $(".dd.is-open");
     if (openDd && e.key === "Escape") { closeDropdowns(); $(".dd-trigger", openDd)?.focus(); e.stopPropagation(); return; }
     if (openDd && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -3819,4 +3834,194 @@ async function endAlert() {
     toast("Alert ended", "var(--muted)");
   }
   catch (e) { console.error(e); toast("Couldn't end the alert. Try again.", "#E2632B"); }
+}
+
+/* ==========================================================================
+   Helper chat: answers with SharePoint links, the right person, or a request form
+   ========================================================================== */
+const HC = CFG.helper || {};
+const SP_SITE = (CFG.links?.sharepoint || "").replace(/\/$/, "");
+const HP = { msgs: [], open: false, busy: false, msal: null, account: null };
+const STOP = new Set(["what", "whats", "what's", "is", "our", "the", "a", "an", "for", "to", "of", "how", "do", "i", "we", "my", "me", "where", "can", "find", "get", "hey", "hi", "hello", "please", "need", "about", "with", "on", "in", "and", "or", "who", "handles", "it", "there", "this", "that", "you", "your", "does", "should", "be", "are", "any", "have", "has", "help", "question", "questions"]);
+const spSearchUrl = (q) => SP_SITE ? `${SP_SITE}/_layouts/15/search.aspx?q=${encodeURIComponent(q)}` : "";
+const resUrl = (r) => r.url || spSearchUrl(r.title);
+const qWords = (q) => lower(q).replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
+const stem = (w) => w.replace(/(ings|ing|ers|er|es|s)$/i, "");
+
+function resourceScore(r, words, raw) {
+  const title = lower(r.title), desc = lower(r.description || ""), keys = (r.keywords || []).map(lower);
+  let score = 0;
+  for (const k of keys) if (k.includes(" ") && raw.includes(k)) score += 8;          // phrase like "time off"
+  for (const w of words) {
+    const s = stem(w);
+    if (title.split(/\s+/).some((t) => stem(t) === s)) score += 6;
+    else if (keys.some((k) => k === w || stem(k) === s)) score += 5;
+    else if (s.length >= 4 && (desc.includes(s) || keys.some((k) => k.includes(s)))) score += 2;
+  }
+  return score;
+}
+function requestTypeMatch(words, raw) {
+  const wantsRequest = /\b(request|access|ticket|submit|form|need access|add me|credits?)\b/.test(raw);
+  let best = null;
+  for (const [key, t] of Object.entries(CFG.requestTypes)) {
+    if (!canUseType(t)) continue;
+    const label = lower(t.label);
+    let sc = 0;
+    for (const w of words) if (w.length > 2 && label.includes(w)) sc += 4;
+    if (sc && wantsRequest) sc += 3;
+    if (sc > (best?.sc || 0)) best = { key, t, sc };
+  }
+  return best && best.sc >= 4 ? best : null;
+}
+
+function answerFor(q) {
+  const raw = lower(q), words = qWords(q);
+  const parts = [];
+  // 1) SharePoint resources
+  const res = (HC.resources || []).map((r) => ({ r, s: resourceScore(r, words, raw) })).filter((x) => x.s >= 5).sort((a, b) => b.s - a.s);
+  // 2) People (Who to contact): chat sentences are long, so count the words that match instead of requiring all
+  const people = PEOPLE().map((p, i) => {
+    const handles = (p.handles || []).map(lower), keys = (p.keywords || []).map(lower), name = lower(p.name);
+    let sc = 0;
+    for (const k of keys) if (k.includes(" ") && raw.includes(k)) sc += 6;
+    for (const w of words) {
+      const st = stem(w);
+      if (name.includes(w)) sc += 6;
+      else if (keys.some((k) => k === w || stem(k) === st) || handles.some((h) => h.split(/\s+/).some((x) => stem(x) === st))) sc += 5;
+    }
+    return { p, i, s: sc };
+  }).filter((x) => x.s >= 5).sort((a, b) => b.s - a.s);
+  // 3) Request forms
+  const rt = requestTypeMatch(words, raw);
+
+  const docScore = res[0]?.s || 0, personTop = people[0]?.s || 0;
+  if (people.length && personTop > docScore) parts.push({ kind: "person", p: people[0].p, i: people[0].i });
+  if (res.length) parts.push({ kind: "doc", top: res[0].r, more: res.slice(1, 3).map((x) => x.r) });
+  if (rt && (!res.length || rt.sc >= 7)) parts.push({ kind: "request", key: rt.key, t: rt.t });
+  if (people.length && personTop <= docScore && !res.length) parts.push({ kind: "person", p: people[0].p, i: people[0].i });
+  return { q, parts, words };
+}
+
+function hpMsgHTML(m) {
+  if (m.from === "me") return `<div class="hp-msg hp-me"><div class="hp-bubble-text">${esc(m.text)}</div></div>`;
+  if (m.typing) return `<div class="hp-msg hp-bot"><div class="hp-bubble-text hp-typing"><i></i><i></i><i></i></div></div>`;
+  return `<div class="hp-msg hp-bot">${m.html}</div>`;
+}
+
+function botReplyHTML(a) {
+  const out = [];
+  const docCard = (r, big) => `<a class="hp-doc${big ? " is-top" : ""}" href="${esc(resUrl(r))}" target="_blank" rel="noopener">
+      <span class="hp-doc-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
+      <span class="hp-doc-text"><strong>${esc(r.title)}</strong>${big && r.description ? `<small>${esc(r.description)}</small>` : ""}<em>${r.url ? "Open in SharePoint" : "Find it in SharePoint"}</em></span>
+      <span class="hp-doc-go">${ARROW_R}</span></a>`;
+  for (const p of a.parts) {
+    if (p.kind === "doc") {
+      out.push(`<div class="hp-bubble-text">Here it is! 👉</div>${docCard(p.top, true)}`);
+      if (p.more.length) out.push(`<div class="hp-related"><span>Related</span>${p.more.map((r) => docCard(r, false)).join("")}</div>`);
+    }
+    if (p.kind === "request") out.push(`<div class="hp-bubble-text">You can send a request for that:</div>
+      <button type="button" class="hp-action" data-hp-request="${esc(p.key)}"><span class="hp-doc-ico">${ICONS[p.t.icon] || ICONS.spark}</span><span class="hp-doc-text"><strong>${esc(p.t.label)}</strong><small>${esc(p.t.blurb)}</small><em>Open the request form</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`);
+    if (p.kind === "person") out.push(`<div class="hp-bubble-text">For that, reach out to <strong>${esc(p.p.name)}</strong>.</div>
+      <button type="button" class="hp-action" data-hp-person="${p.i}"><span class="hp-doc-ico hp-person-ico">${esc(initials(p.p.name))}</span><span class="hp-doc-text"><strong>${esc(p.p.name)}</strong><small>${esc(p.p.summary || "")}</small><em>See how to reach them</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`);
+  }
+  if (!out.length) {
+    out.push(`<div class="hp-bubble-text">I couldn't find an exact match for that.${SP_SITE ? " Here's a search of our SharePoint:" : ""}</div>`);
+    if (SP_SITE) out.push(docCard({ title: `Search SharePoint for “${a.q}”`, url: spSearchUrl(a.q) }, false));
+    out.push(`<div class="hp-bubble-text hp-soft">Still stuck? Your account manager can point you the right way, or check <button type="button" class="hp-inline" data-hp-contacts>Who to contact</button>.</div>`);
+  }
+  if (a.graph?.length) {
+    out.push(`<div class="hp-related"><span>Found in SharePoint</span>${a.graph.map((g) => `<a class="hp-doc" href="${esc(g.url)}" target="_blank" rel="noopener"><span class="hp-doc-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></span><span class="hp-doc-text"><strong>${esc(g.name)}</strong>${g.snippet ? `<small>${esc(g.snippet)}</small>` : ""}</span><span class="hp-doc-go">${ARROW_R}</span></a>`).join("")}</div>`);
+  }
+  return out.join("");
+}
+
+function renderHelper() {
+  const box = $("#hp-msgs"); if (!box) return;
+  const welcome = `<div class="hp-msg hp-bot"><div class="hp-bubble-text">${esc(HC.greeting || "Hi! What do you need?")}</div>
+    <div class="hp-chips">${(HC.suggestions || []).map((x) => `<button type="button" class="hp-chip" data-hp-ask="${esc(x)}">${esc(x)}</button>`).join("")}</div>
+    ${msConfigured() && !HP.account ? `<button type="button" class="hp-connect" data-hp-connect><svg width="14" height="14" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/><rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/></svg>Connect Microsoft to search all of SharePoint</button>` : ""}</div>`;
+  box.innerHTML = welcome + HP.msgs.map(hpMsgHTML).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+async function askHelper(q) {
+  q = String(q || "").trim(); if (!q || HP.busy) return;
+  HP.busy = true;
+  HP.msgs.push({ from: "me", text: q }, { from: "bot", typing: true });
+  renderHelper();
+  const a = answerFor(q);
+  if (HP.account && (!a.parts.length || a.parts[0].kind !== "doc")) { try { a.graph = await graphSearch(q); } catch (e) { console.warn("SharePoint search failed", e); } }
+  await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 650));
+  HP.msgs.pop();
+  HP.msgs.push({ from: "bot", html: botReplyHTML(a) });
+  HP.busy = false;
+  renderHelper();
+  try { sessionStorage.setItem("hra_helper_" + (state.user?.uid || ""), JSON.stringify(HP.msgs.slice(-30))); } catch {}
+}
+
+function toggleHelper(force) {
+  HP.open = force ?? !HP.open;
+  const panel = $("#hp-panel"), bubble = $("#hp-bubble");
+  bubble.setAttribute("aria-expanded", String(HP.open));
+  bubble.classList.toggle("is-open", HP.open);
+  if (HP.open) {
+    panel.hidden = false; requestAnimationFrame(() => panel.classList.add("is-open"));
+    renderHelper();
+    try { localStorage.setItem("hra_helper_seen", "1"); } catch {}
+    bubble.classList.remove("is-new");
+    if (matchMedia("(pointer: fine)").matches) setTimeout(() => $("#hp-q")?.focus(), 250);
+  } else {
+    panel.classList.remove("is-open"); setTimeout(() => { if (!HP.open) panel.hidden = true; }, 300);
+  }
+}
+
+function startHelper() {
+  const h = $("#helper"); if (!h) return;
+  h.hidden = false;
+  try { HP.msgs = JSON.parse(sessionStorage.getItem("hra_helper_" + state.user.uid)) || []; } catch { HP.msgs = []; }
+  let seen = false; try { seen = Boolean(localStorage.getItem("hra_helper_seen")); } catch {}
+  $("#hp-bubble").classList.toggle("is-new", !seen);
+  $("#hp-title").textContent = HC.name || "HRA Helper";
+}
+function stopHelper() { HP.open = false; HP.msgs = []; HP.account = null; const h = $("#helper"); if (h) { h.hidden = true; $("#hp-panel").hidden = true; $("#hp-panel").classList.remove("is-open"); } }
+
+/* ---- optional: search all of SharePoint with the person's Microsoft sign-in ---- */
+const msConfigured = () => Boolean(HC.microsoft?.clientId && HC.microsoft?.tenantId);
+const GRAPH_SCOPES = ["Sites.Read.All", "Files.Read.All"];
+function loadMsal() {
+  if (window.msal) return Promise.resolve(window.msal);
+  return new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js";
+    sc.onload = () => res(window.msal); sc.onerror = () => rej(new Error("Microsoft sign-in didn't load"));
+    document.head.appendChild(sc);
+  });
+}
+async function connectMicrosoft() {
+  try {
+    const msal = await loadMsal();
+    HP.msal = HP.msal || new msal.PublicClientApplication({ auth: { clientId: HC.microsoft.clientId, authority: `https://login.microsoftonline.com/${HC.microsoft.tenantId}`, redirectUri: location.origin + location.pathname }, cache: { cacheLocation: "sessionStorage" } });
+    await HP.msal.initialize();
+    const r = await HP.msal.loginPopup({ scopes: GRAPH_SCOPES, prompt: "select_account" });
+    HP.account = r.account;
+    HP.msgs.push({ from: "bot", html: `<div class="hp-bubble-text">Connected as <strong>${esc(r.account.name || r.account.username)}</strong>. I'll now search all of SharePoint too. ✨</div>` });
+    renderHelper();
+  } catch (e) {
+    console.error(e);
+    HP.msgs.push({ from: "bot", html: `<div class="hp-bubble-text">I couldn't connect to Microsoft. I'll keep using the saved links for now.</div>` });
+    renderHelper();
+  }
+}
+async function graphSearch(q) {
+  let tok;
+  try { tok = (await HP.msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: HP.account })).accessToken; }
+  catch { tok = (await HP.msal.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: HP.account })).accessToken; }
+  const res = await fetch("https://graph.microsoft.com/v1.0/search/query", {
+    method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ requests: [{ entityTypes: ["driveItem", "listItem"], query: { queryString: `${q}${SP_SITE ? ` path:"${SP_SITE}"` : ""}` }, from: 0, size: 4 }] })
+  });
+  if (!res.ok) throw new Error("Graph " + res.status);
+  const j = await res.json();
+  const hits = j?.value?.[0]?.hitsContainers?.[0]?.hits || [];
+  return hits.map((h) => ({ name: h.resource?.name || h.resource?.fields?.title || "SharePoint item", url: h.resource?.webUrl, snippet: String(h.summary || "").replace(/<[^>]+>/g, "").slice(0, 120) })).filter((x) => x.url);
 }
