@@ -1555,7 +1555,22 @@ function bind() {
     const mnB = t.closest("[data-ac-min]"); if (mnB) { AL.draft.minutes = Number(mnB.dataset.acMin); $$("[data-ac-min]").forEach((b) => b.setAttribute("aria-pressed", String(b === mnB))); renderPreview(); return; }
     if (t.closest("[data-notif-panel]")) { const p = $("#notif-pop"), open = p.hidden; renderNotifPanel(); p.hidden = !open; $("#bell-btn").setAttribute("aria-expanded", String(open)); return; }
     const npT = t.closest("[data-np]"); if (npT) { toggleNP(npT.dataset.np); return; }
-    if (t.closest("[data-np-test]")) { unlockAudio(); setTimeout(() => notify({ kind: state.isAdmin ? "ticket" : "done", title: "Test notification", body: "This is how notifications will look and sound." }), 150); return; }
+    if (t.closest("[data-np-test]")) {
+      unlockAudio();
+      const kind = state.isAdmin ? "ticket" : "done";
+      setTimeout(() => { chime(kind); messengerPopup({ kind, title: "Test notification", body: "This is how notifications look inside the dashboard." }); }, 150);
+      if (NP.desktop && desktopState() === "granted") {
+        toast("A Windows test notification arrives in 5 seconds. Switch to another app to see it.", "var(--s-progress)");
+        setTimeout(() => {
+          const ok = desktopNotify({ kind, title: "HRA Dashboard test", body: "Windows notifications are working. You'll see these even when you're in another app." }, true);
+          flashTitle("Test notification");
+          if (!ok) toast("The browser couldn't show a Windows notification.", "#E2632B");
+        }, 5000);
+      } else {
+        setTimeout(() => toast(desktopState() === "denied" ? "Windows notifications are blocked for this site in your browser settings." : "Turn on Windows notifications above to get alerts outside the dashboard.", "#E0A800"), 600);
+      }
+      return;
+    }
     if (!t.closest(".notif-wrap") && $("#notif-pop") && !$("#notif-pop").hidden) { $("#notif-pop").hidden = true; $("#bell-btn").setAttribute("aria-expanded", "false"); }
     const ddT = t.closest("[data-dd-toggle]");
     if (ddT) {
@@ -3310,19 +3325,35 @@ function messengerPopup({ kind = "info", title, body, action, sticky }) {
   host.appendChild(el);
 }
 
-function desktopNotify({ kind, title, body, action }) {
-  if (!NP.desktop || desktopState() !== "granted") return;
-  if (document.visibilityState === "visible" && document.hasFocus()) return;   // they're already looking at the dashboard
+function desktopNotify({ kind, title, body, action }, force) {
+  if (!NP.desktop || desktopState() !== "granted") return false;
+  if (!force && document.visibilityState === "visible" && document.hasFocus()) return false;   // they're already looking at the dashboard
   try {
-    const n = new Notification(title, { body, icon: "assets/logo.png", tag: kind + ":" + title + body, requireInteraction: kind === "alert" });
+    const n = new Notification(title, { body, icon: new URL("assets/logo.png", location.href).href, tag: kind + ":" + Date.now(), renotify: true, requireInteraction: kind === "alert" });
     n.onclick = () => { window.focus(); action?.(); n.close(); };
-  } catch (e) { console.warn("Notification failed", e); }
+    return true;
+  } catch (e) { console.warn("Notification failed", e); return false; }
 }
+
+// Old-Messenger style: flash the browser tab title while the dashboard isn't in front.
+const BASE_TITLE = document.title;
+let flashTimer = null, unseen = 0;
+function flashTitle(text) {
+  if (document.visibilityState === "visible" && document.hasFocus()) return;
+  unseen++;
+  clearInterval(flashTimer);
+  let on = false;
+  flashTimer = setInterval(() => { on = !on; document.title = on ? `🔴 (${unseen}) ${text}` : BASE_TITLE; }, 1000);
+}
+function stopFlash() { clearInterval(flashTimer); flashTimer = null; unseen = 0; document.title = BASE_TITLE; }
+addEventListener("focus", stopFlash);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") stopFlash(); });
 
 function notify(opts) {
   chime(opts.kind);
   if (NP.popup) messengerPopup(opts); else toast(`${opts.title}: ${opts.body}`, opts.kind === "done" ? "var(--s-done)" : "var(--s-open)");
   desktopNotify(opts);
+  flashTitle(opts.kind === "alert" ? "URGENT alert" : opts.title);
 }
 
 function notifPanelHTML() {
@@ -3336,7 +3367,8 @@ function notifPanelHTML() {
       ${sw("sound", NP.sound, "Sound", "A short chime with each notification")}
     </ul>
     <button type="button" class="btn btn-ghost np-test" data-np-test>Send me a test</button>
-    <p class="np-note">Notifications arrive while the dashboard is open in a browser tab. Keep it open (it can be in the background).</p>`;
+    ${NP.desktop && ds === "granted" ? `<p class="np-note"><strong>Not seeing the Windows test?</strong> Open Windows Settings → System → Notifications, make sure your browser is turned on and Do not disturb is off.</p>` : ""}
+    <p class="np-note">Notifications arrive while the dashboard is open in a browser tab, even in the background or minimized. They can't arrive once the tab is closed.</p>`;
 }
 function renderNotifPanel() { const p = $("#notif-pop"); if (p) p.innerHTML = notifPanelHTML(); $(".bell-dot").hidden = !(desktopState() === "default" && !NP.desktopAsked); }
 
