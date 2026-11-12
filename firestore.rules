@@ -91,6 +91,11 @@ service cloud.firestore {
       allow read: if isMember();
       allow write: if isAdmin();
     }
+    // History of past alerts, for the notification center.
+    match /broadcast_log/{alertId} {
+      allow read: if isMember();
+      allow write: if isAdmin();
+    }
 
     // Each person's own dashboard preferences (like their column layout).
     match /user_prefs/{uid} {

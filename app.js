@@ -68,7 +68,7 @@ function toast(msg, color, action) {
 /* --------------------------------------------------------------------------
    Data stores
    -------------------------------------------------------------------------- */
-const bcListeners = new Set();
+const bcListeners = new Set(), logListeners = new Set();
 function createDemoStore() {
   const KEY = "hra_demo_tickets_v3", UKEY = "hra_demo_user_v2", FKEY = "hra_demo_files_v1";
   const loadFiles = () => { try { return JSON.parse(localStorage.getItem(FKEY)) || {}; } catch { return {}; } };
@@ -151,6 +151,25 @@ function createDemoStore() {
       return () => { removeEventListener("storage", fn); bcListeners.delete(fn); };
     },
     async setBroadcast(data) { localStorage.setItem("hra_demo_broadcast", JSON.stringify(data)); bcListeners.forEach((fn) => fn()); },
+    watchAlertLog(cb) {
+      const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_alert_log")) || []; } catch { return []; } };
+      if (!localStorage.getItem("hra_demo_alert_log")) {
+        const d = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+        localStorage.setItem("hra_demo_alert_log", JSON.stringify([
+          { id: "seed-fest", active: false, level: "festive", title: "Shout-out to Jen Omohundro for 5 hires this month! 🎉", message: "Amazing work Jen. Thank you for everything you do for our clients.", startedAt: d(26), endsAt: d(22), by: "Juan Rochin", byUid: "demo-admin" },
+          { id: "seed-maint", active: false, level: "warning", title: "Scheduled maintenance tonight", message: "Workable may be unavailable from 9 to 10 PM. Save your work.", startedAt: d(74), endsAt: d(73), by: "Juan Rochin", byUid: "demo-admin" }
+        ]));
+      }
+      const fn = (e) => { if (!e || e.key === "hra_demo_alert_log") cb(read()); };
+      addEventListener("storage", fn); logListeners.add(fn); setTimeout(() => cb(read()), 0);
+      return () => { removeEventListener("storage", fn); logListeners.delete(fn); };
+    },
+    async logAlert(a) {
+      let list = []; try { list = JSON.parse(localStorage.getItem("hra_demo_alert_log")) || []; } catch {}
+      const i = list.findIndex((x) => x.id === a.id);
+      if (i >= 0) list[i] = { ...list[i], ...a }; else list.unshift(a);
+      localStorage.setItem("hra_demo_alert_log", JSON.stringify(list.slice(0, 50))); logListeners.forEach((fn) => fn());
+    },
     async setPrefs(uid, data) { const cur = await this.getPrefs(uid); localStorage.setItem("hra_prefs_" + uid, JSON.stringify({ ...cur, ...data })); },
     async addAttachments(id, metas) {
       save(load().map((t) => t.id === id ? { ...t, attachments: [...(t.attachments || []), ...metas], updatedAt: Date.now() } : t));
@@ -215,6 +234,11 @@ async function createFirebaseStore() {
       return fsMod.onSnapshot(fsMod.doc(db, "broadcast", "current"), (snap) => cb(snap.exists() ? snap.data() : null), (e) => console.warn("Alerts unavailable", e));
     },
     setBroadcast(data) { return fsMod.setDoc(fsMod.doc(db, "broadcast", "current"), data); },
+    watchAlertLog(cb) {
+      const q = fsMod.query(fsMod.collection(db, "broadcast_log"), fsMod.orderBy("startedAt", "desc"), fsMod.limit(30));
+      return fsMod.onSnapshot(q, (snap) => cb(snap.docs.map((d) => d.data())), (e) => console.warn("Alert history unavailable", e));
+    },
+    logAlert(a) { return fsMod.setDoc(fsMod.doc(db, "broadcast_log", a.id), a, { merge: true }); },
     async getPrefs(uid) {
       const snap = await fsMod.getDoc(fsMod.doc(db, "user_prefs", uid));
       return snap.exists() ? snap.data() : {};
@@ -368,6 +392,7 @@ function onTickets(list) {
   }
   state.known = new Map(list.map((t) => [t.id, t.status]));
   state.tickets = list;
+  setTimeout(refreshBell, 0);
   state.loaded = true;
   if (first) {
     const m = location.hash.match(/^#r-([A-Za-z0-9]+)$/);
@@ -1551,23 +1576,35 @@ function bind() {
     if (t.closest("[data-alert-ack]")) { ackTakeover(); return; }
     if (t.closest("[data-alert-more]")) { if (AL.cur) showTakeover(AL.cur); return; }
     const tpl = t.closest("[data-ac-tpl]"); if (tpl) { const x = ALERT_TEMPLATES[Number(tpl.dataset.acTpl)]; Object.assign(AL.draft, { level: x.level, minutes: x.minutes, title: x.title, message: x.message }); openAlertComposer(); return; }
-    const lvB = t.closest("[data-ac-level]"); if (lvB) { AL.draft.level = lvB.dataset.acLevel; $$("[data-ac-level]").forEach((b) => { const on = b === lvB; b.classList.toggle("is-on", on); b.setAttribute("aria-checked", String(on)); }); renderPreview(); return; }
+    const lvB = t.closest("[data-ac-level]"); if (lvB) {
+      AL.draft.level = lvB.dataset.acLevel;
+      $$("[data-ac-level]").forEach((b) => { const on = b === lvB; b.classList.toggle("is-on", on); b.setAttribute("aria-checked", String(on)); });
+      const sb = $(".ac-send"); if (sb) { sb.classList.toggle("is-festive", AL.draft.level === "festive"); $(".btn-text", sb).textContent = AL.draft.level === "festive" ? "Celebrate with everyone 🎉" : "Send to everyone"; }
+      renderPreview(); return;
+    }
     const mnB = t.closest("[data-ac-min]"); if (mnB) { AL.draft.minutes = Number(mnB.dataset.acMin); $$("[data-ac-min]").forEach((b) => b.setAttribute("aria-pressed", String(b === mnB))); renderPreview(); return; }
-    if (t.closest("[data-notif-panel]")) { const p = $("#notif-pop"), open = p.hidden; renderNotifPanel(); p.hidden = !open; $("#bell-btn").setAttribute("aria-expanded", String(open)); return; }
-    const npT = t.closest("[data-np]"); if (npT) { toggleNP(npT.dataset.np); return; }
+    if (t.closest("[data-notif-panel]")) { const p = $("#notif-pop"), open = p.hidden; NH.view = "list"; renderNotifPanel(); p.hidden = !open; $("#bell-btn").setAttribute("aria-expanded", String(open)); return; }
+    const npT = t.closest("[data-np]"); if (npT) { NP[npT.dataset.np] = !NP[npT.dataset.np]; saveNP(); renderNotifPanel(); return; }
+    const npM = t.closest("[data-np-mode]"); if (npM) { if (npM.dataset.npMode === "windows") enableWindows(); else { NP.mode = "dashboard"; saveNP(); renderNotifPanel(); refreshBell(); } return; }
+    if (t.closest("[data-np-enable]")) { enableWindows(); return; }
+    const ncV = t.closest("[data-nc-view]"); if (ncV) { NH.view = ncV.dataset.ncView; renderNotifPanel(); return; }
+    if (t.closest("[data-nc-readall]")) { NH.read = { all: new Date().toISOString(), ids: [] }; saveRead(); refreshBell(); renderNotifPanel(); return; }
+    const ncI = t.closest("[data-nc]"); if (ncI) {
+      const it = notifItems().find((x) => x.id === ncI.dataset.nc);
+      if (!NH.read.ids.includes(ncI.dataset.nc)) { NH.read.ids.push(ncI.dataset.nc); saveRead(); }
+      $("#notif-pop").hidden = true; $("#bell-btn").setAttribute("aria-expanded", "false"); refreshBell();
+      it?.open(); return;
+    }
     if (t.closest("[data-np-test]")) {
       unlockAudio();
       const kind = state.isAdmin ? "ticket" : "done";
-      setTimeout(() => { chime(kind); messengerPopup({ kind, title: "Test notification", body: "This is how notifications look inside the dashboard." }); }, 150);
-      if (NP.desktop && desktopState() === "granted") {
-        toast("A Windows test notification arrives in 5 seconds. Switch to another app to see it.", "var(--s-progress)");
-        setTimeout(() => {
-          const ok = desktopNotify({ kind, title: "HRA Dashboard test", body: "Windows notifications are working. You'll see these even when you're in another app." }, true);
-          flashTitle("Test notification");
-          if (!ok) toast("The browser couldn't show a Windows notification.", "#E2632B");
-        }, 5000);
+      if (windowsReady()) {
+        chime(kind);
+        const ok = desktopNotify({ kind, title: "HRA Dashboard test", body: "Windows notifications are working. This is how alerts and request updates will appear." }, true);
+        toast(ok ? "Test sent to Windows. Look at the bottom-right corner of your screen." : "The browser couldn't show a Windows notification.", ok ? "var(--s-progress)" : "#E2632B");
       } else {
-        setTimeout(() => toast(desktopState() === "denied" ? "Windows notifications are blocked for this site in your browser settings." : "Turn on Windows notifications above to get alerts outside the dashboard.", "#E0A800"), 600);
+        notify({ kind, title: "Test notification", body: "This is how notifications look inside the dashboard." });
+        if (NP.mode === "windows") setTimeout(() => toast(desktopState() === "denied" ? "Windows notifications are blocked for this site in your browser settings." : "Select Windows above and allow notifications to get them outside the dashboard.", "#E0A800"), 600);
       }
       return;
     }
@@ -3266,7 +3303,9 @@ function contactCard(t, k, words, isFallback = false, idx = DIR.topics.indexOf(t
    Notifications: messenger-style pop-ups, chime, and Windows notifications
    ========================================================================== */
 const NOTIF_KEY = "hra_notif_prefs";
-const NP = Object.assign({ popup: true, desktop: false, sound: true }, (() => { try { return JSON.parse(localStorage.getItem(NOTIF_KEY)) || {}; } catch { return {}; } })());
+const NP = Object.assign({ mode: "windows", sound: true }, (() => { try { return JSON.parse(localStorage.getItem(NOTIF_KEY)) || {}; } catch { return {}; } })());
+if (NP.mode !== "windows" && NP.mode !== "dashboard") NP.mode = "windows";
+const windowsReady = () => NP.mode === "windows" && desktopState() === "granted";
 const saveNP = () => { try { localStorage.setItem(NOTIF_KEY, JSON.stringify(NP)); } catch {} };
 const desktopSupported = () => "Notification" in window;
 const desktopState = () => !desktopSupported() ? "unsupported" : Notification.permission;   // default | granted | denied
@@ -3283,6 +3322,7 @@ function chime(kind) {
     g.gain.setValueAtTime(0.0001, t0 + at); g.gain.exponentialRampToValueAtTime(vol, t0 + at + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
     o.connect(g).connect(audioCtx.destination); o.start(t0 + at); o.stop(t0 + at + dur + 0.05);
   };
+  if (kind === "party") { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, i * .09, .3, .13)); tone(1568, .5, .5, .1); tone(2093, .62, .45, .07); return; }
   if (kind === "alert") { [0, .22, .44].forEach((d) => { tone(880, d, .16, .2, "triangle"); tone(660, d + .1, .14, .16, "triangle"); }); }
   else if (kind === "done") { tone(784, 0, .18); tone(1047, .12, .28); tone(1319, .24, .38, .12); }
   else { tone(988, 0, .2); tone(1319, .14, .36); }      // classic two-note "ding-dong" up
@@ -3292,7 +3332,8 @@ const MSGR_ICONS = {
   ticket: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M12 9v4M10 11h4"/></svg>',
   done:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16.5 9.5"/></svg>',
   alert:  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>',
-  info:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>'
+  info:   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>',
+  party:  '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5l4.8-12.8 8 8z"/><path d="M8.3 7.7c2.2 2.2 4.6 5.6 4.4 7.6"/><path d="M14 3.5c.4 1.3-.2 2.4-1.4 2.9M20.5 10c-1.3-.4-2.4.2-2.9 1.4M17 3l.4 1.6M21 7l-1.6.4"/><circle cx="14.8" cy="8.8" r=".7" fill="currentColor"/><circle cx="19.5" cy="14.5" r=".7" fill="currentColor"/></svg>'
 };
 
 function messengerPopup({ kind = "info", title, body, action, sticky }) {
@@ -3326,7 +3367,7 @@ function messengerPopup({ kind = "info", title, body, action, sticky }) {
 }
 
 function desktopNotify({ kind, title, body, action }, force) {
-  if (!NP.desktop || desktopState() !== "granted") return false;
+  if (desktopState() !== "granted") return false;
   if (!force && document.visibilityState === "visible" && document.hasFocus()) return false;   // they're already looking at the dashboard
   try {
     const n = new Notification(title, { body, icon: new URL("assets/logo.png", location.href).href, tag: kind + ":" + Date.now(), renotify: true, requireInteraction: kind === "alert" });
@@ -3351,37 +3392,123 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 function notify(opts) {
   chime(opts.kind);
-  if (NP.popup) messengerPopup(opts); else toast(`${opts.title}: ${opts.body}`, opts.kind === "done" ? "var(--s-done)" : "var(--s-open)");
-  desktopNotify(opts);
-  flashTitle(opts.kind === "alert" ? "URGENT alert" : opts.title);
+  // Windows first: shown in the Windows corner even while the dashboard is in front.
+  const shown = windowsReady() && desktopNotify(opts, true);
+  if (!shown) messengerPopup(opts);
+  flashTitle(opts.kind === "alert" ? "URGENT alert" : opts.kind === "party" ? "🎉 Celebration" : opts.title);
+  refreshBell();
+}
+
+/* ---- notification center (history) ---- */
+const NH = { alerts: [], unsubLog: null, read: { all: null, ids: [] }, view: "list" };
+const readKey = () => "hra_notif_read_" + (state.user?.uid || "");
+function loadRead() {
+  try { const r = JSON.parse(localStorage.getItem(readKey())); if (r) NH.read = { all: r.all || null, ids: r.ids || [] }; } catch {}
+  state.store.getPrefs(state.user.uid).then((p) => { if (p?.notifRead) { NH.read = { all: p.notifRead.all || null, ids: p.notifRead.ids || [] }; refreshBell(); } }).catch(() => {});
+}
+function saveRead() {
+  NH.read.ids = NH.read.ids.slice(-150);
+  try { localStorage.setItem(readKey(), JSON.stringify(NH.read)); } catch {}
+  state.store.setPrefs(state.user.uid, { notifRead: NH.read }).catch(() => {});
+}
+function notifItems() {
+  if (!state.user) return [];
+  const items = [];
+  const since = Date.now() - 45 * 86400e3;
+  for (const a of NH.alerts) {
+    if (!a?.startedAt) continue;
+    items.push({ id: "a:" + a.id, group: "important", kind: a.level === "festive" ? "party" : "alert", level: a.level,
+      title: a.title, text: a.message || "", by: a.by, at: a.startedAt, live: alertActive(a), open: () => showTakeover(a, true) });
+  }
+  for (const t of state.tickets) {
+    const created = toDate(t.createdAt).toISOString();
+    if (state.isAdmin && t.createdBy?.uid !== state.user.uid && new Date(created).getTime() > since)
+      items.push({ id: "n:" + t.id, group: "more", kind: "ticket", title: `${t.createdBy?.name || "Someone"} sent a request`, text: t.title, who: t.createdBy?.name, at: created, open: () => { setTool("requests"); openTicket(t.id); } });
+    if (t.createdBy?.uid === state.user.uid) {
+      const done = [...(t.history || [])].reverse().find((h) => h.status === "completed");
+      if (t.status === "completed" && done?.at && new Date(done.at).getTime() > since)
+        items.push({ id: "c:" + t.id + ":" + done.at, group: "more", kind: "done", title: "Your request was completed", text: `${ref(t.id)}: ${t.title}`, who: done.by, at: done.at, open: () => { setTool("requests"); openTicket(t.id); } });
+    }
+  }
+  return items.sort((x, y) => y.at.localeCompare(x.at)).slice(0, 60);
+}
+const isUnread = (it) => !(NH.read.all && it.at <= NH.read.all) && !NH.read.ids.includes(it.id);
+
+function refreshBell() {
+  const btn = $("#bell-btn"); if (!btn || !state.user) return;
+  const n = notifItems().filter(isUnread).length;
+  let badge = $(".bell-count", btn);
+  if (!badge) { badge = document.createElement("span"); badge.className = "bell-count"; btn.appendChild(badge); }
+  const prev = badge.textContent;
+  badge.textContent = n > 9 ? "9+" : String(n);
+  badge.hidden = !n;
+  if (n && prev !== badge.textContent) { badge.classList.remove("bump"); void badge.offsetWidth; badge.classList.add("bump"); }
+  $(".bell-dot").hidden = Boolean(n) || !(NP.mode === "windows" && desktopState() === "default");
+  if (!$("#notif-pop").hidden && NH.view === "list") renderNotifPanel();
+}
+
+function itemHTML(it) {
+  const av = it.kind === "ticket" ? `<span class="nc-av nc-person">${esc(initials(it.who || "?"))}</span>`
+    : `<span class="nc-av nc-${it.kind}${it.level ? " lv-" + it.level : ""}">${MSGR_ICONS[it.kind] || MSGR_ICONS.info}</span>`;
+  return `<li><button type="button" class="nc-item${isUnread(it) ? " is-unread" : ""}" data-nc="${esc(it.id)}">
+    <span class="nc-dot" aria-hidden="true"></span>${av}
+    <span class="nc-body"><span class="nc-title">${esc(it.title)}</span>${it.text ? `<span class="nc-text">${esc(it.text)}</span>` : ""}
+      <span class="nc-meta">${it.live ? `<span class="nc-live">Live now</span>` : ""}${esc(ago(it.at))}${it.by ? ` · from ${esc(it.by)}` : ""}</span></span>
+  </button></li>`;
 }
 
 function notifPanelHTML() {
+  if (NH.view === "settings") return settingsHTML();
+  const items = notifItems();
+  const imp = items.filter((x) => x.group === "important"), more = items.filter((x) => x.group === "more");
+  const unread = items.filter(isUnread).length;
+  const ask = NP.mode === "windows" && desktopState() === "default";
+  return `<div class="nc-head"><strong>Notifications</strong>
+      <span class="nc-tools">
+        ${unread ? `<button type="button" class="link-btn" data-nc-readall>Mark all as read</button>` : ""}
+        <button type="button" class="icon-btn nc-gear" data-nc-view="settings" aria-label="Notification settings" title="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      </span></div>
+    ${ask ? `<div class="nc-ask"><span>${MSGR_ICONS.info}</span><span><strong>Get notifications in Windows</strong><small>See alerts and requests even when you're in another app.</small></span><button type="button" class="btn btn-primary btn-mini" data-np-enable>Turn on</button></div>` : ""}
+    ${desktopState() === "denied" && NP.mode === "windows" ? `<div class="nc-ask is-warn"><span>${MSGR_ICONS.alert}</span><span><strong>Windows notifications are blocked</strong><small>Allow notifications for this site in your browser's site settings. Until then they show inside the dashboard.</small></span></div>` : ""}
+    <div class="nc-scroll">
+      ${items.length ? `
+        ${imp.length ? `<div class="nc-sec">Important</div><ul class="nc-list">${imp.map(itemHTML).join("")}</ul>` : ""}
+        ${more.length ? `<div class="nc-sec">More notifications</div><ul class="nc-list">${more.map(itemHTML).join("")}</ul>` : ""}`
+      : `<div class="nc-empty">${MSGR_ICONS.info}<strong>You're all caught up</strong><span>Alerts and request updates will show up here.</span></div>`}
+    </div>`;
+}
+
+function settingsHTML() {
   const ds = desktopState();
-  const sw = (key, on, label, sub, disabled) => `<li class="np-row${disabled ? " is-disabled" : ""}"><span class="np-label"><strong>${label}</strong><small>${sub}</small></span>
-    <button type="button" class="switch" role="switch" aria-checked="${on}" data-np="${key}" ${disabled ? "disabled" : ""} aria-label="${label}"><span></span></button></li>`;
-  return `<div class="np-head"><strong>Notifications</strong><span>You'll be notified about ${state.isAdmin ? "new requests, completed requests and alerts" : "your completed requests and alerts"}.</span></div>
+  const winSub = ds === "granted" ? "On. Shows in the corner of Windows, even when you're in another app." : ds === "denied" ? "Blocked in your browser. Allow notifications for this site in the browser's site settings." : ds === "unsupported" ? "Not supported in this browser." : "Needs your permission. Select it to allow.";
+  return `<div class="nc-head"><button type="button" class="icon-btn nc-back" data-nc-view="list" aria-label="Back to notifications"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button><strong>Notification settings</strong></div>
+    <div class="np-sec">Show notifications in</div>
+    <div class="np-modes" role="radiogroup">
+      <button type="button" role="radio" class="np-mode${NP.mode === "windows" ? " is-on" : ""}" aria-checked="${NP.mode === "windows"}" data-np-mode="windows" ${ds === "unsupported" ? "disabled" : ""}>
+        <span class="np-mode-ico"><svg viewBox="0 0 21 21" width="18" height="18"><rect x="1" y="1" width="9" height="9" fill="currentColor"/><rect x="11" y="1" width="9" height="9" fill="currentColor"/><rect x="1" y="11" width="9" height="9" fill="currentColor"/><rect x="11" y="11" width="9" height="9" fill="currentColor"/></svg></span>
+        <span><strong>Windows <em>Recommended</em></strong><small>${winSub}</small></span></button>
+      <button type="button" role="radio" class="np-mode${NP.mode === "dashboard" ? " is-on" : ""}" aria-checked="${NP.mode === "dashboard"}" data-np-mode="dashboard">
+        <span class="np-mode-ico">${MSGR_ICONS.info}</span>
+        <span><strong>Inside the dashboard</strong><small>Pop-up windows in the corner of this page only.</small></span></button>
+    </div>
     <ul class="np-list">
-      ${sw("popup", NP.popup, "Pop-up windows", "Little windows in the corner of the dashboard")}
-      ${sw("desktop", NP.desktop && ds === "granted", "Windows notifications", ds === "denied" ? "Blocked in your browser. Allow notifications for this site in the browser's site settings." : ds === "unsupported" ? "Not supported in this browser" : "Shows up even when you're in another app", ds === "denied" || ds === "unsupported")}
-      ${sw("sound", NP.sound, "Sound", "A short chime with each notification")}
+      <li class="np-row"><span class="np-label"><strong>Sound</strong><small>A short chime with each notification</small></span>
+        <button type="button" class="switch" role="switch" aria-checked="${NP.sound}" data-np="sound" aria-label="Sound"><span></span></button></li>
     </ul>
     <button type="button" class="btn btn-ghost np-test" data-np-test>Send me a test</button>
-    ${NP.desktop && ds === "granted" ? `<p class="np-note"><strong>Not seeing the Windows test?</strong> Open Windows Settings → System → Notifications, make sure your browser is turned on and Do not disturb is off.</p>` : ""}
-    <p class="np-note">Notifications arrive while the dashboard is open in a browser tab, even in the background or minimized. They can't arrive once the tab is closed.</p>`;
+    ${NP.mode === "windows" && ds === "granted" ? `<p class="np-note"><strong>Not seeing the test?</strong> Open Windows Settings → System → Notifications. Make sure your browser is turned on and Do not disturb is off.</p>` : ""}
+    <p class="np-note">Notifications arrive while the dashboard is open in a browser tab, even minimized or behind other windows. Anything you miss is saved here in the notification list.</p>`;
 }
-function renderNotifPanel() { const p = $("#notif-pop"); if (p) p.innerHTML = notifPanelHTML(); $(".bell-dot").hidden = !(desktopState() === "default" && !NP.desktopAsked); }
+function renderNotifPanel() { const p = $("#notif-pop"); if (p) p.innerHTML = notifPanelHTML(); }
 
-async function toggleNP(key) {
-  if (key === "desktop") {
-    if (!NP.desktop || desktopState() !== "granted") {
-      NP.desktopAsked = true;
-      const res = desktopState() === "granted" ? "granted" : await Notification.requestPermission();
-      NP.desktop = res === "granted";
-      if (!NP.desktop) toast("Windows notifications weren't allowed. You can change this in your browser's site settings.", "#E0A800");
-    } else NP.desktop = false;
-  } else NP[key] = !NP[key];
-  saveNP(); renderNotifPanel();
+async function enableWindows() {
+  NP.mode = "windows"; saveNP();
+  if (desktopState() === "default") {
+    const r = await Notification.requestPermission();
+    if (r === "granted") { desktopNotify({ kind: "info", title: "Notifications are on", body: "You'll see HRA Dashboard alerts and request updates here in Windows." }, true); toast("Windows notifications are on", "var(--s-done)"); }
+    else toast("Windows notifications weren't allowed. They'll show inside the dashboard instead.", "#E0A800");
+  }
+  renderNotifPanel(); refreshBell();
 }
 
 /* ==========================================================================
@@ -3390,7 +3517,8 @@ async function toggleNP(key) {
 const ALERT_LEVELS = {
   critical: { label: "Critical", tag: "URGENT" },
   warning:  { label: "Warning",  tag: "IMPORTANT" },
-  info:     { label: "Notice",   tag: "NOTICE" }
+  info:     { label: "Notice",   tag: "NOTICE" },
+  festive:  { label: "Festive",  tag: "CELEBRATE" }
 };
 const ALERT_DURATIONS = [[5, "5 minutes"], [10, "10 minutes"], [30, "30 minutes"], [60, "1 hour"], [240, "4 hours"], [0, "Until I turn it off"]];
 const ALERT_TEMPLATES = [
@@ -3399,7 +3527,11 @@ const ALERT_TEMPLATES = [
   { name: "System down", level: "critical", minutes: 60, title: "A system is down. We're working on it.",
     message: "[System name] isn't working right now. No action needed on your part. We'll post an update here when it's back." },
   { name: "Planned maintenance", level: "warning", minutes: 30, title: "Scheduled maintenance in progress",
-    message: "[System name] may be unavailable until [time]. Save your work. Thanks for your patience." }
+    message: "[System name] may be unavailable until [time]. Save your work. Thanks for your patience." },
+  { name: "🎉 Shout-out", level: "festive", minutes: 240, title: "Shout-out to [Name]! 🎉",
+    message: "Huge congratulations to [Name] for [achievement]. Thank you for everything you do for the team!" },
+  { name: "🎉 Day off", level: "festive", minutes: 0, title: "Surprise! [Day] is a day off for everyone 🎉",
+    message: "Thank you for all your hard work. Enjoy the day, rest up, and we'll see you on [return day]." }
 ];
 const AL = { cur: null, unsub: null, tick: null, seen: null, draft: null };
 const alertActive = (a) => Boolean(a && a.active && (!a.endsAt || new Date(a.endsAt).getTime() > Date.now()));
@@ -3408,11 +3540,14 @@ const fmtLeft = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); const h 
 
 function startAlerts() {
   stopAlerts();
+  loadRead();
+  NH.unsubLog = state.store.watchAlertLog((list) => { NH.alerts = list || []; refreshBell(); });
   AL.unsub = state.store.watchBroadcast(onAlertData);
   AL.tick = setInterval(tickAlert, 1000);
   renderNotifPanel();
 }
 function stopAlerts() {
+  NH.unsubLog?.(); NH.unsubLog = null; NH.alerts = []; NH.read = { all: null, ids: [] }; NH.view = "list";
   AL.unsub?.(); AL.unsub = null; clearInterval(AL.tick); AL.cur = null; AL.seen = null;
   $("#alert-root").innerHTML = ""; document.body.classList.remove("has-alert");
 }
@@ -3426,7 +3561,7 @@ function onAlertData(a) {
     let acked = false; try { acked = Boolean(localStorage.getItem(ackKey(a))); } catch {}
     if (!mine && !acked) {
       showTakeover(a);
-      notify({ kind: "alert", title: `${ALERT_LEVELS[a.level]?.tag || "ALERT"}: ${a.title}`, body: a.message || "", sticky: false });
+      notify({ kind: a.level === "festive" ? "party" : "alert", title: a.level === "festive" ? `🎉 ${a.title}` : `${ALERT_LEVELS[a.level]?.tag || "ALERT"}: ${a.title}`, body: a.message || "", action: () => showTakeover(a, true) });
     }
   }
   if (!alertActive(a) && wasId && AL.cur?.id === wasId && !a?.active) $(".alert-takeover")?.remove();
@@ -3455,7 +3590,8 @@ function renderBanner() {
   const html = `
     <div class="alert-stripes" aria-hidden="true"></div><div class="alert-shine" aria-hidden="true"></div>
     <div class="alert-inner">
-      <span class="alert-siren" aria-hidden="true"><span class="siren-ring"></span><span class="siren-ring r2"></span>${MSGR_ICONS.alert}</span>
+      ${lv === "festive" ? `<div class="alert-confetti" aria-hidden="true">${confettiBits(26)}</div>` : ""}
+      <span class="alert-siren" aria-hidden="true"><span class="siren-ring"></span><span class="siren-ring r2"></span>${lv === "festive" ? MSGR_ICONS.party : MSGR_ICONS.alert}</span>
       <span class="alert-tag">${esc(ALERT_LEVELS[lv].tag)}</span>
       <span class="alert-copy"><strong class="alert-title">${esc(a.title)}</strong>${a.message ? `<span class="alert-msg">${esc(a.message)}</span>` : ""}</span>
       <span class="alert-side">
@@ -3478,31 +3614,83 @@ function renderBanner() {
   AL.ro?.disconnect(); AL.ro?.observe(bar);
 }
 
-function showTakeover(a) {
+function showTakeover(a, past) {
   $(".alert-takeover")?.remove();
   const lv = ALERT_LEVELS[a.level] ? a.level : "critical";
+  const fest = lv === "festive";
   const el = document.createElement("div");
   el.className = `alert-takeover lv-${lv}`;
+  el.dataset.alertId = a.id;
   el.innerHTML = `<div class="tk-card" role="alertdialog" aria-modal="true" aria-labelledby="tk-title">
       <div class="alert-stripes" aria-hidden="true"></div>
-      <span class="tk-siren" aria-hidden="true"><span class="siren-ring"></span><span class="siren-ring r2"></span><span class="siren-ring r3"></span>${MSGR_ICONS.alert}</span>
-      <span class="tk-tag">${esc(ALERT_LEVELS[lv].tag)} · MESSAGE TO ALL EMPLOYEES</span>
+      <span class="tk-siren" aria-hidden="true"><span class="siren-ring"></span><span class="siren-ring r2"></span><span class="siren-ring r3"></span>${fest ? MSGR_ICONS.party : MSGR_ICONS.alert}</span>
+      <span class="tk-tag">${esc(ALERT_LEVELS[lv].tag)} · ${past && !alertActive(a) ? "PAST MESSAGE" : "MESSAGE TO ALL EMPLOYEES"}</span>
       <h2 id="tk-title">${esc(a.title)}</h2>
       ${a.message ? `<p>${esc(a.message)}</p>` : ""}
-      <span class="tk-from">From ${esc(a.by || "an admin")}, ${esc(new Date(a.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }))}</span>
-      <button type="button" class="tk-ok" data-alert-ack>Got it</button>
+      <span class="tk-from">From ${esc(a.by || "an admin")}, ${esc(past ? fullDate(a.startedAt) : new Date(a.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }))}</span>
+      <button type="button" class="tk-ok" data-alert-ack>${fest ? "Woohoo! 🎉" : past ? "Close" : "Got it"}</button>
     </div>`;
   document.body.appendChild(el);
   requestAnimationFrame(() => el.classList.add("is-open"));
   setTimeout(() => $(".tk-ok", el)?.focus(), 300);
+  if (fest) setTimeout(() => confettiBurst(), 250);
 }
 function ackTakeover() {
   const el = $(".alert-takeover"); if (!el) return;
-  if (AL.cur) { try { localStorage.setItem(ackKey(AL.cur), "1"); } catch {} }
+  if (el.classList.contains("lv-festive")) confettiBurst(true);
+  if (el.dataset.alertId) { try { localStorage.setItem("hra_alert_ack_" + el.dataset.alertId, "1"); } catch {} }
   el.classList.add("is-closing");
   setTimeout(() => el.remove(), 550);
   $(".alert-banner")?.classList.add("is-landing");
   setTimeout(() => $(".alert-banner")?.classList.remove("is-landing"), 1200);
+}
+
+/* ---- confetti ---- */
+const PARTY_COLORS = ["#F26A26", "#FFD23F", "#3BCEAC", "#2D6BFF", "#EE4266", "#9B5DE5", "#FFFFFF"];
+function confettiBits(n) {
+  let out = "";
+  for (let i = 0; i < n; i++) {
+    const c = PARTY_COLORS[i % PARTY_COLORS.length], left = (i * 37) % 100, dur = 3 + (i % 5) * .7, delay = -((i * 0.53) % dur), round = i % 3 === 0;
+    out += `<i style="left:${left}%;background:${c};animation-duration:${dur}s;animation-delay:${delay}s;${round ? "border-radius:50%;width:7px;height:7px;" : ""}"></i>`;
+  }
+  return out;
+}
+function confettiBurst(small) {
+  if (reduceMotion) return;
+  const cv = document.createElement("canvas");
+  cv.className = "confetti-canvas";
+  document.body.appendChild(cv);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = innerWidth, H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+  const N = small ? 90 : 220, parts = [];
+  const spawn = (x, y, angle, spread, speed) => {
+    const a = angle + (Math.random() - .5) * spread, v = speed * (.55 + Math.random() * .6);
+    parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, w: 6 + Math.random() * 6, h: 8 + Math.random() * 10, r: Math.random() * Math.PI, vr: (Math.random() - .5) * .3,
+      c: PARTY_COLORS[(Math.random() * PARTY_COLORS.length) | 0], shape: Math.random() < .3 ? "circle" : "rect", wob: Math.random() * 10 });
+  };
+  for (let i = 0; i < N / 2; i++) spawn(0, H * .75, -Math.PI / 3, .9, 17);          // left cannon
+  for (let i = 0; i < N / 2; i++) spawn(W, H * .75, -Math.PI * 2 / 3, .9, 17);      // right cannon
+  if (!small) for (let i = 0; i < 70; i++) spawn(Math.random() * W, -20, Math.PI / 2, .6, 3);   // top rain
+  const start = performance.now();
+  let last = start;
+  const frame = (now) => {
+    const t = now - start, k = Math.min(3, (now - last) / 16.67);   // time-based, so it looks the same at any frame rate
+    last = now;
+    ctx.clearRect(0, 0, W, H);
+    for (const p of parts) {
+      p.vy += .32 * k; p.vx *= Math.pow(.992, k); p.vy *= Math.pow(.992, k);
+      p.x += (p.vx + Math.sin((t / 200) + p.wob) * .6) * k; p.y += p.vy * k; p.r += p.vr * k;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c;
+      ctx.globalAlpha = Math.max(0, Math.min(1, 1 - (t - 2600) / 1200));
+      if (p.shape === "circle") { ctx.beginPath(); ctx.arc(0, 0, p.w / 2.2, 0, Math.PI * 2); ctx.fill(); }
+      else ctx.fillRect(-p.w / 2, -p.h / 2 * Math.abs(Math.cos(t / 120 + p.wob)), p.w, p.h * Math.abs(Math.cos(t / 120 + p.wob)) + 1);
+      ctx.restore();
+    }
+    if (t < 3800) requestAnimationFrame(frame); else cv.remove();
+  };
+  requestAnimationFrame(frame);
 }
 
 /* ---- composer (admins) ---- */
@@ -3512,7 +3700,7 @@ function openAlertComposer() {
   swapModal(`<div id="alert-compose">
     <div class="modal-head">
       <span class="type-icon ac-icon">${MSGR_ICONS.alert}</span>
-      <div><h2 id="modal-title">Alert all employees</h2><p>Puts a red banner on everyone's screen and sends a notification.</p></div>
+      <div><h2 id="modal-title">Alert all employees</h2><p>Shows a banner on everyone's screen and sends them a notification.</p></div>
     </div>
     <div id="ac-live"></div>
     <div class="ac-templates"><span>Start from:</span>${ALERT_TEMPLATES.map((t, i) => `<button type="button" class="ct-try-btn" data-ac-tpl="${i}">${esc(t.name)}</button>`).join("")}</div>
@@ -3527,7 +3715,7 @@ function openAlertComposer() {
       <p class="form-error" id="ac-error" role="alert"></p>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" data-close>Cancel</button>
-        <button type="submit" class="btn ac-send"><span class="btn-text">Send to everyone</span><span class="spinner" aria-hidden="true"></span></button>
+        <button type="submit" class="btn ac-send${AL.draft.level === "festive" ? " is-festive" : ""}"><span class="btn-text">${AL.draft.level === "festive" ? "Celebrate with everyone 🎉" : "Send to everyone"}</span><span class="spinner" aria-hidden="true"></span></button>
       </div>
     </form>
   </div>`);
@@ -3541,8 +3729,8 @@ function renderComposerLive() {
 }
 function renderPreview() {
   const d = AL.draft, el = $("#ac-preview"); if (!el) return;
-  el.innerHTML = `<div class="alert-banner is-preview lv-${d.level}"><div class="alert-stripes"></div><div class="alert-shine"></div><div class="alert-inner">
-    <span class="alert-siren"><span class="siren-ring"></span>${MSGR_ICONS.alert}</span><span class="alert-tag">${ALERT_LEVELS[d.level].tag}</span>
+  el.innerHTML = `<div class="alert-banner is-preview lv-${d.level}"><div class="alert-stripes"></div><div class="alert-shine"></div>${d.level === "festive" ? `<div class="alert-confetti">${confettiBits(16)}</div>` : ""}<div class="alert-inner">
+    <span class="alert-siren"><span class="siren-ring"></span>${d.level === "festive" ? MSGR_ICONS.party : MSGR_ICONS.alert}</span><span class="alert-tag">${ALERT_LEVELS[d.level].tag}</span>
     <span class="alert-copy"><strong class="alert-title">${esc(d.title || "Your headline appears here")}</strong>${d.message ? `<span class="alert-msg">${esc(d.message)}</span>` : ""}</span>
     ${d.minutes ? `<span class="alert-side"><span class="alert-timer">${d.minutes >= 60 ? d.minutes / 60 + "h 00m" : d.minutes + ":00"}</span></span>` : ""}</div></div>`;
 }
@@ -3559,6 +3747,7 @@ async function sendAlert(btn) {
     startedAt: now.toISOString(), endsAt: d.minutes ? new Date(now.getTime() + d.minutes * 60e3).toISOString() : null, by: state.user.name, byUid: state.user.uid };
   try {
     await state.store.setBroadcast(data);
+    state.store.logAlert(data).catch((e) => console.warn("Alert not saved to history", e));
     AL.draft = null;
     closeOverlay($("#modal"));
     toast("Alert sent to everyone", "var(--s-done)");
@@ -3572,6 +3761,11 @@ async function endAlert() {
   const yes = await confirmDialog({ title: "End this alert?", body: `The banner <strong>${esc(a.title)}</strong> will disappear for everyone.`, confirm: "End alert", danger: true });
   if (!yes) return;
   closeOverlay($("#confirm"));
-  try { await state.store.setBroadcast({ ...a, active: false, endedAt: new Date().toISOString(), endedBy: state.user.name }); toast("Alert ended", "var(--muted)"); }
+  try {
+    const ended = { ...a, active: false, endedAt: new Date().toISOString(), endedBy: state.user.name };
+    await state.store.setBroadcast(ended);
+    state.store.logAlert({ id: a.id, active: false, endedAt: ended.endedAt, endedBy: ended.endedBy }).catch(() => {});
+    toast("Alert ended", "var(--muted)");
+  }
   catch (e) { console.error(e); toast("Couldn't end the alert. Try again.", "#E2632B"); }
 }

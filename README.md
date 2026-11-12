@@ -9,8 +9,9 @@ Internal tools for the team, switched from the left panel:
 - **Who to contact**: search a problem ("password reset", "payroll") and see who to reach, with one-click Teams chat, email, call and copy buttons plus what to include. Edit the people and topics in `config.js` → `contacts`.
 - **SharePoint**: opens the team site (`config.js` → `links`).
 
-- **All-employees alert** (admins only): the megaphone button in the top bar sends a full-screen alert to everyone, then keeps a large animated banner at the top of the dashboard for 5 minutes up to "until I turn it off". Admins can end it from the banner. Stored in Firestore at `broadcast/current`.
-- **Notifications**: messenger-style pop-ups with a chime, plus Windows notifications when allowed. Sent for new all-employee alerts, new requests (to admins) and completed requests (to the requester). Each person sets their preferences with the bell button. They arrive while the dashboard is open in a browser tab, even in the background.
+- **All-employees alert** (admins only): the megaphone button in the top bar sends a full-screen alert to everyone, then keeps a large animated banner at the top of the dashboard for 5 minutes up to "until I turn it off". Looks: Critical, Warning, Notice and **Festive** (party colors and confetti, for shout-outs and good news). Admins can end it from the banner. Stored in Firestore at `broadcast/current`, with a history in `broadcast_log`.
+- **Notifications**: shown as Windows notifications (or inside the dashboard if Windows notifications are off or blocked), with a chime. Sent for new alerts, new requests (to admins) and completed requests (to the requester). They arrive while the dashboard is open in a browser tab, even minimized.
+- **Notification center** (bell button): a history of alerts and request updates with unread dots, so nothing is missed even if the dashboard was closed. Read status is saved to each person's account. The gear opens notification settings.
 
 Until Firebase and Workable are connected, the dashboard runs on fictional demo data.
 
