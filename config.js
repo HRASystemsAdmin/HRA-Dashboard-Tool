@@ -75,6 +75,7 @@ window.HRA_CONFIG = {
         suggestions: [...] offers typing suggestions on a text field. */
   requestTypes: {
     phone_queue: {
+      keywords: ["phone queue", "call queue", "add to queue", "add to the queue", "add member", "queue member", "zoom queue", "queue"],
       group: "phone",
       label: "Add members to a queue",
       short: "Add members",
@@ -92,6 +93,7 @@ window.HRA_CONFIG = {
     },
 
     new_phone_queue: {
+      keywords: ["new queue", "new phone queue", "create a queue", "create queue", "set up a queue", "queue for a client"],
       group: "phone",
       label: "Create a new phone queue",
       short: "New queue",
@@ -111,6 +113,7 @@ window.HRA_CONFIG = {
     },
 
     new_employee: {
+      keywords: ["new employee", "new hire", "onboard", "onboarding", "new team member", "hiring someone", "start date"],
       adminOnly: true,
       adminTab: { id: "newhires", label: "New employees", short: "New hires", blurb: "Onboarding requests, kept separate from the main queue." },
       label: "New employee request",
@@ -174,6 +177,7 @@ window.HRA_CONFIG = {
     },
 
     jeanie: {
+      keywords: ["jeanie", "classet"],
       label: "Jeanie / Classet",
       blurb: "Help with the Jeanie or Classet recruiting assistant.",
       icon: "bot",
@@ -182,6 +186,7 @@ window.HRA_CONFIG = {
     },
 
     indeed_credits: {
+      keywords: ["indeed", "credits", "sponsored job", "sponsor"],
       label: "Credits for Indeed",
       blurb: "Request Indeed credits or ask about sponsored jobs.",
       icon: "coins",
@@ -190,6 +195,7 @@ window.HRA_CONFIG = {
     },
 
     quickbooks: {
+      keywords: ["quickbooks", "quick books", "qb", "invoice", "invoices"],
       label: "QuickBooks",
       blurb: "Access, invoices or anything in QuickBooks.",
       icon: "ledger",
@@ -300,33 +306,11 @@ window.HRA_CONFIG = {
     footer: "Still unsure? Contact your account manager."
   },
 
-  /* 10) Helper chat (bubble in the bottom-right corner).
-         resources: the SharePoint links it knows. Ask a question and it answers with the best match.
-         Add each url as the direct link to the page or file (open it in SharePoint → Copy link).
-         Topics without a url are recognized, but the helper says their link hasn't been added yet.
-         microsoft (optional): turns on full SharePoint search with each person's Microsoft sign-in.
-         Leave empty to keep the helper using only the links below. */
+  /* 10) Helper chat (bubble in the bottom-right corner). It answers from the dashboard itself:
+         who to contact (contacts above), which request form to use (requestTypes, using their
+         "keywords"), and questions about the Client Pipeline data. */
   helper: {
     name: "HRA Helper",
-    greeting: "Hi! I can find SharePoint documents, the right person to contact, or the right request form. What do you need?",
-    resources: [
-      { example: true, title: "Contractor onboarding", description: "Steps, forms and checklist for onboarding a new contractor.",
-        keywords: ["onboarding", "onboard", "contractor", "contractors", "1099", "new contractor", "third party"] },
-      { example: true, title: "Employee onboarding", description: "First-week checklist and setup for a new full-time employee.",
-        keywords: ["onboarding", "onboard", "new hire", "new employee", "first day", "first week", "orientation", "full time"] },
-      { example: true, title: "Employee handbook", description: "Company policies, expectations and benefits overview.",
-        keywords: ["handbook", "policies", "policy", "rules", "code of conduct", "dress code"] },
-      { example: true, title: "Time off policy", description: "How PTO, sick days and holidays work, and how to request them.",
-        keywords: ["pto", "time off", "vacation", "sick", "holiday", "holidays", "leave", "day off"] },
-      { example: true, title: "Expense reimbursement", description: "What can be reimbursed and how to submit expenses.",
-        keywords: ["expense", "expenses", "reimbursement", "reimburse", "receipt", "receipts", "mileage"] },
-      { example: true, title: "Brand and logo files", description: "Logos, colors and templates for client-facing materials.",
-        keywords: ["logo", "logos", "brand", "branding", "template", "templates", "letterhead", "colors"] },
-      { example: true, title: "Org chart", description: "Who's who and who reports to whom.",
-        keywords: ["org chart", "organization", "team", "who reports", "structure", "directory"] },
-      { example: true, title: "IT and security policy", description: "Passwords, devices, phishing and data security rules.",
-        keywords: ["security", "it policy", "phishing", "password policy", "device", "data", "mfa"] }
-    ],
-    microsoft: { clientId: "", tenantId: "" }
+    greeting: "Hi! Tell me what's going on and I'll point you to the right person or request. You can also ask me about the client pipeline, like “How many clients does Jen Omohundro have?”"
   }
 };

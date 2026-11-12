@@ -1579,7 +1579,20 @@ function bind() {
     if (t.closest("[data-hp-toggle]")) { toggleHelper(); return; }
     if (t.closest("[data-hp-clear]")) { HP.msgs = []; try { sessionStorage.removeItem("hra_helper_" + state.user.uid); } catch {} renderHelper(); $("#hp-q")?.focus(); return; }
     const hpAsk = t.closest("[data-hp-ask]"); if (hpAsk) { askHelper(hpAsk.dataset.hpAsk); return; }
-    if (t.closest("[data-hp-connect]")) { connectMicrosoft(); return; }
+    const hpPipe = t.closest("[data-hp-pipe]"); if (hpPipe) {
+      const [am, client] = hpPipe.dataset.hpPipe.split("|");
+      toggleHelper(false); setTool("pipeline");
+      setTimeout(() => { if (am) PL.am = am; PL.client = client || null; PL.animate = true; renderPipeline(); }, 200);
+      return;
+    }
+    const hpNote = t.closest("[data-hp-note]"); if (hpNote) {
+      const [client, id] = hpNote.dataset.hpNote.split("|");
+      const am = PL.ams.find((a) => (a.clients || []).some((n) => sameName(n, client)));
+      toggleHelper(false); setTool("pipeline");
+      setTimeout(() => { if (am) PL.am = am.name; PL.client = client; renderPipeline(); setTimeout(() => openNote(id), 250); }, 200);
+      return;
+    }
+    const hpTool = t.closest("[data-hp-tool]"); if (hpTool) { toggleHelper(false); setTool(hpTool.dataset.hpTool); return; }
     const hpReq = t.closest("[data-hp-request]"); if (hpReq) { toggleHelper(false); setTool("requests"); setTimeout(() => openNew(hpReq.dataset.hpRequest), 250); return; }
     const hpPer = t.closest("[data-hp-person]"); if (hpPer) {
       toggleHelper(false); setTool("contacts");
@@ -3837,68 +3850,232 @@ async function endAlert() {
 }
 
 /* ==========================================================================
-   Helper chat: answers with SharePoint links, the right person, or a request form
+   Helper chat: routes problems to the right person or request form, and
+   answers questions about the Client Pipeline
    ========================================================================== */
 const HC = CFG.helper || {};
-const SP_SITE = (CFG.links?.sharepoint || "").replace(/\/$/, "");
-const HP = { msgs: [], open: false, busy: false, msal: null, account: null };
-const STOP = new Set(["what", "whats", "what's", "is", "our", "the", "a", "an", "for", "to", "of", "how", "do", "i", "we", "my", "me", "where", "can", "find", "get", "hey", "hi", "hello", "please", "need", "about", "with", "on", "in", "and", "or", "who", "handles", "it", "there", "this", "that", "you", "your", "does", "should", "be", "are", "any", "have", "has", "help", "question", "questions"]);
-const resUrl = (r) => r.url || "";
-const qWords = (q) => lower(q).replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
+const HP = { msgs: [], open: false, busy: false };
+const STOP = new Set(["what", "whats", "is", "our", "the", "a", "an", "for", "to", "of", "how", "do", "we", "where", "can", "find", "get", "hey", "hi", "hello", "please", "need", "about", "with", "on", "in", "and", "or", "it", "there", "this", "that", "you", "your", "does", "should", "be", "are", "any", "have", "has", "help", "question", "questions", "i", "my", "me", "im", "issue", "issues", "problem", "problems", "not", "working", "doesnt", "dont", "cant", "wont", "isnt"]);
+const norm = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’'`´]/g, "").replace(/[^a-z0-9&\s]+/g, " ").replace(/\s+/g, " ").trim();
 const stem = (w) => w.replace(/(ings|ing|ers|er|es|s)$/i, "");
+const qWords = (q) => norm(q).split(" ").filter((w) => w && !STOP.has(w));
+const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+const listJoin = (a) => a.length < 2 ? (a[0] || "") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
 
-function resourceScore(r, words, raw) {
-  const title = lower(r.title), desc = lower(r.description || ""), keys = (r.keywords || []).map(lower);
-  let score = 0;
-  for (const k of keys) if (k.includes(" ") && raw.includes(k)) score += 8;          // phrase like "time off"
-  for (const w of words) {
-    const s = stem(w);
-    if (title.split(/\s+/).some((t) => stem(t) === s)) score += 6;
-    else if (keys.some((k) => k === w || stem(k) === s)) score += 5;
-    else if (s.length >= 4 && (desc.includes(s) || keys.some((k) => k.includes(s)))) score += 2;
-  }
-  return score;
-}
-function requestTypeMatch(words, raw) {
-  const wantsRequest = /\b(request|access|ticket|submit|form|need access|add me|credits?)\b/.test(raw);
-  let best = null;
-  for (const [key, t] of Object.entries(CFG.requestTypes)) {
-    if (!canUseType(t)) continue;
-    const label = lower(t.label);
-    let sc = 0;
-    for (const w of words) if (w.length > 2 && label.includes(w)) sc += 4;
-    if (sc && wantsRequest) sc += 3;
-    if (sc > (best?.sc || 0)) best = { key, t, sc };
-  }
-  return best && best.sc >= 4 ? best : null;
-}
-
-function answerFor(q) {
-  const raw = lower(q), words = qWords(q);
-  const parts = [];
-  // 1) SharePoint resources
-  const res = (HC.resources || []).map((r) => ({ r, s: resourceScore(r, words, raw) })).filter((x) => x.s >= 5).sort((a, b) => b.s - a.s);
-  // 2) People (Who to contact): chat sentences are long, so count the words that match instead of requiring all
-  const people = PEOPLE().map((p, i) => {
-    const handles = (p.handles || []).map(lower), keys = (p.keywords || []).map(lower), name = lower(p.name);
+/* ---------- problem routing: people + request forms ---------- */
+function personMatch(words, raw) {
+  return PEOPLE().map((p, i) => {
+    const handles = (p.handles || []).map(norm), keys = (p.keywords || []).map(norm), name = norm(p.name);
     let sc = 0;
     for (const k of keys) if (k.includes(" ") && raw.includes(k)) sc += 6;
     for (const w of words) {
       const st = stem(w);
-      if (name.includes(w)) sc += 6;
-      else if (keys.some((k) => k === w || stem(k) === st) || handles.some((h) => h.split(/\s+/).some((x) => stem(x) === st))) sc += 5;
+      if (w.length > 2 && name.split(" ").includes(w)) sc += 6;
+      else if (keys.some((k) => k === w || stem(k) === st) || handles.some((h) => h.split(" ").some((x) => stem(x) === st))) sc += 5;
     }
     return { p, i, s: sc };
-  }).filter((x) => x.s >= 5).sort((a, b) => b.s - a.s);
-  // 3) Request forms
-  const rt = requestTypeMatch(words, raw);
+  }).filter((x) => x.s >= 5).sort((a, b) => b.s - a.s)[0] || null;
+}
+function requestMatch(words, raw) {
+  let best = null;
+  for (const [key, t] of Object.entries(CFG.requestTypes)) {
+    if (!canUseType(t)) continue;
+    const keys = (t.keywords || []).map(norm), label = norm(t.label);
+    let sc = 0;
+    for (const k of keys) if (k.includes(" ") && raw.includes(k)) sc += 7;
+    for (const w of words) { if (w.length > 2 && (keys.includes(w) || label.split(" ").includes(w))) sc += 5; }
+    if (sc > (best?.sc || 0)) best = { key, t, sc };
+  }
+  return best && best.sc >= 5 ? best : null;
+}
 
-  const docScore = res[0]?.s || 0, personTop = people[0]?.s || 0;
-  if (people.length && personTop > docScore) parts.push({ kind: "person", p: people[0].p, i: people[0].i });
-  if (res.length) parts.push({ kind: "doc", top: res[0].r });
-  if (rt && (!res.length || rt.sc >= 7)) parts.push({ kind: "request", key: rt.key, t: rt.t });
-  if (people.length && personTop <= docScore && !res.length) parts.push({ kind: "person", p: people[0].p, i: people[0].i });
-  return { q, parts, words };
+/* ---------- pipeline questions ---------- */
+async function ensurePipeline() {
+  if (!PL.started) startPipeline();
+  for (let i = 0; i < 50 && !PL.clients.length; i++) await new Promise((r) => setTimeout(r, 100));
+  return PL.clients.length > 0;
+}
+const GENERIC = new Set(["plumbing", "electric", "hvac", "air", "heating", "home", "services", "sewer", "drain", "and", "the", "builders", "roofing", "climate", "co", "inc", "llc"]);
+function findEntity(qn, names, { tokens = true } = {}) {
+  const padded = ` ${qn} `;
+  const full = names.filter((n) => padded.includes(` ${norm(n)} `)).sort((a, b) => b.length - a.length);
+  if (full.length) return { name: full[0] };
+  if (!tokens) return null;
+  const toks = new Set(qn.split(" "));
+  const hits = names.filter((n) => norm(n).split(" ").some((t) => t.length >= 3 && !GENERIC.has(t) && toks.has(t)));
+  if (hits.length === 1) return { name: hits[0] };
+  if (hits.length > 1) return { ambiguous: hits, token: [...toks].find((t) => hits.every((h) => norm(h).split(" ").includes(t))) };
+  return null;
+}
+function parsePeriod(qn) {
+  const today = new Date(); const iso = isoDay;
+  const mk = (s, e, label) => ({ s: iso(s), e: iso(e), label });
+  if (/\btoday\b/.test(qn)) return mk(today, today, "today");
+  if (/\bthis week\b/.test(qn)) { const s = new Date(today); s.setDate(s.getDate() - ((s.getDay() + 6) % 7)); return mk(s, today, "this week"); }
+  if (/\blast week\b/.test(qn)) { const e = new Date(today); e.setDate(e.getDate() - ((e.getDay() + 6) % 7) - 1); const s = new Date(e); s.setDate(s.getDate() - 6); return mk(s, e, "last week"); }
+  if (/\bthis month\b/.test(qn)) return mk(new Date(today.getFullYear(), today.getMonth(), 1), today, "this month");
+  if (/\blast month\b/.test(qn)) return mk(new Date(today.getFullYear(), today.getMonth() - 1, 1), new Date(today.getFullYear(), today.getMonth(), 0), "last month");
+  if (/\b(this year|ytd|year to date)\b/.test(qn)) return mk(new Date(today.getFullYear(), 0, 1), today, "this year");
+  if (/\blast year\b/.test(qn)) return mk(new Date(today.getFullYear() - 1, 0, 1), new Date(today.getFullYear() - 1, 11, 31), "last year");
+  const m = qn.match(/\b(last|past)\s+(\d{1,3})\s+(day|days|week|weeks|month|months)\b/);
+  if (m) { const n = Number(m[2]) * (m[3].startsWith("week") ? 7 : m[3].startsWith("month") ? 30 : 1); const s = new Date(today); s.setDate(s.getDate() - n + 1); return mk(s, today, `the last ${m[2]} ${m[3]}`); }
+  if (/\b(last|past) (quarter|3 months)\b/.test(qn)) { const s = new Date(today); s.setDate(s.getDate() - 89); return mk(s, today, "the last 90 days"); }
+  return null;
+}
+const METRIC_WORDS = [
+  ["noShows", /\bno ?shows?\b/, "no-show", "no-shows"],
+  ["fell", /\bfell through|declined offers?|backed out\b/, "candidate who fell through", "candidates who fell through"],
+  ["rate", /\bhire rate|conversion|success rate\b/, "", ""],
+  ["hires", /\bhires?\b|\bhired\b|\bplacements?\b|\bplaced\b/, "hire", "hires"],
+  ["interviews", /\binterview/, "interview", "interviews"],
+  ["inProcess", /\bin process\b|\bactive\b|\bpending\b|\bopen\b|\bstill (in|going)\b/, "candidate in process", "candidates in process"],
+  ["submitted", /\bsubmit|\bsubmissions?\b|\bsent\b|\bcandidates?\b/, "candidate submitted", "candidates submitted"]
+];
+function pipelineIntent(q) {
+  const qn = norm(q);
+  const rows = insightRows();
+  const ams = PL.ams.filter((a) => !a.unassigned).map((a) => a.name);
+  const clients = PL.clients.map((c) => c.name);
+  const recruiters = [...new Set(rows.map((r) => r.recruiter))].filter((x) => x && x !== "Not recorded");
+  const candidates = [...new Set(rows.map((r) => r.name))];
+  const me = /\b(i|my|me|mine)\b/.test(qn) ? PL.ams.find((a) => a.isMe)?.name : null;
+
+  const amE = findEntity(qn, ams), clE = findEntity(qn, clients), rcE = findEntity(qn, recruiters.filter((r) => !ams.includes(r))), cdE = findEntity(qn, candidates, { tokens: false });
+  for (const e of [amE, rcE, clE]) if (e?.ambiguous) return { kind: "ambiguous", options: e.ambiguous, token: e.token, q };
+  const am = amE?.name || (!clE && !rcE && me) || null, client = clE?.name || null, recruiter = rcE?.name || null, cand = cdE?.name || null;
+  const metric = METRIC_WORDS.find(([, re]) => re.test(qn));
+  const period = parsePeriod(qn);
+  const pipeWords = /\b(clients?|accounts?|candidates?|hires?|hired|placements?|placed|submit\w*|interview\w*|pipeline|recruiters?|account managers?|no ?shows?|in process|status)\b/.test(qn);
+
+  if (cand && !am && !client) return { kind: "candidate", name: cand };
+  if (/\b(who|which)\b.*\b(account manager|am|manages|managing|handles)\b/.test(qn) && client) return { kind: "clientAm", client };
+  if (/\b(most|best|top|leader|leading|highest|winning)\b/.test(qn) && (metric || /\bhires?\b/.test(qn))) {
+    const dim = /\bclients?\b/.test(qn) ? "client" : /\baccount managers?\b|\bams?\b/.test(qn) ? "am" : "recruiter";
+    return { kind: "top", dim, metric: metric?.[0] === "submitted" ? "submitted" : metric?.[0] || "hires", period, am, client };
+  }
+  if (/\bclients?\b|\baccounts\b/.test(qn) && (am || me) && !/\bhires?|submit|interview|candidates?\b/.test(qn)) return { kind: "amClients", am: am || me };
+  if (metric && (am || client || recruiter || pipeWords)) return { kind: "count", metric: metric[0], period, am, client, recruiter };
+  if ((am || client) && pipeWords) return { kind: am && !client ? "amClients" : "count", am, client, metric: "submitted", period };
+  if (!am && !client && !recruiter && /\b(clients|account managers)\b/.test(qn) && /\bhow many|list|which|what\b/.test(qn)) return { kind: "overview" };
+  return null;
+}
+
+function countFor(rows, metric, rg) {
+  const m = metricsFor(rows, rg);
+  if (metric === "inProcess") return rows.filter((r) => r.status === "in_process").length;
+  return m[metric] ?? m.submitted;
+}
+const metricNoun = (metric, n) => { const w = METRIC_WORDS.find(([k]) => k === metric); return w ? plural(n, w[2], w[3]).replace(/^\d+ /, "") : ""; };
+
+function pipelineAnswer(it) {
+  const rows = insightRows();
+  const allRg = { s: rows.reduce((m, r) => (r.submitted && r.submitted < m ? r.submitted : m), isoDay(new Date())), e: isoDay(new Date()) };
+  const rg = it.period || allRg;
+  const when = it.period ? ` ${it.period.label}` : it.metric === "inProcess" ? " right now" : " (all time)";
+  const btn = (label, attrs) => `<button type="button" class="hp-action" ${attrs}><span class="hp-doc-ico">${ICONS.pipeline || '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M9 9.5V20"/></svg>'}</span><span class="hp-doc-text"><strong>${esc(label)}</strong><em>Open in Client Pipeline</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`;
+  const stat = (n, label) => `<div class="hp-stat"><span class="hp-stat-num" data-count="${n}">${n}</span><span class="hp-stat-label">${esc(label)}</span></div>`;
+  const brk = (pairs) => pairs.length ? `<div class="hp-break">${pairs.map(([k, v], i) => `<div style="--i:${i}"><span>${esc(k)}</span><b>${v}</b></div>`).join("")}</div>` : "";
+
+  if (it.kind === "ambiguous") {
+    return `<div class="hp-bubble-text">Which one do you mean?</div><div class="hp-chips">${it.options.map((o) => `<button type="button" class="hp-chip" data-hp-ask="${esc(it.token ? norm(it.q).replace(new RegExp(`\\b${it.token}\\b`), norm(o)) : it.q + " " + o)}">${esc(o)}</button>`).join("")}</div>`;
+  }
+  if (it.kind === "overview") {
+    const ams = PL.ams.filter((a) => !a.unassigned);
+    return `<div class="hp-bubble-text">We have <strong>${plural(PL.clients.length, "client")}</strong> across <strong>${plural(ams.length, "account manager")}</strong>.</div>${brk(ams.map((a) => [a.name, (a.clients || []).length]))}`;
+  }
+  if (it.kind === "amClients") {
+    const a = PL.ams.find((x) => x.name === it.am);
+    if (!a) return null;
+    const list = a.clients || [];
+    const live = list.map((n) => [n, (clientDoc(n)?.candidates || []).filter((r) => r.status === "in_process").length]);
+    return `<div class="hp-bubble-text">${a.isMe ? "You have" : `<strong>${esc(a.name)}</strong> has`} <strong>${plural(list.length, "client")}</strong> right now${list.length ? `: ${esc(listJoin(list))}.` : "."}</div>
+      ${stat(list.length, list.length === 1 ? "client" : "clients")}${brk(live.map(([n, k]) => [n, `${k} in process`]))}
+      ${btn(`${a.isMe ? "My" : a.name.split(" ")[0] + "’s"} clients`, `data-hp-pipe="${esc(a.name)}|"`)}`;
+  }
+  if (it.kind === "clientAm") {
+    const am = PL.ams.find((a) => (a.clients || []).some((n) => sameName(n, it.client)));
+    return `<div class="hp-bubble-text"><strong>${esc(it.client)}</strong> is managed by <strong>${esc(am?.name || "no one yet")}</strong>.</div>${am ? btn(it.client, `data-hp-pipe="${esc(am.name)}|${esc(it.client)}"`) : ""}`;
+  }
+  if (it.kind === "candidate") {
+    const r = rows.filter((x) => x.name === it.name).sort((a, b) => (b.submitted || "").localeCompare(a.submitted || ""))[0];
+    if (!r) return null;
+    const st = PSTATUS[r.status] || PSTATUS.in_process;
+    return `<div class="hp-bubble-text"><strong>${esc(r.name)}</strong> was submitted to <strong>${esc(r.client)}</strong> for ${esc(r.role)} on ${esc(fmtDay(r.submitted))}.</div>
+      <div class="hp-cand" style="--sw:#${st.fill};--bar:${st.bar}"><span class="hp-cand-st"><i></i>${esc(st.short)}</span>
+        ${[["Interview", r.interview], ["Hired", r.hired], ["Recruiter", r.recruiter]].filter(([, v]) => v).map(([k, v]) => `<span><small>${k}</small>${esc(v)}</span>`).join("")}
+        ${r.notes ? `<p>${esc(r.notes.split("\n")[0])}</p>` : ""}</div>
+      ${btn("Open their notes", `data-hp-note="${esc(r.client)}|${esc(r.id)}"`)}`;
+  }
+  if (it.kind === "top") {
+    const list = computeBoard(rows, rg, it.dim).map((e) => ({ name: e.name, v: it.metric === "rate" ? e.rate : it.metric === "inProcess" ? null : e[it.metric] })).filter((e) => e.v != null && e.v > 0).sort((a, b) => b.v - a.v);
+    if (!list.length) return `<div class="hp-bubble-text">No ${esc(metricNoun(it.metric, 2) || "results")}${esc(when)} yet.</div>`;
+    const fmtV = (v) => it.metric === "rate" ? Math.round(v * 100) + "%" : v;
+    const who = it.dim === "client" ? "client" : it.dim === "am" ? "account manager" : "recruiter";
+    return `<div class="hp-bubble-text">🏆 <strong>${esc(list[0].name)}</strong> is the top ${who} for ${esc(it.metric === "rate" ? "hire rate" : metricNoun(it.metric, 2))}${esc(when)}, with <strong>${fmtV(list[0].v)}</strong>.</div>${brk(list.slice(0, 5).map((e, i) => [`${i + 1}. ${e.name}`, fmtV(e.v)]))}`;
+  }
+  if (it.kind === "count") {
+    let pool = rows, subject = "Across all clients, there", btnHtml = "";
+    if (it.client) { pool = rows.filter((r) => sameName(r.client, it.client)); subject = `<strong>${esc(it.client)}</strong>`; const am = PL.ams.find((a) => (a.clients || []).some((n) => sameName(n, it.client))); if (am) btnHtml = btn(it.client, `data-hp-pipe="${esc(am.name)}|${esc(it.client)}"`); }
+    else if (it.am) { pool = rows.filter((r) => r.am === it.am); subject = `<strong>${esc(it.am)}</strong>’s clients`; btnHtml = btn(`${it.am.split(" ")[0]}’s clients`, `data-hp-pipe="${esc(it.am)}|"`); }
+    if (it.recruiter) { pool = pool.filter((r) => r.recruiter === it.recruiter); subject = it.client || it.am ? `${subject}, recruiter <strong>${esc(it.recruiter)}</strong>,` : `<strong>${esc(it.recruiter)}</strong>`; }
+    if (it.metric === "rate") {
+      const m = metricsFor(pool, rg);
+      return `<div class="hp-bubble-text">${subject} ${m.submitted ? `hired <strong>${Math.round((m.rate || 0) * 100)}%</strong> of submitted candidates` : "had no submitted candidates"}${esc(when)}.</div>${stat(Math.round((m.rate || 0) * 100), "% hire rate")}${btnHtml}`;
+    }
+    const n = countFor(pool, it.metric, rg);
+    const noun = metricNoun(it.metric, n);
+    const verbSubject = subject.startsWith("Across") ? `${subject} ${n === 1 ? "was" : "were"} <strong>${n} ${esc(noun)}</strong>` : `${subject} ${it.metric === "inProcess" ? "ha" + (subject.includes("’s clients") ? "ve" : "s") : "had"} <strong>${n} ${esc(noun)}</strong>`;
+    const by = it.client ? "recruiter" : it.am || !it.recruiter ? "client" : "client";
+    const groups = new Map();
+    const inR = (d) => d && d >= rg.s && d <= rg.e;
+    pool.forEach((r) => {
+      const ok = it.metric === "inProcess" ? r.status === "in_process" : it.metric === "hires" ? r.status === "hired" && inR(r.hiredAt || r.submitted) : it.metric === "interviews" ? inR(r.interviewAt || (isY(r) ? r.submitted : "")) : it.metric === "noShows" ? r.status === "no_show" && inR(r.interviewAt || r.submitted) : it.metric === "fell" ? r.status === "fell_through" && inR(r.hiredAt || r.submitted) : inR(r.submitted);
+      if (ok) groups.set(r[by], (groups.get(r[by]) || 0) + 1);
+    });
+    const pairs = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return `<div class="hp-bubble-text">${verbSubject}${esc(when)}.</div>${stat(n, `${noun}${when}`)}${pairs.length > 1 ? brk(pairs) : ""}${btnHtml}`;
+  }
+  return null;
+}
+
+/* ---------- answering ---------- */
+async function answerFor(q) {
+  const raw = norm(q), words = qWords(q);
+  // Client Pipeline questions
+  const looksPipeline = /\b(clients?|candidates?|hires?|hired|placements?|placed|submit\w*|interview\w*|pipeline|no ?shows?|in process|status of|account manager for|who manages|top recruiter|most hires|hire rate)\b/.test(raw);
+  if (looksPipeline || PL.clients.length) {
+    if (looksPipeline) await ensurePipeline();
+    if (PL.clients.length) {
+      const it = pipelineIntent(q);
+      if (it) { const html = pipelineAnswer(it); if (html) return html; }
+    }
+  }
+  // Problems → person and/or request form
+  const person = personMatch(words, raw), req = requestMatch(words, raw);
+  const out = [];
+  if (person && (!req || person.s >= req.sc)) out.push(personAnswer(person.p, person.i));
+  if (req) out.push(`<div class="hp-bubble-text">${out.length ? "Or send a request:" : "You can send a request for that:"}</div>
+      <button type="button" class="hp-action" data-hp-request="${esc(req.key)}"><span class="hp-doc-ico">${ICONS[req.t.icon] || ICONS.spark}</span><span class="hp-doc-text"><strong>${esc(req.t.label)}</strong><small>${esc(req.t.blurb)}</small><em>Open the request form</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`);
+  if (person && req && person.s < req.sc) out.push(personAnswer(person.p, person.i, true));
+  if (out.length) return out.join("");
+  return `<div class="hp-bubble-text">I'm not sure about that one. I can help you <strong>find who to contact</strong>, <strong>pick the right request</strong>, or <strong>answer questions about the client pipeline</strong>. Try something like “my Outlook login isn't working” or “how many hires did we have this month?”</div>
+    <div class="hp-chips"><button type="button" class="hp-chip" data-hp-contacts>See Who to contact</button><button type="button" class="hp-chip" data-hp-tool="requests">Browse requests</button></div>`;
+}
+
+function personAnswer(p, i, secondary) {
+  const [c1, c2] = CT_COLORS[p.color] || CT_COLORS.navy;
+  const acts = (p.how || []).map((h) => {
+    if (h.type === "request") return `<button type="button" class="hp-mini" data-hp-request="general">${esc(h.label || "Send a request")}</button>`;
+    if (h.type === "link") return `<a class="hp-mini" href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.label || "Open")} ↗</a>`;
+    if (h.type === "phone") return `<a class="hp-mini" href="${esc(telHref(h.value))}">Call ${esc(h.value)}</a>`;
+    if (h.type === "email") return `<a class="hp-mini hp-mini-ghost" href="mailto:${esc(h.value)}">Email</a>`;
+    return "";
+  }).join("");
+  return `<div class="hp-bubble-text">${secondary ? "You can also reach" : "For that, reach out to"} <strong>${esc(p.name)}</strong>.</div>
+    <div class="hp-person" style="--c1:${c1};--c2:${c2}">
+      <div class="hp-person-top"><span class="hp-person-av">${esc(initials(p.name))}</span><span class="hp-doc-text"><strong>${esc(p.name)}</strong><small>${esc(p.summary || "")}</small></span></div>
+      <div class="hp-person-acts">${acts}<button type="button" class="hp-mini hp-mini-ghost" data-hp-person="${i}">Details</button></div>
+    </div>`;
 }
 
 function hpMsgHTML(m) {
@@ -3906,58 +4083,28 @@ function hpMsgHTML(m) {
   if (m.typing) return `<div class="hp-msg hp-bot"><div class="hp-bubble-text hp-typing"><i></i><i></i><i></i></div></div>`;
   return `<div class="hp-msg hp-bot">${m.html}</div>`;
 }
-
-function botReplyHTML(a) {
-  const out = [];
-  const docCard = (r, big) => `<a class="hp-doc${big ? " is-top" : ""}" href="${esc(resUrl(r))}" target="_blank" rel="noopener">
-      <span class="hp-doc-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
-      <span class="hp-doc-text"><strong>${esc(r.title)}</strong>${big && r.description ? `<small>${esc(r.description)}</small>` : ""}<em>Open in SharePoint</em></span>
-      <span class="hp-doc-go">${ARROW_R}</span></a>`;
-  for (const p of a.parts) {
-    if (p.kind === "doc") {
-      if (p.top.url) out.push(`<div class="hp-bubble-text">Here it is! 👉</div>${docCard(p.top, true)}`);
-      else out.push(`<div class="hp-bubble-text">I know about <strong>${esc(p.top.title)}</strong>, but its SharePoint link hasn't been added yet.${state.isAdmin ? ` <span class="hp-admin">Admins: add it in <code>config.js</code> → <code>helper.resources</code>.</span>` : " Your account manager can share it with you."}</div>`);
-    }
-    if (p.kind === "request") out.push(`<div class="hp-bubble-text">You can send a request for that:</div>
-      <button type="button" class="hp-action" data-hp-request="${esc(p.key)}"><span class="hp-doc-ico">${ICONS[p.t.icon] || ICONS.spark}</span><span class="hp-doc-text"><strong>${esc(p.t.label)}</strong><small>${esc(p.t.blurb)}</small><em>Open the request form</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`);
-    if (p.kind === "person") out.push(`<div class="hp-bubble-text">For that, reach out to <strong>${esc(p.p.name)}</strong>.</div>
-      <button type="button" class="hp-action" data-hp-person="${p.i}"><span class="hp-doc-ico hp-person-ico">${esc(initials(p.p.name))}</span><span class="hp-doc-text"><strong>${esc(p.p.name)}</strong><small>${esc(p.p.summary || "")}</small><em>See how to reach them</em></span><span class="hp-doc-go">${ARROW_R}</span></button>`);
-  }
-  if (!out.length) {
-    out.push(`<div class="hp-bubble-text">I couldn't find that one. Try different words, like “onboarding” or “handbook”, or check <button type="button" class="hp-inline" data-hp-contacts>Who to contact</button>. Your account manager can also point you the right way.</div>`);
-    if (SP_SITE) out.push(docCard({ title: "Open the SharePoint team site", url: SP_SITE }, false));
-  }
-  if (a.graph?.length) {
-    out.length = 0;
-    out.push(`<div class="hp-bubble-text">Here it is! 👉</div>`);
-    out.push(`${a.graph.slice(0, 1).map((g) => `<a class="hp-doc" href="${esc(g.url)}" target="_blank" rel="noopener"><span class="hp-doc-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg></span><span class="hp-doc-text"><strong>${esc(g.name)}</strong>${g.snippet ? `<small>${esc(g.snippet)}</small>` : ""}</span><span class="hp-doc-go">${ARROW_R}</span></a>`).join("")}`);
-  }
-  return out.join("");
-}
-
 function renderHelper() {
   const box = $("#hp-msgs"); if (!box) return;
-  const welcome = `<div class="hp-msg hp-bot"><div class="hp-bubble-text">${esc(HC.greeting || "Hi! What do you need?")}</div>
-    ${msConfigured() && !HP.account ? `<button type="button" class="hp-connect" data-hp-connect><svg width="14" height="14" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/><rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/></svg>Connect Microsoft to search all of SharePoint</button>` : ""}</div>`;
-  box.innerHTML = welcome + HP.msgs.map(hpMsgHTML).join("");
+  box.innerHTML = `<div class="hp-msg hp-bot"><div class="hp-bubble-text">${esc(HC.greeting || "Hi! What do you need?")}</div></div>` + HP.msgs.map(hpMsgHTML).join("");
   box.scrollTop = box.scrollHeight;
 }
-
 async function askHelper(q) {
   q = String(q || "").trim(); if (!q || HP.busy) return;
   HP.busy = true;
   HP.msgs.push({ from: "me", text: q }, { from: "bot", typing: true });
   renderHelper();
-  const a = answerFor(q);
-  if (HP.account && (!a.parts.length || (a.parts[0].kind === "doc" && !a.parts[0].top.url))) { try { a.graph = await graphSearch(q); } catch (e) { console.warn("SharePoint search failed", e); } }
-  await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 650));
+  const started = Date.now();
+  let html;
+  try { html = await answerFor(q); } catch (e) { console.error(e); html = `<div class="hp-bubble-text">Something went wrong on my side. Please try asking again.</div>`; }
+  const wait = Math.max(0, (reduceMotion ? 0 : 600) - (Date.now() - started));
+  await new Promise((r) => setTimeout(r, wait));
   HP.msgs.pop();
-  HP.msgs.push({ from: "bot", html: botReplyHTML(a) });
+  HP.msgs.push({ from: "bot", html });
   HP.busy = false;
   renderHelper();
+  $$("#hp-msgs .hp-msg:last-child .hp-stat-num").forEach((el) => { const to = Number(el.dataset.count); if (isFinite(to) && !reduceMotion) { el.dataset.fmt = "int"; countUp(el); } });
   try { sessionStorage.setItem("hra_helper_" + (state.user?.uid || ""), JSON.stringify(HP.msgs.slice(-30))); } catch {}
 }
-
 function toggleHelper(force) {
   HP.open = force ?? !HP.open;
   const panel = $("#hp-panel"), bubble = $("#hp-bubble");
@@ -3973,7 +4120,6 @@ function toggleHelper(force) {
     panel.classList.remove("is-open"); setTimeout(() => { if (!HP.open) panel.hidden = true; }, 300);
   }
 }
-
 function startHelper() {
   const h = $("#helper"); if (!h) return;
   h.hidden = false;
@@ -3982,45 +4128,4 @@ function startHelper() {
   $("#hp-bubble").classList.toggle("is-new", !seen);
   $("#hp-title").textContent = HC.name || "HRA Helper";
 }
-function stopHelper() { HP.open = false; HP.msgs = []; HP.account = null; const h = $("#helper"); if (h) { h.hidden = true; $("#hp-panel").hidden = true; $("#hp-panel").classList.remove("is-open"); } }
-
-/* ---- optional: search all of SharePoint with the person's Microsoft sign-in ---- */
-const msConfigured = () => Boolean(HC.microsoft?.clientId && HC.microsoft?.tenantId);
-const GRAPH_SCOPES = ["Sites.Read.All", "Files.Read.All"];
-function loadMsal() {
-  if (window.msal) return Promise.resolve(window.msal);
-  return new Promise((res, rej) => {
-    const sc = document.createElement("script");
-    sc.src = "https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js";
-    sc.onload = () => res(window.msal); sc.onerror = () => rej(new Error("Microsoft sign-in didn't load"));
-    document.head.appendChild(sc);
-  });
-}
-async function connectMicrosoft() {
-  try {
-    const msal = await loadMsal();
-    HP.msal = HP.msal || new msal.PublicClientApplication({ auth: { clientId: HC.microsoft.clientId, authority: `https://login.microsoftonline.com/${HC.microsoft.tenantId}`, redirectUri: location.origin + location.pathname }, cache: { cacheLocation: "sessionStorage" } });
-    await HP.msal.initialize();
-    const r = await HP.msal.loginPopup({ scopes: GRAPH_SCOPES, prompt: "select_account" });
-    HP.account = r.account;
-    HP.msgs.push({ from: "bot", html: `<div class="hp-bubble-text">Connected as <strong>${esc(r.account.name || r.account.username)}</strong>. I'll now search all of SharePoint too. ✨</div>` });
-    renderHelper();
-  } catch (e) {
-    console.error(e);
-    HP.msgs.push({ from: "bot", html: `<div class="hp-bubble-text">I couldn't connect to Microsoft. I'll keep using the saved links for now.</div>` });
-    renderHelper();
-  }
-}
-async function graphSearch(q) {
-  let tok;
-  try { tok = (await HP.msal.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: HP.account })).accessToken; }
-  catch { tok = (await HP.msal.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: HP.account })).accessToken; }
-  const res = await fetch("https://graph.microsoft.com/v1.0/search/query", {
-    method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ requests: [{ entityTypes: ["driveItem", "listItem"], query: { queryString: `${q}${SP_SITE ? ` path:"${SP_SITE}"` : ""}` }, from: 0, size: 4 }] })
-  });
-  if (!res.ok) throw new Error("Graph " + res.status);
-  const j = await res.json();
-  const hits = j?.value?.[0]?.hitsContainers?.[0]?.hits || [];
-  return hits.map((h) => ({ name: h.resource?.name || h.resource?.fields?.title || "SharePoint item", url: h.resource?.webUrl, snippet: String(h.summary || "").replace(/<[^>]+>/g, "").slice(0, 120) })).filter((x) => x.url);
-}
+function stopHelper() { HP.open = false; HP.msgs = []; const h = $("#helper"); if (h) { h.hidden = true; $("#hp-panel").hidden = true; $("#hp-panel").classList.remove("is-open"); } }
