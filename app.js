@@ -54,13 +54,15 @@ function ago(v) {
 }
 const fullDate = (v) => toDate(v).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-function toast(msg, color) {
+function toast(msg, color, action) {
   const el = document.createElement("div");
   el.className = "toast";
   if (color) el.style.setProperty("--tc", color);
-  el.innerHTML = `<i></i><span>${esc(msg)}</span>`;
+  el.innerHTML = `<i></i><span>${esc(msg)}</span>${action ? `<button type="button" class="toast-action">${esc(action.label)}</button>` : ""}`;
+  const close = () => { el.classList.add("is-leaving"); setTimeout(() => el.remove(), 380); };
+  if (action) $(".toast-action", el).addEventListener("click", () => { action.fn(); close(); });
   $("#toasts").appendChild(el);
-  setTimeout(() => { el.classList.add("is-leaving"); setTimeout(() => el.remove(), 380); }, 3600);
+  setTimeout(close, action ? 6000 : 3600);
 }
 
 /* --------------------------------------------------------------------------
@@ -1534,6 +1536,17 @@ function bind() {
     const ddO = t.closest("[data-dd-opt]");
     if (ddO) { const dd = ddO.closest(".dd"); closeDropdowns(); $(".dd-trigger", dd)?.focus(); ddSelect(dd.dataset.dd, ddO.dataset.ddOpt); return; }
     if (!t.closest(".dd")) closeDropdowns();
+    const wr = t.closest("[data-w-remove]"); if (wr) { removeWidget(wr.dataset.wRemove); return; }
+    const wt = t.closest("[data-w-toggle]"); if (wt) {
+      const id = wt.dataset.wToggle; const was = IN.removed.has(id);
+      was ? IN.removed.delete(id) : IN.removed.add(id); saveInsightsLayout(); IN.animate = false; renderInsights();
+      if (was) $(`[data-widget="${id}"]`)?.classList.add("is-added");
+      $(`[data-w-toggle="${id}"]`)?.focus(); return;
+    }
+    if (t.closest("[data-w-reset]")) { IN.removed = defaultRemoved(); saveInsightsLayout(); IN.animate = true; renderInsights(); toast("Dashboard reset to the default layout", "var(--s-progress)"); return; }
+    if (t.closest("[data-in-customize]")) { IN.pop = IN.pop === "customize" ? null : "customize"; const pop = $(".cust-pop"); if (pop) pop.hidden = IN.pop !== "customize"; $("[data-in-customize]").setAttribute("aria-expanded", String(IN.pop === "customize")); return; }
+    if (IN.pop && !t.closest(".cust-pop")) { IN.pop = null; const pop = $(".cust-pop"); if (pop) pop.hidden = true; $("[data-in-customize]")?.setAttribute("aria-expanded", "false"); }
+    const ts = t.closest("[data-tsort]"); if (ts) { const k = ts.dataset.tsort; IN.tsort = { key: k, dir: IN.tsort.key === k ? -IN.tsort.dir : (k === "name" ? 1 : -1) }; IN.animate = false; renderInsights(); return; }
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
     const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
     const popBtn = t.closest("[data-pop]"); if (popBtn) { PL.pop = PL.pop === popBtn.dataset.pop ? null : popBtn.dataset.pop; renderPipeline(); if (PL.pop === "am") $(".am-option.is-selected")?.focus(); return; }
@@ -1547,6 +1560,15 @@ function bind() {
     if (t.closest("[data-sort-toggle]")) { PL.newest = !PL.newest; renderSheet(); return; }
     const dlw = t.closest("[data-pl-download]"); if (dlw) { downloadWorkbook(dlw); return; }
     const nb = t.closest("[data-note]"); if (nb) { openNote(nb.dataset.note); return; }
+    const colBtn = t.closest("[data-collapse]"); if (colBtn) { toggleCollapse(colBtn); return; }
+    const wk = t.closest("[data-week]"); if (wk) {
+      const i = Number(wk.dataset.week);
+      if (PL.weeksAll) { PL.weeksAll = false; PL.weekSel = [i]; }
+      else if (PL.weekSel.includes(i)) { if (PL.weekSel.length > 1) PL.weekSel = PL.weekSel.filter((x) => x !== i); else { toast("Keep at least one week selected", "#E0A800"); return; } }
+      else PL.weekSel = [...PL.weekSel, i].sort((a, b) => a - b);
+      saveViewPrefs({ pipelineWeekSel: PL.weekSel }); renderSheet(); return;
+    }
+    if (t.closest("[data-weeks-all]")) { PL.weeksAll = !PL.weeksAll; renderSheet(); if (!PL.weeksAll) $(".sourcing")?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" }); return; }
     const ser = t.closest("[data-series]"); if (ser) { const k = ser.dataset.series; IN.hidden.has(k) ? IN.hidden.delete(k) : IN.hidden.add(k); if (IN.hidden.size === 3) IN.hidden.delete(k); ser.classList.toggle("is-off", IN.hidden.has(k)); ser.setAttribute("aria-pressed", String(!IN.hidden.has(k))); drawTrend(); return; }
     const dim = t.closest("[data-in-dim]"); if (dim) { IN.dim = dim.dataset.inDim; IN.showAll = false; IN.animate = true; renderInsights(); return; }
     const pickE = t.closest("[data-in-pick]"); if (pickE) {
@@ -1671,6 +1693,7 @@ function bind() {
   document.addEventListener("pointerdown", (e) => { const g = e.target.closest?.("[data-col-grip]"); if (g) startColDrag(e, g); });
 
   document.addEventListener("keydown", (e) => {
+    if (IN.pop && e.key === "Escape") { IN.pop = null; const pop = $(".cust-pop"); if (pop) pop.hidden = true; $("[data-in-customize]")?.focus(); return; }
     const openDd = $(".dd.is-open");
     if (openDd && e.key === "Escape") { closeDropdowns(); $(".dd-trigger", openDd)?.focus(); e.stopPropagation(); return; }
     if (openDd && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -1789,11 +1812,11 @@ function setTool(id, silent) {
    Dropdown (shared by the pipeline and Insights)
    ========================================================================== */
 const CHECK = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
-function ddHTML(id, { label, value, options, align = "left", wide = false }) {
-  const cur = options.find((o) => String(o.value) === String(value)) || options[0] || { label: "" };
+function ddHTML(id, { label, value, options, align = "left", wide = false, triggerText = "", triggerIcon = "", primary = false }) {
+  const cur = triggerText ? { label: triggerText } : options.find((o) => String(o.value) === String(value)) || options[0] || { label: "" };
   return `<div class="dd dd-${align}${wide ? " dd-wide" : ""}" data-dd="${esc(id)}">
-    <button type="button" class="dd-trigger" data-dd-toggle aria-haspopup="listbox" aria-expanded="false">
-      ${label ? `<span class="dd-label">${esc(label)}</span>` : ""}<span class="dd-value">${esc(cur.label)}</span>
+    <button type="button" class="dd-trigger${primary ? " is-primary" : ""}" data-dd-toggle aria-haspopup="listbox" aria-expanded="false">
+      ${triggerIcon}${label ? `<span class="dd-label">${esc(label)}</span>` : ""}<span class="dd-value">${esc(cur.label)}</span>
       <span class="dd-chev" aria-hidden="true">${CHEV}</span>
     </button>
     <div class="dd-menu pop" role="listbox" aria-label="${esc(label || "Options")}">
@@ -1807,7 +1830,13 @@ function closeDropdowns(except) {
   $$(".dd.is-open").forEach((d) => { if (d !== except) { d.classList.remove("is-open"); $(".dd-trigger", d)?.setAttribute("aria-expanded", "false"); } });
 }
 function ddSelect(id, value) {
-  if (id === "weeks") { PL.weeks = Number(value) || 2; saveViewPrefs({ pipelineWeeks: PL.weeks }); renderSheet(); return; }
+  if (id === "weeks") {
+    const n = value === "all" ? 99 : Number(value) || 2;
+    const total = (clientDoc(PL.client)?.sourcing || []).length || 8;
+    PL.weekSel = Array.from({ length: Math.min(n, total) }, (_, i) => i);
+    PL.weeksAll = false;
+    saveViewPrefs({ pipelineWeekSel: PL.weekSel }); renderSheet(); return;
+  }
   if (id.startsWith("in-")) { onInsightsSelect(id.slice(3), value); }
 }
 
@@ -1865,11 +1894,16 @@ function normalizeCols(saved) {
 async function loadColPrefs() {
   const key = "hra_cols_" + state.user.uid;
   try { const cached = JSON.parse(localStorage.getItem(key)); if (cached) PL.cols = normalizeCols(cached); } catch {}
-  try { const v = JSON.parse(localStorage.getItem("hra_view_" + state.user.uid)); if (v?.pipelineWeeks) PL.weeks = v.pipelineWeeks; } catch {}
+  try {
+    const v = JSON.parse(localStorage.getItem("hra_view_" + state.user.uid)) || {};
+    if (Array.isArray(v.pipelineWeekSel) && v.pipelineWeekSel.length) PL.weekSel = v.pipelineWeekSel.map(Number);
+    if (Array.isArray(v.pipelineCollapsed)) PL.collapsed = new Set(v.pipelineCollapsed);
+  } catch {}
   if (!PL.cols) PL.cols = defaultCols();
   try {
     const prefs = await state.store.getPrefs(state.user.uid);
-    if (prefs?.pipelineWeeks) { PL.weeks = Number(prefs.pipelineWeeks) || 2; if (PL.started) renderSheet(); }
+    if (Array.isArray(prefs?.pipelineWeekSel) && prefs.pipelineWeekSel.length) { PL.weekSel = prefs.pipelineWeekSel.map(Number); if (PL.started) renderSheet(); }
+    if (Array.isArray(prefs?.pipelineCollapsed)) { PL.collapsed = new Set(prefs.pipelineCollapsed); if (PL.started) renderSheet(); }
     if (prefs?.pipelineColumns) { PL.cols = normalizeCols(prefs.pipelineColumns); try { localStorage.setItem(key, JSON.stringify(PL.cols)); } catch {} if (PL.started) renderSheet(); }
   } catch (e) { console.warn("Column preferences not loaded", e); }
 }
@@ -1883,7 +1917,7 @@ function saveColPrefs() {
   clearTimeout(colSaveTimer);
   colSaveTimer = setTimeout(() => state.store.setPrefs(state.user.uid, { pipelineColumns: PL.cols }).catch((e) => console.warn(e)), 600);
 }
-const PL = { weeks: 2, pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
+const PL = { weekSel: [0, 1], weeksAll: false, collapsed: new Set(), pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
 
 const fmtDay = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number); return y ? `${m}/${d}/${y}` : String(iso); };
 const sameName = (a, b) => lower(a) === lower(b);
@@ -1915,7 +1949,8 @@ function startPipeline() {
 }
 
 function stopPipeline() {
-  Object.assign(IN, { am: "", client: "", recruiter: "", showAll: false, animate: true, data: null });
+  Object.assign(IN, { am: "", client: "", recruiter: "", showAll: false, animate: true, data: null, pop: null, removed: defaultRemoved() });
+  insightsLayoutLoaded = false;
   PL.unsub?.(); PL.unsub = null; clearInterval(PL.timer);
   Object.assign(PL, { pop: null, cols: null, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "" });
 }
@@ -2040,6 +2075,8 @@ function renderSheet() {
         </dl>
       </header>
 
+      ${collapseHead("candidates", "Submitted candidates", `${shown.length === rows.length ? rows.length : `${shown.length} of ${rows.length}`}`)}
+      <div class="collapse${PL.collapsed.has("candidates") ? " is-closed" : " is-settled"}" data-collapse-body="candidates"><div class="collapse-inner">
       <div class="sheet-tools">
         <div class="legend" role="group" aria-label="Filter by status">
           ${Object.entries(PSTATUS).map(([k, v]) => `
@@ -2072,6 +2109,7 @@ function renderSheet() {
                 ${cols.map((col, ci) => cellHTML(r, col, ci === 0)).join("")}
               </tr>`).join("") : `<tr><td colspan="${cols.length}" class="pl-none">No candidates match. Clear the filters or search.</td></tr>`}
             </tbody></table></div>`}
+      </div></div>
     </div>
 
     ${sourcingHTML(c)}`;
@@ -2178,28 +2216,68 @@ function emptyBlock(title, text) {
   return `<div class="empty"><div class="empty-mark">${ICONS.inbox}</div><strong>${esc(title)}</strong>${esc(text)}</div>`;
 }
 
+function collapseHead(key, title, count) {
+  const open = !PL.collapsed.has(key);
+  return `<button type="button" class="section-toggle" data-collapse="${key}" aria-expanded="${open}">
+    <span class="st-title">${esc(title)}</span>${count !== "" ? `<span class="st-count">${esc(count)}</span>` : ""}
+    <span class="st-hint">${open ? "Hide" : "Show"}</span>
+    <span class="st-chev" aria-hidden="true">${CHEV}</span>
+  </button>`;
+}
+
+function toggleCollapse(btn) {
+  const key = btn.dataset.collapse;
+  const body = $(`[data-collapse-body="${key}"]`);
+  const open = PL.collapsed.has(key);          // was closed, now opening
+  open ? PL.collapsed.delete(key) : PL.collapsed.add(key);
+  btn.setAttribute("aria-expanded", String(open));
+  $(".st-hint", btn).textContent = open ? "Hide" : "Show";
+  if (body) {
+    body.classList.remove("is-settled");
+    body.classList.toggle("is-closed", !open);
+    if (open) setTimeout(() => { if (!PL.collapsed.has(key)) body.classList.add("is-settled"); }, reduceMotion ? 0 : 480);
+  }
+  saveViewPrefs({ pipelineCollapsed: [...PL.collapsed] });
+}
+
+const weekName = (i, iso) => i === 0 ? "This week" : i === 1 ? "Last week" : `Week ending ${fmtDay(iso).replace(/\/\d{4}$/, "")}`;
+function selectedWeeks(all) {
+  if (PL.weeksAll) return all.map((w, i) => [w, i]);
+  const sel = PL.weekSel.filter((i) => i < all.length);
+  return (sel.length ? sel : [0]).sort((a, b) => a - b).map((i) => [all[i], i]);
+}
+
 function sourcingHTML(c) {
   const all = c.sourcing || [];
   if (!all.length) return "";
-  const n = Math.min(PL.weeks || 2, all.length);
-  const choices = [1, 2, 3, 4, 6, 8, 12, 26].filter((k) => k <= all.length);
-  if (!choices.includes(all.length)) choices.push(all.length);
-  const weeks = all.slice(0, n);
+  const picked = selectedWeeks(all);
+  const selSet = new Set(PL.weekSel);
+  const presets = [1, 2, 4].filter((k) => k < all.length).map((k) => ({ value: k, label: k === 1 ? "This week only" : `Last ${k} weeks` }));
+  presets.push({ value: "all", label: `All ${all.length} weeks` });
   return `<div class="sourcing">
-    <div class="sourcing-head">
-      <h3 class="sourcing-title">Weekly sourcing numbers</h3>
-      ${ddHTML("weeks", { label: "Show", value: n, align: "right", options: choices.map((k) => ({ value: k, label: k === 1 ? "This week" : `Last ${k} weeks` })) })}
-    </div>
-    <div class="sourcing-grid">
-      ${weeks.map((w, i) => `
-        <div class="sheet-card sourcing-card" style="--i:${i}">
-          <div class="sourcing-week">Week ending ${esc(fmtDay(w.weekEnding))}<span class="sourcing-total">${(w.rows || []).reduce((t, r) => t + (Number(r.sourced) || 0), 0)} sourced</span></div>
-          ${w.rows?.length ? `<div class="pl-table-wrap"><table class="pl-table pl-mini">
-            <thead><tr><th scope="col">Day and role</th><th scope="col"># Sourced</th><th scope="col">Screened</th><th scope="col">Submitted</th></tr></thead>
-            <tbody>${w.rows.map((r) => `<tr><th scope="row">${esc(r.day)} <span class="muted">${esc(r.role)}</span></th><td class="num">${r.sourced || ""}</td><td>${esc((r.screened || []).join(", "))}</td><td>${esc((r.submitted || []).join(", "))}</td></tr>`).join("")}</tbody>
-          </table></div>` : `<p class="muted sourcing-none">No sourcing activity recorded this week.</p>`}
-        </div>`).join("")}
-    </div>
+    ${collapseHead("sourcing", "Weekly sourcing numbers", PL.weeksAll ? `All ${all.length} weeks` : `${picked.length} of ${all.length} weeks`)}
+    <div class="collapse${PL.collapsed.has("sourcing") ? " is-closed" : " is-settled"}" data-collapse-body="sourcing"><div class="collapse-inner">
+      <div class="week-picker">
+        <div class="wk-chips" role="group" aria-label="Weeks to show">
+          ${all.map((w, i) => `<button type="button" class="wk-chip${(PL.weeksAll || selSet.has(i)) ? " is-on" : ""}" data-week="${i}" aria-pressed="${PL.weeksAll || selSet.has(i)}">
+            <span class="wk-dot" aria-hidden="true"></span><span class="wk-name">${esc(i < 2 ? weekName(i) : fmtDay(w.weekEnding).replace(/\/\d{4}$/, ""))}</span>
+          </button>`).join("")}
+        </div>
+        ${ddHTML("weeks", { label: "Quick pick", value: "", align: "right", options: presets, triggerText: "Choose" })}
+      </div>
+      <div class="sourcing-grid">
+        ${picked.map(([w, i], k) => `
+          <div class="sheet-card sourcing-card" style="--i:${k}">
+            <div class="sourcing-week"><span>${esc(i < 2 ? weekName(i) + ", ending " + fmtDay(w.weekEnding) : "Week ending " + fmtDay(w.weekEnding))}</span><span class="sourcing-total">${(w.rows || []).reduce((t, r) => t + (Number(r.sourced) || 0), 0)} sourced</span></div>
+            ${w.rows?.length ? `<div class="pl-table-wrap"><table class="pl-table pl-mini">
+              <thead><tr><th scope="col">Day and role</th><th scope="col"># Sourced</th><th scope="col">Screened</th><th scope="col">Submitted</th></tr></thead>
+              <tbody>${w.rows.map((r) => `<tr><th scope="row">${esc(r.day)} <span class="muted">${esc(r.role)}</span></th><td class="num">${r.sourced || ""}</td><td>${esc((r.screened || []).join(", "))}</td><td>${esc((r.submitted || []).join(", "))}</td></tr>`).join("")}</tbody>
+            </table></div>` : `<p class="muted sourcing-none">No sourcing activity recorded this week.</p>`}
+          </div>`).join("")}
+      </div>
+      ${all.length > 1 ? `<button type="button" class="show-all-weeks" data-weeks-all>${PL.weeksAll ? `Show only my selected weeks (${PL.weekSel.length})` : `Show all ${all.length} weeks`}
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(${PL.weeksAll ? 180 : 0}deg)"><path d="M6 9l6 6 6-6"/></svg></button>` : ""}
+    </div></div>
   </div>`;
 }
 
@@ -2277,7 +2355,7 @@ async function downloadWorkbook(btn) {
         r++;
       }
 
-      for (const w of (c.sourcing || []).slice(0, PL.weeks || 2)) {
+      for (const [w] of selectedWeeks(c.sourcing || [])) {
         r += 2;
         ws.mergeCells(`A${r}:E${r}`);
         ws.getCell(`A${r}`).value = "Weekly Sourcing Numbers"; ws.getCell(`A${r}`).font = { bold: true, name: "Arial" };
@@ -2405,7 +2483,23 @@ function demoClients() {
 /* ==========================================================================
    Insights (admins only): a summary of the Client Pipeline data
    ========================================================================== */
-const IN = { period: "180d", am: "", client: "", recruiter: "", dim: "recruiter", metric: "hires", hidden: new Set(), showAll: false, ro: null, animate: true };
+const IN_WIDGETS = [
+  { id: "k_submitted", label: "Submitted", group: "Numbers" },
+  { id: "k_interviews", label: "Interviews", group: "Numbers" },
+  { id: "k_hires", label: "Hires", group: "Numbers" },
+  { id: "k_rate", label: "Hire rate", group: "Numbers" },
+  { id: "k_ivrate", label: "Interview rate", group: "Numbers", off: true },
+  { id: "k_days", label: "Days to hire", group: "Numbers" },
+  { id: "k_noshows", label: "No-shows", group: "Numbers" },
+  { id: "k_fell", label: "Fell through", group: "Numbers", off: true },
+  { id: "trend", label: "Activity over time", group: "Charts and tables" },
+  { id: "funnel", label: "Hiring funnel", group: "Charts and tables" },
+  { id: "board", label: "Leaderboard", group: "Charts and tables" },
+  { id: "donut", label: "Where candidates ended up", group: "Charts and tables" },
+  { id: "table", label: "Performance table", group: "Charts and tables", off: true }
+];
+const defaultRemoved = () => new Set(IN_WIDGETS.filter((w) => w.off).map((w) => w.id));
+const IN = { removed: defaultRemoved(), pop: null, tsort: { key: "hires", dir: -1 }, period: "180d", am: "", client: "", recruiter: "", dim: "recruiter", metric: "hires", hidden: new Set(), showAll: false, ro: null, animate: true };
 const PERIODS = [
   { value: "30d", label: "Last 30 days", days: 30 }, { value: "90d", label: "Last 90 days", days: 90 },
   { value: "180d", label: "Last 6 months", days: 182 }, { value: "365d", label: "Last 12 months", days: 365 },
@@ -2484,9 +2578,11 @@ function seriesFor(rows, buckets) {
 }
 const fmtMetric = (v, fmt) => v == null ? "–" : fmt === "pct" ? `${Math.round(v * 100)}%` : fmt === "days" ? `${Math.round(v)}` : String(Math.round(v));
 
-function startInsights() { startPipeline(); renderInsights(); }
+let insightsLayoutLoaded = false;
+function startInsights() { startPipeline(); if (!insightsLayoutLoaded) { insightsLayoutLoaded = true; loadInsightsLayout(); } renderInsights(); }
 
 function onInsightsSelect(key, value) {
+  if (key === "export") { exportInsights(value); return; }
   if (key === "period") IN.period = value;
   if (key === "am") { IN.am = value; IN.client = ""; IN.recruiter = ""; }
   if (key === "client") { IN.client = value; IN.recruiter = ""; }
@@ -2530,12 +2626,59 @@ function renderInsights() {
       delta = `<span class="kpi-delta ${flat ? "is-flat" : good ? "is-up" : "is-down"}" title="Compared with the previous ${rg.len} days">${flat ? "No change" : `${diff > 0 ? "▲" : "▼"} ${Math.abs(Math.round(diff))}${fmt === "pct" ? " pts" : "%"}`}</span>`;
     }
     return `<div class="kpi" style="--accent:${opts.color || "#00377F"};--i:${opts.i || 0}">
-      <div class="kpi-top"><span class="kpi-label">${esc(label)}</span>${delta}</div>
-      <div class="kpi-value" data-count="${value == null ? "" : value}" data-fmt="${fmt}">${fmtMetric(value, fmt)}</div>
+      <div class="kpi-top"><span class="kpi-label">${esc(label)}</span></div>
+      <div class="kpi-row"><div class="kpi-value" data-count="${value == null ? "" : value}" data-fmt="${fmt}">${fmtMetric(value, fmt)}</div>${delta}</div>
       <div class="kpi-foot">${opts.foot || ""}</div>
       ${opts.spark ? `<svg class="kpi-spark" data-spark="${opts.spark}" preserveAspectRatio="none" viewBox="0 0 100 30" aria-hidden="true"></svg>` : ""}
     </div>`;
   };
+
+  const removeBtn = (id, label) => `<button type="button" class="w-remove" data-w-remove="${id}" aria-label="Remove ${esc(label)}" title="Remove from my dashboard"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+  const kpiW = (id, ...args) => IN.removed.has(id) ? "" : kpi(...args).replace('<div class="kpi"', `<div class="kpi" data-widget="${id}"`).replace('<div class="kpi-top">', `${removeBtn(id, args[1])}<div class="kpi-top">`);
+  const ivRate = (r) => r.submitted ? r.cohort.filter(isY).length / r.submitted : null;
+  const kpisHTML = [
+    kpiW("k_submitted", "submitted", "Submitted", cur.submitted, prev?.submitted, "int", { color: "#00377F", spark: "submitted", i: 0, foot: "candidates sent to clients" }),
+    kpiW("k_interviews", "interviews", "Interviews", cur.interviews, prev?.interviews, "int", { color: "#2D6BFF", spark: "interviews", i: 1, foot: "client interviews held" }),
+    kpiW("k_hires", "hires", "Hires", cur.hires, prev?.hires, "int", { color: "#F26A26", spark: "hires", i: 2, foot: "offers accepted" }),
+    kpiW("k_rate", "rate", "Hire rate", cur.rate, prev?.rate, "pct", { color: "#0E9F7E", i: 3, foot: "of submitted candidates hired" }),
+    kpiW("k_ivrate", "ivrate", "Interview rate", ivRate(cur), prev ? ivRate(prev) : null, "pct", { color: "#4F7BD9", i: 4, foot: "of submitted candidates interviewed" }),
+    kpiW("k_days", "days", "Days to hire", cur.days, prev?.days, "days", { color: "#7C5CFF", i: 5, lowerBetter: true, foot: "average, submitted to hired" }),
+    kpiW("k_noshows", "noShows", "No-shows", cur.noShows, prev?.noShows, "int", { color: "#E5484D", i: 6, lowerBetter: true, foot: "missed client interviews" }),
+    kpiW("k_fell", "fell", "Fell through", cur.fell, prev?.fell, "int", { color: "#3B82C4", i: 7, lowerBetter: true, foot: "declined, no-show or left after offer" })
+  ].join("");
+  const card = (id, cls, inner) => IN.removed.has(id) ? "" : `<section class="in-card ${cls}" data-widget="${id}">${inner.replace('<header class="in-card-head">', `<header class="in-card-head">${removeBtn(id, IN_WIDGETS.find((w) => w.id === id).label)}`)}</section>`;
+  const cardsHTML = [
+    card("trend", "in-trend w-wide", `
+        <header class="in-card-head">
+          <div><h2>Activity over time</h2><p>${buckets.length && rg.len <= 120 ? "Weekly" : "Monthly"}, ${esc((PERIODS.find((p) => p.value === IN.period) || {}).label || "").toLowerCase()}</p></div>
+          <div class="legend-toggles">
+            ${["submitted", "interviews", "hires"].map((k) => `<button type="button" class="lt${IN.hidden.has(k) ? " is-off" : ""}" data-series="${k}" style="--c:${METRICS[k].color}" aria-pressed="${!IN.hidden.has(k)}"><i></i>${METRICS[k].label}</button>`).join("")}
+          </div>
+        </header>
+        <div class="chart" id="in-chart"></div>`),
+    card("funnel", "in-funnel", `
+        <header class="in-card-head"><div><h2>Hiring funnel</h2><p>What happened to candidates submitted in this period</p></div></header>
+        ${funnelHTML(cur.cohort)}`),
+    card("board", "in-board w-wide", `
+        <header class="in-card-head">
+          <div><h2>Leaderboard</h2><p>Select a name to filter everything by it</p></div>
+          <div class="in-board-tools">
+            ${dimSegHTML()}
+            ${ddHTML("in-metric", { label: "By", value: IN.metric, align: "right", options: Object.entries(METRICS).map(([k, m]) => ({ value: k, label: m.label, dot: m.color })) })}
+          </div>
+        </header>
+        ${leaderboardHTML(all, rg)}`),
+    card("donut", "in-donut", `
+        <header class="in-card-head"><div><h2>Where candidates ended up</h2><p>Current status of this period's submissions</p></div></header>
+        ${donutHTML(cur.cohort)}`),
+    card("table", "in-table w-full", `
+        <header class="in-card-head">
+          <div><h2>Performance table</h2><p>Every ${IN.dim === "am" ? "account manager" : IN.dim} side by side. Select a column to sort.</p></div>
+          <div class="in-board-tools">${dimSegHTML()}</div>
+        </header>
+        ${perfTableHTML(all, rg)}`)
+  ].join("");
+  const nothing = !kpisHTML && !cardsHTML;
 
   root.innerHTML = `
     <div class="in-hero">
@@ -2543,7 +2686,13 @@ function renderInsights() {
         <h1 class="hero-title">Insights</h1>
         <p class="hero-sub">How every client, account manager and recruiter is performing. Pick a period and drill in.</p>
       </div>
-      <span class="sync-chip in-asof"><i></i><span>${PL.meta?.demo ? "Demo data" : "Data"} as of ${esc(ago(freshness() || new Date().toISOString()))}</span></span>
+      <div class="in-hero-actions">
+        <span class="sync-chip in-asof"><i></i><span>${PL.meta?.demo ? "Demo data" : "Data"} as of ${esc(ago(freshness() || new Date().toISOString()))}</span></span>
+        ${ddHTML("in-export", { value: "", align: "right", primary: true, triggerText: "Export to Excel", triggerIcon: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/></svg>', options: [
+          { value: "view", label: "This view", sub: "The period and filters selected now" },
+          { value: "archive", label: "Full archive", sub: "All time, every client, every candidate" }
+        ] })}
+      </div>
     </div>
 
     <div class="in-filters">
@@ -2552,52 +2701,18 @@ function renderInsights() {
       ${ddHTML("in-client", { label: "Client", value: IN.client, options: clientOpts })}
       ${ddHTML("in-recruiter", { label: "Recruiter", value: IN.recruiter, options: recOpts })}
       ${chips.length ? `<button type="button" class="link-btn in-clear" data-in-clear>Clear filters</button>` : ""}
+      <div class="cust-wrap">
+        <button type="button" class="btn-mini cust-btn" data-in-customize aria-haspopup="dialog" aria-expanded="${IN.pop === "customize"}">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><path d="M17 14v6M14 17h6"/></svg>
+          Customize<span class="cols-n">${IN_WIDGETS.filter((w) => !IN.removed.has(w.id)).length}</span>
+        </button>
+        ${customizePopHTML()}
+      </div>
     </div>
 
-    <div class="kpis">
-      ${kpi("submitted", "Submitted", cur.submitted, prev?.submitted, "int", { color: "#00377F", spark: "submitted", i: 0, foot: "candidates sent to clients" })}
-      ${kpi("interviews", "Interviews", cur.interviews, prev?.interviews, "int", { color: "#2D6BFF", spark: "interviews", i: 1, foot: "client interviews held" })}
-      ${kpi("hires", "Hires", cur.hires, prev?.hires, "int", { color: "#F26A26", spark: "hires", i: 2, foot: "offers accepted" })}
-      ${kpi("rate", "Hire rate", cur.rate, prev?.rate, "pct", { color: "#0E9F7E", i: 3, foot: "of submitted candidates hired" })}
-      ${kpi("days", "Days to hire", cur.days, prev?.days, "days", { color: "#7C5CFF", i: 4, lowerBetter: true, foot: "average, submitted to hired" })}
-      ${kpi("noShows", "No-shows", cur.noShows, prev?.noShows, "int", { color: "#E5484D", i: 5, lowerBetter: true, foot: `${cur.fell} more fell through after offer` })}
-    </div>
-
-    <div class="in-grid">
-      <section class="in-card in-trend">
-        <header class="in-card-head">
-          <div><h2>Activity over time</h2><p>${buckets.length && rg.len <= 120 ? "Weekly" : "Monthly"}, ${esc((PERIODS.find((p) => p.value === IN.period) || {}).label || "").toLowerCase()}</p></div>
-          <div class="legend-toggles">
-            ${["submitted", "interviews", "hires"].map((k) => `<button type="button" class="lt${IN.hidden.has(k) ? " is-off" : ""}" data-series="${k}" style="--c:${METRICS[k].color}" aria-pressed="${!IN.hidden.has(k)}"><i></i>${METRICS[k].label}</button>`).join("")}
-          </div>
-        </header>
-        <div class="chart" id="in-chart"></div>
-      </section>
-
-      <section class="in-card in-funnel">
-        <header class="in-card-head"><div><h2>Hiring funnel</h2><p>What happened to candidates submitted in this period</p></div></header>
-        ${funnelHTML(cur.cohort)}
-      </section>
-
-      <section class="in-card in-board">
-        <header class="in-card-head">
-          <div><h2>Leaderboard</h2><p>Select a name to filter everything by it</p></div>
-          <div class="in-board-tools">
-            <div class="seg in-seg" role="tablist" aria-label="Rank by">
-              ${[["recruiter", "Recruiters"], ["am", "Account managers"], ["client", "Clients"]].map(([k, l]) => `<button class="seg-btn${IN.dim === k ? " is-active" : ""}" data-in-dim="${k}">${l}</button>`).join("")}
-              <span class="seg-indicator" aria-hidden="true"></span>
-            </div>
-            ${ddHTML("in-metric", { label: "By", value: IN.metric, align: "right", options: Object.entries(METRICS).map(([k, m]) => ({ value: k, label: m.label, dot: m.color })) })}
-          </div>
-        </header>
-        ${leaderboardHTML(all, rg)}
-      </section>
-
-      <section class="in-card in-donut">
-        <header class="in-card-head"><div><h2>Where candidates ended up</h2><p>Current status of this period's submissions</p></div></header>
-        ${donutHTML(cur.cohort)}
-      </section>
-    </div>`;
+    ${nothing ? `<div class="in-card in-nothing"><div class="empty"><div class="empty-mark">${ICONS.spark}</div><strong>Your dashboard is empty</strong>Use Customize to add numbers and charts back.</div></div>` : ""}
+    ${kpisHTML ? (() => { const n = (kpisHTML.match(/data-widget=/g) || []).length; return `<div class="kpis" style="--n:${n};--half:${Math.ceil(n / 2)}">${kpisHTML}</div>`; })() : ""}
+    ${cardsHTML ? `<div class="in-grid">${cardsHTML}</div>` : ""}`;
 
   requestAnimationFrame(() => {
     $$(".in-seg").forEach(moveIndicator);
@@ -2607,11 +2722,11 @@ function renderInsights() {
       root.classList.remove("in-enter"); void root.offsetWidth; root.classList.add("in-enter");
       $$(".kpi-value[data-count]", root).forEach((el) => countUp(el));
       requestAnimationFrame(() => {
-        $$(".funnel-bar, .ldr-bar", root).forEach((b) => b.style.setProperty("--w", b.dataset.w));
+        $$(".funnel-bar, .ldr-bar, .pt-bar", root).forEach((b) => b.style.setProperty("--w", b.dataset.w));
         $$(".donut-seg", root).forEach((c) => c.style.strokeDasharray = c.dataset.dash);
       });
     } else {
-      $$(".funnel-bar, .ldr-bar", root).forEach((b) => b.style.setProperty("--w", b.dataset.w));
+      $$(".funnel-bar, .ldr-bar, .pt-bar", root).forEach((b) => b.style.setProperty("--w", b.dataset.w));
       $$(".donut-seg", root).forEach((c) => c.style.strokeDasharray = c.dataset.dash);
     }
     IN.animate = false;
@@ -2730,14 +2845,27 @@ function donutHTML(cohort) {
   </div>`;
 }
 
+function computeBoard(all, rg, dim = IN.dim) {
+  const base = all.filter((r) => (!IN.am || dim === "am" || r.am === IN.am) && (!IN.client || dim === "client" || dim === "am" || sameName(r.client, IN.client)) && (!IN.recruiter || dim === "recruiter" || r.recruiter === IN.recruiter));
+  const groups = new Map();
+  base.forEach((r) => { const g = r[dim]; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(r); });
+  return [...groups.entries()].map(([name, rs]) => {
+    const m = metricsFor(rs, rg);
+    return { name, ...m, ivrate: m.submitted ? m.cohort.filter(isY).length / m.submitted : null };
+  }).filter((e) => e.submitted || e.hires || e.interviews);
+}
+
+function dimSegHTML() {
+  return `<div class="seg in-seg" role="tablist" aria-label="Group by">
+    ${[["recruiter", "Recruiters"], ["am", "Account managers"], ["client", "Clients"]].map(([k, l]) => `<button class="seg-btn${IN.dim === k ? " is-active" : ""}" data-in-dim="${k}">${l}</button>`).join("")}
+    <span class="seg-indicator" aria-hidden="true"></span>
+  </div>`;
+}
+
 function leaderboardHTML(all, rg) {
   const key = IN.dim;
-  const base = all.filter((r) => (!IN.am || key === "am" || r.am === IN.am) && (!IN.client || key === "client" || key === "am" || sameName(r.client, IN.client)) && (!IN.recruiter || key === "recruiter" || r.recruiter === IN.recruiter));
-  const groups = new Map();
-  base.forEach((r) => { const g = r[key]; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(r); });
   const m = METRICS[IN.metric];
-  let list = [...groups.entries()].map(([name, rs]) => ({ name, ...metricsFor(rs, rg) }))
-    .filter((e) => e.submitted || e.hires || e.interviews);
+  const list = computeBoard(all, rg);
   list.forEach((e) => { e.value = IN.metric === "rate" ? (e.submitted >= 3 ? e.rate : null) : e[IN.metric]; });
   list.sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || b.hires - a.hires || b.submitted - a.submitted);
   if (!list.length) return `<p class="in-empty">Nothing to rank in this period.</p>`;
@@ -2758,4 +2886,181 @@ function leaderboardHTML(all, rg) {
         </button>
       </li>`).join("")}</ol>
     ${list.length > 7 ? `<button type="button" class="link-btn ldr-more" data-in-more>${IN.showAll ? "Show top 7" : `Show all ${list.length}`}</button>` : ""}`;
+}
+
+const PT_COLS = [
+  ["submitted", "Submitted", "int"], ["interviews", "Interviews", "int"], ["hires", "Hires", "int"], ["rate", "Hire rate", "pct"],
+  ["ivrate", "Interview rate", "pct"], ["days", "Days to hire", "days"], ["noShows", "No-shows", "int"], ["fell", "Fell through", "int"]
+];
+function perfTableHTML(all, rg) {
+  const list = computeBoard(all, rg);
+  if (!list.length) return `<p class="in-empty">Nothing to show in this period.</p>`;
+  const { key, dir } = IN.tsort;
+  list.sort((a, b) => key === "name" ? a.name.localeCompare(b.name) * dir : ((a[key] ?? -1) - (b[key] ?? -1)) * dir || a.name.localeCompare(b.name));
+  const tot = metricsFor(list.length ? filteredRows(insightRows()).filter((r) => list.some((e) => e.name === r[IN.dim])) : [], rg);
+  tot.ivrate = tot.submitted ? tot.cohort.filter(isY).length / tot.submitted : null;
+  const maxHires = Math.max(1, ...list.map((e) => e.hires));
+  const th = (k, label) => `<th scope="col" class="${k === key ? "is-sorted" : ""}${k === "name" ? "" : " num"}"><button type="button" data-tsort="${k}">${esc(label)}<span class="pt-arrow" aria-hidden="true">${k === key ? (dir < 0 ? "▼" : "▲") : ""}</span></button></th>`;
+  return `<div class="pl-table-wrap pt-wrap"><table class="pt">
+    <thead><tr>${th("name", IN.dim === "am" ? "Account manager" : IN.dim === "client" ? "Client" : "Recruiter")}${PT_COLS.map(([k, l]) => th(k, l)).join("")}</tr></thead>
+    <tbody>${list.map((e, i) => `<tr style="--i:${Math.min(i, 15)}">
+      <th scope="row"><span class="pt-name"><span class="ldr-avatar pt-av">${esc(initials(e.name))}</span>${esc(e.name)}</span></th>
+      ${PT_COLS.map(([k, , f]) => `<td class="num${k === "hires" ? " pt-hires" : ""}">${k === "hires" ? `<span class="pt-bar" data-w="${e.hires / maxHires * 100}%"></span>` : ""}<span>${fmtMetric(e[k], f)}</span></td>`).join("")}
+    </tr>`).join("")}</tbody>
+    <tfoot><tr><th scope="row">Total</th>${PT_COLS.map(([k, , f]) => `<td class="num">${fmtMetric(tot[k], f)}</td>`).join("")}</tr></tfoot>
+  </table></div>`;
+}
+
+function customizePopHTML() {
+  const groups = [...new Set(IN_WIDGETS.map((w) => w.group))];
+  return `<div class="cols-pop cust-pop pop" role="dialog" aria-label="Customize dashboard" ${IN.pop === "customize" ? "" : "hidden"}>
+    <div class="cols-head"><strong>Customize</strong><button type="button" class="link-btn" data-w-reset>Reset to default</button></div>
+    <p class="cols-hint">Switch boxes on or off. Your layout is saved to your account.</p>
+    ${groups.map((g) => `<div class="cust-group"><span class="cust-g">${esc(g)}</span>
+      <ul class="cols-list">${IN_WIDGETS.filter((w) => w.group === g).map((w) => `
+        <li class="col-item${IN.removed.has(w.id) ? "" : " is-on"}"><span class="col-label">${esc(w.label)}${w.off ? `<span class="col-new">New</span>` : ""}</span>
+          <button type="button" class="switch" role="switch" aria-checked="${!IN.removed.has(w.id)}" data-w-toggle="${w.id}" aria-label="Show ${esc(w.label)}"><span></span></button></li>`).join("")}</ul></div>`).join("")}
+  </div>`;
+}
+
+function saveInsightsLayout() {
+  saveViewPrefs({ insightsRemoved: [...IN.removed] });
+}
+async function loadInsightsLayout() {
+  try { const v = JSON.parse(localStorage.getItem("hra_view_" + state.user.uid)) || {}; if (Array.isArray(v.insightsRemoved)) IN.removed = new Set(v.insightsRemoved); } catch {}
+  try { const p = await state.store.getPrefs(state.user.uid); if (Array.isArray(p?.insightsRemoved)) { IN.removed = new Set(p.insightsRemoved); renderInsights(); } } catch {}
+}
+
+function removeWidget(id) {
+  const w = IN_WIDGETS.find((x) => x.id === id); if (!w) return;
+  const el = $(`[data-widget="${id}"]`);
+  const finish = () => { IN.removed.add(id); saveInsightsLayout(); renderInsights(); };
+  if (el && !reduceMotion) { el.classList.add("is-removing"); setTimeout(finish, 280); } else finish();
+  toast(`Removed ${w.label}`, "var(--muted)", { label: "Undo", fn: () => { IN.removed.delete(id); saveInsightsLayout(); IN.animate = false; renderInsights(); $(`[data-widget="${id}"]`)?.classList.add("is-added"); } });
+}
+
+/* ---------- Excel export of Insights ---------- */
+async function exportInsights(kind) {
+  const btn = $('[data-dd="in-export"] .dd-trigger');
+  btn?.classList.add("is-loading");
+  try {
+    const ExcelJS = await loadExcel();
+    const archive = kind === "archive";
+    const allRows = insightRows();
+    const saved = { period: IN.period, am: IN.am, client: IN.client, recruiter: IN.recruiter };
+    if (archive) Object.assign(IN, { period: "all", am: "", client: "", recruiter: "" });
+    const rows = filteredRows(allRows);
+    const rg = periodRange(allRows);
+    const cur = metricsFor(rows, rg);
+    const prevRaw = rg.prev ? metricsFor(rows, rg.prev) : null;
+    const prev = prevRaw && prevRaw.submitted ? prevRaw : null;
+    const buckets = bucketsFor(archive ? { ...rg, len: 999 } : rg);
+    const series = seriesFor(rows, buckets);
+    const boards = { recruiter: computeBoard(allRows, rg, "recruiter"), am: computeBoard(allRows, rg, "am"), client: computeBoard(allRows, rg, "client") };
+    const filters = { period: (PERIODS.find((p) => p.value === IN.period) || {}).label, am: IN.am, client: IN.client, recruiter: IN.recruiter };
+    Object.assign(IN, saved);
+
+    const wb = new ExcelJS.Workbook(); wb.creator = "HRA Dashboard"; wb.created = new Date();
+    const NAVY = "FF00377F", thin = { style: "thin", color: { argb: "FFD5DEEA" } }, box = { top: thin, left: thin, bottom: thin, right: thin };
+    const fill = (hex) => ({ type: "pattern", pattern: "solid", fgColor: { argb: hex.length === 6 ? "FF" + hex : hex } });
+    const header = (ws, rowNum, labels) => { const r = ws.getRow(rowNum); labels.forEach((l, i) => { const c = r.getCell(i + 1); c.value = l; c.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 }; c.fill = fill(NAVY); c.border = box; c.alignment = { vertical: "middle", wrapText: true }; }); r.height = 24; };
+    const body = (cell, fmt) => { cell.border = box; cell.font = { name: "Arial", size: 10 }; if (fmt === "pct") cell.numFmt = "0%"; if (fmt === "days") cell.numFmt = "0"; };
+    const val = (v, fmt) => v == null ? "" : fmt === "days" ? Math.round(v) : v;
+    const title = (ws, text, sub) => {
+      ws.getCell("A1").value = text; ws.getCell("A1").font = { bold: true, size: 16, name: "Arial", color: { argb: NAVY } };
+      ws.getCell("A2").value = sub; ws.getCell("A2").font = { italic: true, size: 10, name: "Arial", color: { argb: "FF62789A" } };
+    };
+    const subtitle = `Period: ${fmtDay(rg.s)} to ${fmtDay(rg.e)} (${filters.period})${filters.am ? `, account manager: ${filters.am}` : ""}${filters.client ? `, client: ${filters.client}` : ""}${filters.recruiter ? `, recruiter: ${filters.recruiter}` : ""}. Exported ${new Date().toLocaleString()}.`;
+
+    // Summary
+    const sum = wb.addWorksheet("Summary");
+    sum.columns = [{ width: 30 }, { width: 18 }, { width: 18 }, { width: 14 }, { width: 46 }];
+    title(sum, archive ? "HRA Insights, full archive" : "HRA Insights", subtitle);
+    header(sum, 4, ["Measure", "This period", prev ? "Previous period" : "Previous period (no data)", "Change", "What it means"]);
+    const K = [
+      ["Submitted", cur.submitted, prev?.submitted, "int", "Candidates sent to clients"],
+      ["Interviews", cur.interviews, prev?.interviews, "int", "Client interviews held"],
+      ["Hires", cur.hires, prev?.hires, "int", "Offers accepted in the period"],
+      ["Hire rate", cur.rate, prev?.rate, "pct", "Share of submitted candidates who were hired"],
+      ["Interview rate", cur.submitted ? cur.cohort.filter(isY).length / cur.submitted : null, prev?.submitted ? prev.cohort.filter(isY).length / prev.submitted : null, "pct", "Share of submitted candidates who interviewed"],
+      ["Average days to hire", cur.days, prev?.days, "days", "From submitted to hired"],
+      ["No-shows", cur.noShows, prev?.noShows, "int", "Missed client interviews"],
+      ["Fell through", cur.fell, prev?.fell, "int", "Declined, no-show or left after offer"]
+    ];
+    K.forEach(([l, a, b, f, note], i) => {
+      const r = sum.getRow(5 + i);
+      const cells = [l, val(a, f), prev ? val(b, f) : "", prev && a != null && b != null ? (f === "pct" ? a - b : b ? (a - b) / b : "") : "", note];
+      cells.forEach((v, j) => { const c = r.getCell(j + 1); c.value = v; body(c, j === 1 || j === 2 ? f : null); if (j === 3) c.numFmt = f === "pct" ? '+0" pts";-0" pts"' : "+0%;-0%"; if (j === 3 && f === "pct" && v !== "") c.value = Math.round(v * 100); });
+      r.getCell(1).font = { bold: true, name: "Arial", size: 10 };
+    });
+    const fr = 15;
+    header(sum, fr, ["Hiring funnel", "Candidates", "Share of submitted"]);
+    const sub = cur.cohort.length;
+    [["Submitted", sub], ["Interviewed", cur.cohort.filter(isY).length], ["Hired", cur.cohort.filter((r) => r.status === "hired").length]].forEach(([l, n], i) => {
+      const r = sum.getRow(fr + 1 + i); [l, n, sub ? n / sub : ""].forEach((v, j) => { const c = r.getCell(j + 1); c.value = v; body(c, j === 2 ? "pct" : null); });
+    });
+    const sr = fr + 6;
+    header(sum, sr, ["Status of submitted candidates", "Candidates", "Share"]);
+    Object.entries(PSTATUS).forEach(([k, st], i) => {
+      const n = cur.cohort.filter((r) => r.status === k).length;
+      const r = sum.getRow(sr + 1 + i); [st.label, n, sub ? n / sub : ""].forEach((v, j) => { const c = r.getCell(j + 1); c.value = v; body(c, j === 2 ? "pct" : null); });
+      r.getCell(1).fill = fill(st.fill);
+    });
+
+    // Over time
+    const ot = wb.addWorksheet("Over time");
+    ot.columns = [{ width: 24 }, { width: 14 }, { width: 14 }, { width: 14 }];
+    title(ot, "Activity over time", subtitle);
+    header(ot, 4, [buckets.length && (archive ? false : rg.len <= 120) ? "Week" : "Month", "Submitted", "Interviews", "Hires"]);
+    buckets.forEach((b, i) => { const r = ot.getRow(5 + i); [b.long, series.submitted[i], series.interviews[i], series.hires[i]].forEach((v, j) => body(Object.assign(r.getCell(j + 1), { value: v }))); });
+
+    // Leaderboards
+    const boardSheet = (name, list, label) => {
+      const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 4 }] });
+      ws.columns = [{ width: 28 }, ...PT_COLS.map(() => ({ width: 15 }))];
+      title(ws, name, subtitle);
+      header(ws, 4, [label, ...PT_COLS.map(([, l]) => l)]);
+      list.sort((a, b) => b.hires - a.hires || b.submitted - a.submitted).forEach((e, i) => {
+        const r = ws.getRow(5 + i);
+        body(Object.assign(r.getCell(1), { value: e.name }));
+        PT_COLS.forEach(([k, , f], j) => body(Object.assign(r.getCell(j + 2), { value: val(e[k], f) }), f));
+      });
+    };
+    boardSheet("By recruiter", boards.recruiter, "Recruiter");
+    boardSheet("By account manager", boards.am, "Account manager");
+    boardSheet("By client", boards.client, "Client");
+
+    // Candidates (raw data)
+    const cw = wb.addWorksheet("Candidates", { views: [{ state: "frozen", ySplit: 4 }] });
+    const CC = [["client", "Client", 26], ["am", "Account manager", 18], ["name", "Candidate", 22], ["role", "Role submitted", 26], ["submitted", "Date submitted", 13, "date"], ["interview", "Wants to interview, when", 24], ["interviewAt", "Interview date", 13, "date"], ["hired", "Hired (Y/N)", 18], ["hiredAt", "Hire date", 13, "date"], ["roleHired", "Role hired for", 22], ["startDate", "Start date", 13, "date"], ["recruiter", "Recruiter", 16], ["status", "Status", 16], ["stage", "Workable stage", 18], ["notes", "Notes", 60]];
+    cw.columns = CC.map(([, , w]) => ({ width: w }));
+    title(cw, archive ? "All candidates" : "Candidates in this view", subtitle);
+    header(cw, 4, CC.map(([, l]) => l));
+    const inR = (d) => d && d >= rg.s && d <= rg.e;
+    const exportRows = rows.filter((r) => archive || inR(r.submitted) || inR(r.interviewAt) || inR(r.hiredAt)).sort((a, b) => (a.client.localeCompare(b.client)) || (a.submitted || "").localeCompare(b.submitted || ""));
+    exportRows.forEach((row, i) => {
+      const r = cw.getRow(5 + i);
+      CC.forEach(([k, , , t], j) => {
+        const c = r.getCell(j + 1);
+        let v = k === "status" ? (PSTATUS[row.status]?.short || row.status) : row[k] ?? "";
+        if (t === "date" && /^\d{4}-\d{2}-\d{2}/.test(v || "")) { const [y, m, d] = v.slice(0, 10).split("-").map(Number); v = new Date(Date.UTC(y, m - 1, d)); c.numFmt = "m/d/yyyy"; }
+        c.value = v; body(c);
+        c.fill = fill(PSTATUS[row.status]?.fill || "FFFFFF");
+        c.alignment = { vertical: "top", wrapText: k === "notes" };
+      });
+    });
+    cw.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: CC.length } };
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const d = new Date(), stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const fname = archive ? `HRA Insights - Full archive - ${stamp}.xlsx` : `HRA Insights - ${filters.period}${filters.am ? " - " + filters.am : ""}${filters.client ? " - " + filters.client : ""}${filters.recruiter ? " - " + filters.recruiter : ""} - ${stamp}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"), { href: url, download: fname.replace(/[\\/:*?"<>|]/g, "-") });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast(archive ? `Archive exported: ${exportRows.length} candidates` : `Exported ${exportRows.length} candidates and all summaries`, "var(--s-done)");
+  } catch (e) {
+    console.error(e);
+    toast("The Excel file couldn't be created. Check your connection and try again.", "#E2632B");
+  } finally { btn?.classList.remove("is-loading"); }
 }

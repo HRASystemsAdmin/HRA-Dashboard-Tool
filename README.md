@@ -4,7 +4,7 @@ Internal tools for the team, switched from the left panel:
 
 - **Request Center**: send and track requests (details below).
 - **Client Pipeline**: submitted candidates per client from Workable, in the Weekly Hiring Update layout, with **Download spreadsheet**. Setup: **[WORKABLE-SETUP.md](WORKABLE-SETUP.md)**.
-- **Insights** (admins only): totals, trends, hiring funnel, status breakdown and a leaderboard of recruiters, account managers and clients, built from the Client Pipeline data. Filter by period, account manager, client or recruiter.
+- **Insights** (admins only): totals, trends, hiring funnel, status breakdown, leaderboard and a performance table for recruiters, account managers and clients, built from the Client Pipeline data. Filter by period, account manager, client or recruiter. Each admin can remove or add any box (**Customize**), and **Export to Excel** saves either the current view or a full archive of every candidate.
 
 Until Firebase and Workable are connected, the dashboard runs on fictional demo data.
 
