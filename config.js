@@ -18,6 +18,8 @@ window.HRA_CONFIG = {
     apiKey: "AIzaSyCil1W-ab6RniMUIAN_7Ye_q6jOmRc4mFA",
     authDomain: "hra-dashboard-d8fa9.firebaseapp.com",
     projectId: "hra-dashboard-d8fa9",
+    storageBucket: "hra-dashboard-d8fa9.firebasestorage.app",
+    messagingSenderId: "726901435741",
     appId: "1:726901435741:web:f255b432ef64ecca9a4cb4"
   },
 
