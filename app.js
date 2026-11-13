@@ -3639,7 +3639,12 @@ function onAlertData(a) {
     const mine = a.byUid && a.byUid === state.user?.uid;
     let acked = false; try { acked = Boolean(localStorage.getItem(ackKey(a))); } catch {}
     if (!mine && !acked) {
-      showTakeover(a);
+      // Only Critical (red) alerts take over the screen. Warning, Notice and Festive show the banner only.
+      if ((a.level || "critical") === "critical") showTakeover(a);
+      else {
+        try { localStorage.setItem(ackKey(a), "1"); } catch {}
+        setTimeout(() => { const b = $("#alert-root .alert-banner"); if (b) { b.classList.remove("is-landing"); void b.offsetWidth; b.classList.add("is-landing"); setTimeout(() => b.classList.remove("is-landing"), 1200); } }, 700);
+      }
       notify({ kind: a.level === "festive" ? "party" : "alert", title: a.level === "festive" ? `🎉 ${a.title}` : `${ALERT_LEVELS[a.level]?.tag || "ALERT"}: ${a.title}`, body: a.message || "", action: () => showTakeover(a, true) });
     }
   }
@@ -3786,7 +3791,7 @@ function openAlertComposer() {
     <form class="modal-form" id="ac-form" novalidate>
       <label class="field"><span class="field-label">Headline</span><input id="ac-title" maxlength="90" required placeholder="e.g. Outlook is down worldwide. It's not your account." value="${esc(AL.draft.title)}" /></label>
       <label class="field"><span class="field-label">Message<span class="opt">optional</span></span><textarea id="ac-msg" maxlength="320" placeholder="What's happening and what people should do">${esc(AL.draft.message)}</textarea></label>
-      <div class="field"><span class="field-label">Look</span>
+      <div class="field"><span class="field-label">Look<span class="opt">Critical also shows a full-screen alert. The others show the banner only.</span></span>
         <div class="ac-levels" role="radiogroup" aria-label="Alert style">${Object.entries(ALERT_LEVELS).map(([k, v]) => `<button type="button" role="radio" class="ac-level lv-${k}${AL.draft.level === k ? " is-on" : ""}" aria-checked="${AL.draft.level === k}" data-ac-level="${k}"><i></i>${v.label}</button>`).join("")}</div></div>
       <div class="field"><span class="field-label">Show it for</span>
         <div class="chips">${ALERT_DURATIONS.map(([m, l]) => `<button type="button" class="chip" aria-pressed="${AL.draft.minutes === m}" data-ac-min="${m}">${l}</button>`).join("")}</div></div>
