@@ -15,10 +15,10 @@ window.HRA_CONFIG = {
   /* 1) Firebase project keys (Firebase console → Project settings → Your apps → Web app).
         Leave apiKey empty to run in DEMO MODE (data stays in this browser only). */
   firebase: {
-    apiKey: "",
-    authDomain: "",
-    projectId: "",
-    appId: ""
+    apiKey: "AIzaSyCil1W-ab6RniMUIAN_7Ye_q6jOmRc4mFA",
+    authDomain: "hra-dashboard-d8fa9.firebaseapp.com",
+    projectId: "hra-dashboard-d8fa9",
+    appId: "1:726901435741:web:f255b432ef64ecca9a4cb4"
   },
 
   /* 2) Who can use the tool. Emails are compared in lowercase.
