@@ -9,13 +9,14 @@ service cloud.firestore {
 
     function adminEmails() {
       return [
-        'admin@yourcompany.com'
+        'jrochin@hunterrecruitment.net',
+        'kcooney@hunterrecruitment.net'
       ];
     }
 
     function memberEmails() {
+      // Add employees here, one per line, in single quotes, separated by commas.
       return [
-        'employee@yourcompany.com'
       ];
     }
 
