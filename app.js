@@ -182,6 +182,15 @@ function createDemoStore() {
       d.notes.unshift({ ...n, id: Math.random().toString(36).slice(2, 10) });
       localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
     },
+    async deleteProgress(uid) {
+      const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
+      delete d.progress[uid]; localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
+    },
+    async deleteNote(id) {
+      const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
+      d.notes = d.notes.filter((n) => n.id !== id); localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
+    },
+    async deletePrivate(uid) { localStorage.removeItem("hra_demo_trprivate_" + uid); dispatchEvent(new StorageEvent("storage", { key: "hra_demo_trprivate_" + uid })); },
     watchOpenQuestions(cb) {
       const emit = () => { const d = JSON.parse(localStorage.getItem("hra_demo_training_v1") || "null") || { notes: [] }; cb(d.notes.filter((n) => n.status === "open")); };
       const fn = (e) => { if (!e || e.key === "hra_demo_training_v1") emit(); };
@@ -298,6 +307,9 @@ async function createFirebaseStore() {
       return fsMod.setDoc(ref, { notes: { [courseId]: { [stepId]: fsMod.deleteField() } } }, { merge: true });
     },
     addNote(n) { return fsMod.addDoc(fsMod.collection(db, "training_notes"), n); },
+    deleteProgress(uid) { return fsMod.deleteDoc(fsMod.doc(db, "training_progress", uid)); },
+    deleteNote(id) { return fsMod.deleteDoc(fsMod.doc(db, "training_notes", id)); },
+    deletePrivate(uid) { return fsMod.deleteDoc(fsMod.doc(db, "training_private", uid)); },
     watchOpenQuestions(cb) {
       const q = fsMod.query(fsMod.collection(db, "training_notes"), fsMod.where("status", "==", "open"));
       return fsMod.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => trDbError(e, "questions"));
@@ -1682,6 +1694,8 @@ function bind() {
     if (t.closest("[data-tr-questions]")) { if (TRS.view === "player") { TRS.panel = true; renderPlayer(true); } else openTrainingQuestions(); return; }
     if (t.closest("[data-tr-panel-close]")) { TRS.panel = false; renderPlayer(true); return; }
     const trPtab = t.closest("[data-tr-ptab]"); if (trPtab) { TRS.panelTab = trPtab.dataset.trPtab; renderQuestionsPanel(); return; }
+    if (t.closest("[data-tr-manage]")) { openManageTraining(); return; }
+    const tmB = t.closest("[data-tm]"); if (tmB) { runManage(tmB.dataset.tm, tmB); return; }
     const trPx = t.closest("[data-tr-pptx]"); if (trPx) { downloadCoursePptx(trPx.dataset.trPptx, trPx); return; }
     if (t.closest("[data-tr-note-toggle]")) { const sec = t.closest(".tp-mynote"); const open = !sec.classList.contains("is-open"); sec.classList.toggle("is-open", open); TRS.noteOpen = open; t.closest("[data-tr-note-toggle]").setAttribute("aria-expanded", String(open)); if (open) setTimeout(() => $("#tr-mynote")?.focus(), 250); return; }
     if (t.closest("[data-tr-ask]")) { TRS.askOpen = !TRS.askOpen; const box = $(".tp-askbox"); if (box) { box.hidden = !TRS.askOpen; if (TRS.askOpen) $("#tr-ask-text")?.focus(); } return; }
@@ -4769,7 +4783,8 @@ function renderTeam() {
     <div class="tr-hero">
       <div><h1 class="hero-title">Team progress</h1><p class="hero-sub">See how new team members are moving through training, and help when someone gets stuck.</p></div>
       <div class="tr-hero-side"><div class="seg tr-seg"><button class="seg-btn" data-tr-view="home">My training</button><button class="seg-btn is-active" data-tr-view="team">Team progress${openQ.length ? `<span class="tab-count">${openQ.length}</span>` : ""}</button><span class="seg-indicator"></span></div>
-      ${avail.length > 1 ? ddHTML("tr-course", { label: "Course", value: c.id, options: avail.map((x) => ({ value: x.id, label: x.title })) }) : `<span class="tr-course-label">${esc(c.title)}</span>`}</div>
+      ${avail.length > 1 ? ddHTML("tr-course", { label: "Course", value: c.id, options: avail.map((x) => ({ value: x.id, label: x.title })) }) : `<span class="tr-course-label">${esc(c.title)}</span>`}
+      ${state.isAdmin ? `<button type="button" class="btn btn-ghost tr-manage" data-tr-manage ${loading ? "disabled" : ""}>${svgI('<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>', 17)}Manage training data</button>` : ""}</div>
     </div>
     <div class="kpis tr-kpis" style="--n:5;--half:3">
       ${[["Team members", rows.length, "#00377F"], ["In progress", st("active"), "#2D6BFF"], ["Completed", st("done"), "#0E9F7E"], ["Need a nudge", st("stuck"), "#E0A800"], ["Open questions", openQ.length, "#F26A26"]].map(([l, v, col], i) => `<div class="kpi" style="--accent:${col};--i:${i}"><div class="kpi-top"><span class="kpi-label">${l}</span></div><div class="kpi-row"><div class="kpi-value">${loading && i < 4 ? `<span class="sk" style="width:48px;height:30px;display:block"></span>` : v}</div></div></div>`).join("")}
@@ -5005,4 +5020,54 @@ async function downloadCoursePptx(cid, btn) {
   } catch (e) {
     console.error(e); toast("The PowerPoint couldn't be created. Check your connection and try again.", "#E2632B");
   } finally { btn?.classList.remove("is-loading"); if (btn) btn.disabled = false; }
+}
+
+/* ---------- Admin: manage training data ---------- */
+function trPeople() {
+  const map = new Map();
+  for (const p of TRS.team.progress) if (p.uid) map.set(p.uid, { uid: p.uid, name: p.name || nameFromEmail(p.email || ""), email: p.email || "" });
+  for (const n of TRS.team.notes) if (n.traineeUid && !map.has(n.traineeUid)) map.set(n.traineeUid, { uid: n.traineeUid, name: n.traineeName || "", email: n.traineeEmail || "" });
+  if (!map.has(state.user.uid)) map.set(state.user.uid, { uid: state.user.uid, name: state.user.name, email: state.user.email });
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+function openManageTraining() {
+  if (!state.isAdmin) return;
+  const people = trPeople();
+  const counts = { progress: TRS.team.progress.length, notes: TRS.team.notes.length };
+  swapModal(`<div id="tr-manage">
+    <div class="modal-head"><span class="type-icon tm-icon">${svgI('<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>', 22)}</span>
+      <div><h2 id="modal-title">Manage training data</h2><p>Clean up test data or start someone over. These actions can't be undone.</p></div></div>
+    <label class="field"><span class="field-label">Who</span>
+      <select id="tm-who"><option value="__all">Everyone (${people.length} ${people.length === 1 ? "person" : "people"})</option>${people.map((p) => `<option value="${esc(p.uid)}">${esc(p.name)}${p.uid === state.user.uid ? " (you)" : ""}${p.email ? ` · ${esc(p.email)}` : ""}</option>`).join("")}</select></label>
+    <div class="tm-actions">
+      <div class="tm-act"><span class="tm-ico">${svgI('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>', 20)}</span><div><strong>Reset progress</strong><small>Clears completed steps, quiz results and course completion. They'll start the course from the beginning.</small></div><button type="button" class="btn tm-btn" data-tm="progress">Reset</button></div>
+      <div class="tm-act"><span class="tm-ico">${TR_ICONS.chat}</span><div><strong>Delete questions and answers</strong><small>Removes questions, replies and manager notes${counts.notes ? ` (${counts.notes} total right now)` : ""}.</small></div><button type="button" class="btn tm-btn" data-tm="questions">Delete</button></div>
+      <div class="tm-act"><span class="tm-ico">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 20)}</span><div><strong>Delete personal notes</strong><small>Deletes the private notes people wrote on steps. You can delete them, but you can never read them.</small></div><button type="button" class="btn tm-btn" data-tm="notes">Delete</button></div>
+    </div>
+    <p class="form-error" id="tm-msg" role="status"></p>
+    <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Done</button></div>
+  </div>`);
+}
+async function runManage(kind, btn) {
+  const who = $("#tm-who")?.value || "__all";
+  const all = who === "__all";
+  const person = all ? null : trPeople().find((p) => p.uid === who);
+  const label = { progress: "reset training progress", questions: "delete questions and answers", notes: "delete personal notes" }[kind];
+  const target = all ? "everyone" : (person?.uid === state.user.uid ? "you" : person?.name || "this person");
+  const yes = await confirmDialog({ title: `${label.charAt(0).toUpperCase() + label.slice(1)}?`, body: `This will ${label} for <strong>${esc(target)}</strong>. It can't be undone.`, confirm: kind === "progress" ? "Reset" : "Delete", danger: true });
+  if (!yes) return;
+  closeOverlay($("#confirm"));
+  btn.classList.add("is-loading"); btn.disabled = true;
+  const uids = all ? trPeople().map((p) => p.uid) : [who];
+  let n = 0, failed = 0;
+  try {
+    if (kind === "progress") for (const u of uids) { try { await state.store.deleteProgress(u); n++; } catch (e) { failed++; console.error(e); } }
+    if (kind === "questions") for (const note of TRS.team.notes.filter((x) => all || x.traineeUid === who)) { try { await state.store.deleteNote(note.id); n++; } catch (e) { failed++; console.error(e); } }
+    if (kind === "notes") for (const u of uids) { try { await state.store.deletePrivate(u); n++; } catch (e) { failed++; console.error(e); } }
+    if (kind === "progress" && uids.includes(state.user.uid)) { TRS.progress = TRS.progress.filter((p) => p.uid !== state.user.uid); }
+    if (kind === "notes" && uids.includes(state.user.uid)) { TRS.priv = {}; }
+    const what = { progress: `Progress reset for ${all ? `${n} ${n === 1 ? "person" : "people"}` : target}`, questions: `${n} question${n === 1 ? "" : "s"} deleted`, notes: `Personal notes deleted for ${all ? `${n} ${n === 1 ? "person" : "people"}` : target}` }[kind];
+    const msg = $("#tm-msg"); if (msg) { msg.textContent = failed ? `${what}. ${failed} couldn't be changed; make sure the latest firestore.rules is published.` : `${what}.`; msg.classList.toggle("is-ok", !failed); }
+    toast(failed ? "Some items couldn't be changed" : what, failed ? "#E2632B" : "var(--s-done)");
+  } finally { btn.classList.remove("is-loading"); btn.disabled = false; }
 }

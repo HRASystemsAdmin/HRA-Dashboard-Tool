@@ -1,5 +1,6 @@
 rules_version = '2';
 
+// RULES VERSION: 2026-11-17 (Training + admin clean-up tools)
 // Paste this into Firebase console → Firestore Database → Rules → Publish.
 // These rules are the real lock on the data. Keep the two lists below in
 // sync with config.js (lowercase emails).
@@ -32,6 +33,7 @@ service cloud.firestore {
     function email()    { return request.auth.token.email.lower(); }
     function isAdmin()  { return signedIn() && email() in adminEmails(); }
     function isMember() { return signedIn() && (isAdmin() || email() in memberEmails()); }
+    function isTrainer() { return isAdmin() || (isMember() && email() in trainerEmails()); }
 
     function ticket(ticketId) {
       return get(/databases/$(database)/documents/tickets/$(ticketId)).data;
@@ -112,14 +114,15 @@ service cloud.firestore {
     }
 
     // Training: people save their own progress; admins and trainers can see everyone's.
-    function isTrainer() { return isAdmin() || (isMember() && email() in trainerEmails()); }
     match /training_progress/{uid} {
       allow read: if isMember() && (request.auth.uid == uid || isTrainer());
       allow write: if isMember() && request.auth.uid == uid;
+      allow delete: if isAdmin();               // admins can reset anyone's progress
     }
     // Personal notes on training steps: private to each person (managers can't read them).
     match /training_private/{uid} {
       allow read, write: if isMember() && request.auth.uid == uid;
+      allow delete: if isAdmin();               // admins can delete notes, but never read them
     }
     // Questions from trainees and notes from managers.
     match /training_notes/{noteId} {
