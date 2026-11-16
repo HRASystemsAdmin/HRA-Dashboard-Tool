@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#F3F7FC" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Request Center · Hunter Recruitment Advisors</title>
+  <script>try { if (localStorage.getItem("hra_rail_collapsed") === "1") document.documentElement.classList.add("rail-collapsed", "rail-settled"); } catch (e) {}</script>
   <link rel="icon" href="assets/favicon.ico" sizes="any" />
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png" />
@@ -108,7 +109,7 @@
     <aside class="rail" aria-label="Tools">
       <div class="rail-brand">
         <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo rail-logo" />
-        <span class="rail-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="34" height="34"><rect width="32" height="32" rx="9" fill="#fff"/><path d="M10 8v16M22 8v16M10 16h12" stroke="#F26A26" stroke-width="3.4" stroke-linecap="round"/></svg></span>
+        <span class="rail-mark" aria-hidden="true"><img src="assets/favicon-64.png" alt="" width="36" height="36" /></span>
       </div>
       <nav class="rail-nav" id="rail">
         <button class="rail-item is-active" data-tool="requests" aria-label="Request Center" data-short="Requests">
@@ -141,6 +142,10 @@
         <span class="rail-glow" aria-hidden="true"></span>
       </nav>
     </aside>
+    <button type="button" class="rail-toggle" id="rail-toggle" data-rail-toggle aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+      <span class="rail-toggle-ring" aria-hidden="true"></span>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5L9 12l5.5 5.5"/></svg>
+    </button>
 
     <div class="workspace">
     <header class="topbar">

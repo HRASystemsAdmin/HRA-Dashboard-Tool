@@ -1705,6 +1705,7 @@ function bind() {
     const tqR = t.closest("[data-tq-resolve]"); if (tqR) { replyToNote(tqR.dataset.tqResolve, true); return; }
     const trT = t.closest("[data-tr-trainee]"); if (trT) { renderTraineeDrawer(trT.dataset.trTrainee); openOverlay($("#tr-drawer")); return; }
     const trdS = t.closest("[data-trd-send]"); if (trdS) { sendManagerNote(trdS.dataset.trdSend); return; }
+    if (t.closest("[data-rail-toggle]")) { toggleRail(); return; }
     if (t.closest("[data-hp-toggle]")) { toggleHelper(); return; }
     if (t.closest("[data-hp-clear]")) { HP.msgs = []; try { sessionStorage.removeItem("hra_helper_" + state.user.uid); } catch {} renderHelper(); $("#hp-q")?.focus(); return; }
     const hpAsk = t.closest("[data-hp-ask]"); if (hpAsk) { askHelper(hpAsk.dataset.hpAsk); return; }
@@ -2067,6 +2068,33 @@ function moveRailGlow() {
   glow.style.width = active.offsetWidth + "px";
   glow.style.height = active.offsetHeight + "px";
 }
+
+/* ---------- Collapsible sidebar ---------- */
+function applyRail(collapsed, animate) {
+  const html = document.documentElement, btn = $("#rail-toggle"), rail = $(".rail");
+  html.classList.toggle("rail-collapsed", collapsed);
+  html.classList.remove("rail-settled");
+  if (btn) { btn.setAttribute("aria-expanded", String(!collapsed)); btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar"); btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar"; }
+  const glow = $("#rail .rail-glow");
+  if (animate && !reduceMotion) {
+    if (rail && !$(".rail-edge", rail)) rail.insertAdjacentHTML("beforeend", '<span class="rail-edge" aria-hidden="true"></span>');
+    rail?.classList.remove("is-moving"); void rail?.offsetWidth; rail?.classList.add("is-moving");
+    btn?.classList.remove("is-pulse"); void btn?.offsetWidth; btn?.classList.add("is-pulse");
+    glow?.classList.add("is-resizing");
+    const t0 = performance.now();
+    const follow = (now) => { moveRailGlow(); if (now - t0 < 700) requestAnimationFrame(follow); else { glow?.classList.remove("is-resizing"); rail?.classList.remove("is-moving"); if (html.classList.contains("rail-collapsed")) html.classList.add("rail-settled"); window.dispatchEvent(new Event("resize")); } };
+    requestAnimationFrame(follow);
+  } else {
+    moveRailGlow();
+    if (collapsed) html.classList.add("rail-settled");
+  }
+}
+function toggleRail() {
+  const collapsed = !document.documentElement.classList.contains("rail-collapsed");
+  try { localStorage.setItem("hra_rail_collapsed", collapsed ? "1" : "0"); } catch {}
+  applyRail(collapsed, true);
+}
+try { if (localStorage.getItem("hra_rail_collapsed") === "1") document.documentElement.classList.add("rail-collapsed", "rail-settled"); } catch {}
 
 function setTool(id, silent) {
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";

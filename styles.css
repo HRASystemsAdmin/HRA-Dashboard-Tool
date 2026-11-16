@@ -2668,12 +2668,87 @@ body.in-course .tp-nav { margin-right: 86px; }
 .vz-levels strong { font-size: 13px; }
 @media (max-width: 760px) { .tp-vals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vz-portals { flex-direction: column; } .vz-portal-or { align-self: center; } .vz-sigs { grid-template-columns: 1fr; } .vz-qb-days { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
+/* ==========================================================================
+   Collapsible sidebar (large screens)
+   ========================================================================== */
+@property --rail-w { syntax: "<length>"; inherits: true; initial-value: 252px; }
+.rail-toggle { display: none; }
+@media (min-width: 1181px) {
+  html { transition: --rail-w .62s cubic-bezier(.65, 0, .25, 1); }
+  html.rail-collapsed { --rail-w: 90px; }
+  html.rail-collapsed .rail { transition-delay: 0s; }
+  .workspace { transition: none; }
+
+  /* labels: leave quickly, come back after the panel has room */
+  .rail-text, .rail-ext {
+    transition: opacity .32s ease, transform .5s cubic-bezier(.22, 1, .36, 1), filter .32s ease;
+    transition-delay: calc(.2s + var(--ri, 0) * .035s);
+  }
+  html.rail-collapsed .rail-text, html.rail-collapsed .rail-ext {
+    opacity: 0; transform: translateX(-14px); filter: blur(3px); pointer-events: none;
+    transition-duration: .18s, .3s, .18s; transition-delay: calc(var(--ri, 0) * .015s);
+  }
+  .rail-nav .rail-item:nth-child(1) { --ri: 0; } .rail-nav .rail-item:nth-child(2) { --ri: 1; } .rail-nav .rail-item:nth-child(3) { --ri: 2; }
+  .rail-nav .rail-item:nth-child(4) { --ri: 3; } .rail-nav .rail-foot { --ri: 4; } .rail-nav .rail-link { --ri: 5; }
+
+  /* logo turns into the orange H */
+  .rail-brand { position: relative; }
+  .rail-logo { transform-origin: left center; transition: opacity .35s ease .12s, transform .55s cubic-bezier(.22, 1, .36, 1) .08s, filter .35s ease .12s; }
+  .rail-mark { display: block; position: absolute; left: 14px; top: 50%; opacity: 0; transform: translateY(-50%) scale(.4) rotate(-90deg); transition: opacity .3s ease, transform .55s var(--ease-spring); pointer-events: none; }
+  .rail-mark img, .rail-mark svg { display: block; width: 36px; height: 36px; border-radius: 10px; filter: drop-shadow(0 8px 16px rgba(0,0,0,.35)); }
+  .rail-mark { left: 13px; }
+  html.rail-collapsed .rail-logo { opacity: 0; transform: scale(.55) translateX(-30px); filter: blur(4px); transition-delay: 0s; }
+  html.rail-collapsed .rail-mark { opacity: 1; transform: translateY(-50%) scale(1) rotate(0); transition-delay: .22s; }
+
+  /* tooltips once collapsed */
+  html.rail-collapsed.rail-settled .rail { overflow: visible; }
+  html.rail-collapsed.rail-settled .rail::after { left: 0; right: 0; }
+  html.rail-collapsed .rail-item::after {
+    content: attr(aria-label); position: absolute; left: calc(100% + 16px); top: 50%; transform: translate(-8px, -50%) scale(.96);
+    padding: 8px 12px; border-radius: 10px; background: var(--ink); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap;
+    box-shadow: 0 12px 26px -12px rgba(10,30,63,.6); opacity: 0; pointer-events: none; transition: opacity .2s, transform .3s var(--ease-out); z-index: 60;
+  }
+  html.rail-collapsed .rail-item:hover::after, html.rail-collapsed .rail-item:focus-visible::after { opacity: 1; transform: translate(0, -50%) scale(1); }
+  html.rail-collapsed .rail-divider { margin-left: 14px; margin-right: 14px; }
+
+  /* the toggle: a small round handle sitting on the panel's edge */
+  .rail-toggle {
+    display: grid; place-items: center; position: fixed; z-index: 30; top: 88px; left: calc(var(--rail-w) - 15px);
+    width: 30px; height: 30px; padding: 0; border-radius: 50%; color: var(--navy); cursor: pointer;
+    background: #fff; border: 1px solid rgba(0,55,127,.14);
+    box-shadow: 0 6px 18px -6px rgba(0,30,80,.45), 0 0 0 4px rgba(255,255,255,.55);
+    transition: transform .35s var(--ease-spring), background .25s, color .25s, box-shadow .3s, opacity .3s;
+  }
+  body:not(.has-app) .rail-toggle { display: none; }
+  .rail-toggle svg { transition: transform .62s cubic-bezier(.65, 0, .25, 1); }
+  html.rail-collapsed .rail-toggle svg { transform: rotate(180deg); }
+  .rail-toggle:hover { background: var(--navy); color: #fff; transform: scale(1.12); box-shadow: 0 10px 24px -8px rgba(0,55,127,.7), 0 0 0 5px rgba(255,255,255,.5); }
+  .rail-toggle:hover svg { animation: nudgeL .9s ease-in-out infinite; }
+  html.rail-collapsed .rail-toggle:hover svg { animation-name: nudgeR; }
+  @keyframes nudgeL { 0%, 100% { translate: 0 0; } 50% { translate: -2px 0; } }
+  @keyframes nudgeR { 0%, 100% { translate: 0 0; } 50% { translate: 2px 0; } }
+  .rail-toggle:active { transform: scale(.94); }
+  .rail-toggle:focus-visible { outline: 3px solid #FFB088; outline-offset: 2px; }
+  .rail-toggle-ring { position: absolute; inset: -4px; border-radius: 50%; border: 2px solid rgba(242,106,38,.7); opacity: 0; pointer-events: none; }
+  .rail-toggle.is-pulse .rail-toggle-ring { animation: railRing .7s ease-out; }
+  @keyframes railRing { from { opacity: .9; transform: scale(.8); } to { opacity: 0; transform: scale(1.7); } }
+
+  /* a light sweeps down the panel's edge as it moves */
+  .rail { --edge: 0; }
+  .rail .rail-edge { position: absolute; top: 0; right: 0; width: 2px; height: 100%; pointer-events: none; background: linear-gradient(180deg, transparent, rgba(255,176,136,.9), transparent); background-size: 100% 40%; background-repeat: no-repeat; opacity: 0; }
+  .rail.is-moving .rail-edge { animation: edgeSweep .7s cubic-bezier(.65, 0, .25, 1); }
+  @keyframes edgeSweep { 0% { opacity: 0; background-position: 0 -40%; } 20% { opacity: 1; } 100% { opacity: 0; background-position: 0 140%; } }
+  .rail-glow.is-resizing { transition: none !important; }
+}
+@media (prefers-reduced-motion: reduce) { html { transition: none !important; } .rail-text, .rail-logo, .rail-mark, .rail-toggle svg { transition: none !important; } }
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }
   .rail { padding-left: 12px; padding-right: 12px; overflow: visible; }
   .rail-logo, .rail-text { display: none; }
   .rail-mark { display: block; margin: 0 auto; }
+  .rail-mark img { display: block; width: 36px; height: 36px; border-radius: 10px; }
   .rail-item { justify-content: center; padding: 10px 0; }
   .rail-ext { display: none; }
   .rail-item::after {
