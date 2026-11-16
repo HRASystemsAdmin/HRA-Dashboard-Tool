@@ -2556,6 +2556,12 @@ body.in-course .tp-nav { margin-right: 86px; }
 }
 @media (prefers-reduced-motion: reduce) { .tp-card, .tp-val-inner, .vz-orb, .vz-road-path, .vz-explore span, .tp-next { animation: none !important; transition: none !important; } }
 
+/* Training: team loading */
+.tr-loading { margin: 6px 0 0; text-align: center; font-size: 13px; font-weight: 700; color: var(--muted); }
+/* Training: blocked by Firebase rules */
+.tr-blocked { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; margin-bottom: 18px; border-radius: 16px; background: #FFF4EC; border: 1px solid #FBD3BC; color: #A3400B; animation: rise .4s var(--ease-out) both; }
+.tr-blocked > svg { flex: none; margin-top: 2px; }
+.tr-blocked div { display: grid; gap: 3px; font-size: 13.5px; } .tr-blocked code { background: rgba(0,0,0,.06); padding: 1px 6px; border-radius: 5px; }
 /* Training: personal notes + download */
 .tp-dl.is-loading { opacity: .6; pointer-events: none; }
 .tp-dl.is-loading svg { animation: rot .9s linear infinite; }

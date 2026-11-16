@@ -182,6 +182,12 @@ function createDemoStore() {
       d.notes.unshift({ ...n, id: Math.random().toString(36).slice(2, 10) });
       localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
     },
+    watchOpenQuestions(cb) {
+      const emit = () => { const d = JSON.parse(localStorage.getItem("hra_demo_training_v1") || "null") || { notes: [] }; cb(d.notes.filter((n) => n.status === "open")); };
+      const fn = (e) => { if (!e || e.key === "hra_demo_training_v1") emit(); };
+      addEventListener("storage", fn); trListeners.add(fn); setTimeout(emit, 0);
+      return () => { removeEventListener("storage", fn); trListeners.delete(fn); };
+    },
     async replyNote(id, reply, patch) {
       const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
       d.notes = d.notes.map((n) => n.id === id ? { ...n, ...patch, replies: [...(n.replies || []), reply] } : n);
@@ -278,20 +284,24 @@ async function createFirebaseStore() {
       let progress = [], notes = [];
       const pq = all ? fsMod.collection(db, "training_progress") : fsMod.doc(db, "training_progress", uid);
       const u1 = all
-        ? fsMod.onSnapshot(pq, (s) => { progress = s.docs.map((d) => ({ uid: d.id, ...d.data() })); cb(progress, notes); }, (e) => console.warn("Training progress unavailable", e))
-        : fsMod.onSnapshot(pq, (s) => { progress = s.exists() ? [{ uid: s.id, ...s.data() }] : []; cb(progress, notes); }, (e) => console.warn("Training progress unavailable", e));
+        ? fsMod.onSnapshot(pq, (s) => { progress = s.docs.map((d) => ({ uid: d.id, ...d.data() })); cb(progress, notes); }, (e) => trDbError(e, "load"))
+        : fsMod.onSnapshot(pq, (s) => { progress = s.exists() ? [{ uid: s.id, ...s.data() }] : []; cb(progress, notes); }, (e) => trDbError(e, "load"));
       const nq = all ? fsMod.collection(db, "training_notes") : fsMod.query(fsMod.collection(db, "training_notes"), fsMod.where("traineeUid", "==", uid));
-      const u2 = fsMod.onSnapshot(nq, (s) => { notes = s.docs.map((d) => ({ id: d.id, ...d.data() })); cb(progress, notes); }, (e) => console.warn("Training notes unavailable", e));
+      const u2 = fsMod.onSnapshot(nq, (s) => { notes = s.docs.map((d) => ({ id: d.id, ...d.data() })); cb(progress, notes); }, (e) => trDbError(e, "questions"));
       return () => { u1(); u2(); };
     },
     saveProgress(uid, data) { return fsMod.setDoc(fsMod.doc(db, "training_progress", uid), data, { merge: true }); },
-    watchPrivate(uid, cb) { return fsMod.onSnapshot(fsMod.doc(db, "training_private", uid), (s) => cb(s.exists() ? s.data() : {}), (e) => console.warn("Personal notes unavailable", e)); },
+    watchPrivate(uid, cb) { return fsMod.onSnapshot(fsMod.doc(db, "training_private", uid), (s) => cb(s.exists() ? s.data() : {}), (e) => trDbError(e, "notes")); },
     savePrivateNote(uid, courseId, stepId, text) {
       const ref = fsMod.doc(db, "training_private", uid);
       if (text) return fsMod.setDoc(ref, { notes: { [courseId]: { [stepId]: { text, at: new Date().toISOString() } } } }, { merge: true });
       return fsMod.setDoc(ref, { notes: { [courseId]: { [stepId]: fsMod.deleteField() } } }, { merge: true });
     },
     addNote(n) { return fsMod.addDoc(fsMod.collection(db, "training_notes"), n); },
+    watchOpenQuestions(cb) {
+      const q = fsMod.query(fsMod.collection(db, "training_notes"), fsMod.where("status", "==", "open"));
+      return fsMod.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => trDbError(e, "questions"));
+    },
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
     watchBroadcast(cb) {
       return fsMod.onSnapshot(fsMod.doc(db, "broadcast", "current"), (snap) => cb(snap.exists() ? snap.data() : null), (e) => console.warn("Alerts unavailable", e));
@@ -2060,7 +2070,7 @@ function setTool(id, silent) {
   moveRailGlow();
   if (id === "pipeline") startPipeline();
   if (id === "insights") { IN.animate = true; startInsights(); }
-  if (id === "training") { renderTraining(); } else document.body.classList.remove("in-course");
+  if (id === "training") { renderTraining(); } else { document.body.classList.remove("in-course"); stopTeamWatch(); }
   if (id === "contacts") { renderContacts(); if (!silent && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#ct-q")?.focus({ preventScroll: true }), 350); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
   if (!silent) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
@@ -4252,7 +4262,7 @@ function stopHelper() { HP.open = false; HP.msgs = []; const h = $("#helper"); i
    Training: course catalog, step-by-step player, team progress for managers
    ========================================================================== */
 const TR = window.HRA_TRAINING || { courses: [], categories: [], links: {}, trainers: [] };
-const TRS = { priv: {}, unsubPriv: null, panelTab: "questions", started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, dir: "fwd", local: {}, knownNotes: null, teamCourse: null, askOpen: false, panel: false };
+const TRS = { team: { on: false, loaded: false, progress: [], notes: [], unsub: null }, openQ: [], unsubQ: null, knownQ: null, priv: {}, unsubPriv: null, panelTab: "questions", started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, dir: "fwd", local: {}, knownNotes: null, teamCourse: null, askOpen: false, panel: false };
 const isTrainerMe = () => Boolean(state.user) && (state.isAdmin || (TR.trainers || []).map(lower).includes(state.user.email));
 const svgI = (d, w = 22) => `<svg viewBox="0 0 24 24" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const TR_ICONS = {
@@ -4290,7 +4300,7 @@ function courseSteps(c) {
   (c?.modules || []).forEach((m, mi) => (m.steps || []).forEach((st, si) => out.push({ ...st, moduleId: m.id, moduleTitle: m.title, mi, si })));
   return out;
 }
-function progDoc(uid) { return TRS.progress.find((p) => p.uid === uid) || null; }
+function progDoc(uid) { return TRS.progress.find((p) => p.uid === uid) || TRS.team.progress.find((p) => p.uid === uid) || null; }
 function progFor(uid, cid) { return progDoc(uid)?.courses?.[cid] || {}; }
 function pctFor(c, p) {
   const steps = courseSteps(c); if (!steps.length) return 0;
@@ -4315,7 +4325,7 @@ function queueNoteSave(cid, sid, text) {
   clearTimeout(noteTimer);
   noteTimer = setTimeout(async () => {
     try { await state.store.savePrivateNote(state.user.uid, cid, sid, text.trim()); const s2 = $(".tp-mynote-status"); if (s2) { s2.textContent = "Saved"; s2.classList.add("is-saved"); } refreshNoteMarks(); }
-    catch (e) { console.error(e); const s2 = $(".tp-mynote-status"); if (s2) s2.textContent = "Couldn't save. Check your connection."; }
+    catch (e) { trDbError(e, "note"); const s2 = $(".tp-mynote-status"); if (s2) s2.textContent = "Not saved"; }
   }, 650);
 }
 function refreshNoteMarks() {
@@ -4324,18 +4334,31 @@ function refreshNoteMarks() {
   const n = noteCount(c.id); const t = $(".tp-dl-notes"); if (t) t.textContent = n ? `${n} note${n === 1 ? "" : "s"}` : "";
 }
 
+let trBlockedShown = false;
+function trDbError(e, what) {
+  console.error("Training " + (what || "") + " failed:", e);
+  const blocked = e?.code === "permission-denied" || /permission|insufficient/i.test(String(e?.message || ""));
+  if (blocked) {
+    if (trBlockedShown) return; trBlockedShown = true;
+    toast(state.isAdmin ? "Firebase blocked Training. Re-publish the latest firestore.rules (it must include training_progress)." : "Training can't save yet. Ask an admin to update the Firebase rules.", "#E2632B");
+    const root = $("#training-root");
+    if (root && state.isAdmin && !$(".tr-blocked")) root.insertAdjacentHTML("afterbegin", `<div class="tr-blocked">${MSGR_ICONS.alert}<div><strong>Training can't save: Firebase is blocking it.</strong><span>In Firebase → Firestore → Rules, paste the latest <code>firestore.rules</code> (it starts with “RULES VERSION: 2026-11-16”) and click Publish. Then reload this page.</span></div></div>`);
+  } else toast("Your progress couldn't be saved. Check your internet connection and try again.", "#E2632B");
+}
+
 /* ---------- data ---------- */
 function startTraining() {
   if (TRS.started) return;
   TRS.started = true;
-  TRS.unsub = state.store.watchTraining(state.user.uid, isTrainerMe(), onTrainingData);
+  TRS.unsub = state.store.watchTraining(state.user.uid, false, onTrainingData);
+  if (isTrainerMe()) TRS.unsubQ = state.store.watchOpenQuestions(onOpenQuestions);
   TRS.unsubPriv = state.store.watchPrivate(state.user.uid, (d) => {
     TRS.priv = d || {};
     if (currentTool === "training" && TRS.view === "player") { refreshNoteMarks(); if (TRS.panel && TRS.panelTab === "notes") renderQuestionsPanel(); }
   });
 }
 function stopTraining() {
-  TRS.unsub?.(); TRS.unsubPriv?.(); Object.assign(TRS, { priv: {}, unsubPriv: null, started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, local: {}, knownNotes: null, askOpen: false, panel: false });
+  TRS.unsub?.(); TRS.unsubPriv?.(); TRS.unsubQ?.(); stopTeamWatch(); Object.assign(TRS, { openQ: [], unsubQ: null, knownQ: null, priv: {}, unsubPriv: null, started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, local: {}, knownNotes: null, askOpen: false, panel: false });
   const r = $("#training-root"); if (r) r.innerHTML = "";
 }
 function onTrainingData(progress, notes) {
@@ -4348,11 +4371,9 @@ function onTrainingData(progress, notes) {
       const before = prevKnown.get(n.id);
       const last = (n.replies || []).slice(-1)[0];
       if (before === undefined) {
-        if (n.from === "trainee" && isTrainerMe() && n.traineeUid !== state.user.uid) notify({ kind: "ticket", title: "Training question", body: `${n.traineeName}: ${n.text}`, action: () => { setTool("training"); TRS.view = "team"; renderTraining(); } });
         if (n.from === "manager" && n.traineeUid === state.user.uid) notify({ kind: "info", title: `Note from ${n.byName || "your manager"}`, body: n.text, action: () => openTrainingQuestions() });
       } else if ((n.replies || []).length > before && last && last.byUid !== state.user.uid) {
         if (n.traineeUid === state.user.uid) notify({ kind: "done", title: "Your training question was answered", body: `${last.by}: ${last.text}`, action: () => openTrainingQuestions() });
-        else if (isTrainerMe()) notify({ kind: "ticket", title: "Training reply", body: `${n.traineeName}: ${last.text}`, action: () => { setTool("training"); TRS.view = "team"; renderTraining(); } });
       }
     }
   }
@@ -4360,11 +4381,39 @@ function onTrainingData(progress, notes) {
   updateTrainingBadge();
   if (currentTool === "training" && TRS.view !== "player") renderTraining();
   if (currentTool === "training" && TRS.view === "player" && TRS.panel) renderQuestionsPanel();
-  if (!$("#tr-drawer")?.hidden && TRS.drawerUid) renderTraineeDrawer(TRS.drawerUid);
+}
+// Team data streams only while a manager is on the Team progress tab.
+function startTeamWatch() {
+  if (TRS.team.on || !isTrainerMe()) return;
+  TRS.team.on = true; TRS.team.loaded = false;
+  TRS.team.unsub = state.store.watchTraining(state.user.uid, true, (progress, notes) => {
+    TRS.team.progress = progress || [];
+    TRS.team.notes = (notes || []).sort((a, b) => (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || ""));
+    TRS.team.loaded = true;
+    if (currentTool === "training" && TRS.view === "team") renderTeam();
+    if (!$("#tr-drawer")?.hidden && TRS.drawerUid) renderTraineeDrawer(TRS.drawerUid);
+  });
+}
+function stopTeamWatch() {
+  TRS.team.unsub?.();
+  Object.assign(TRS.team, { on: false, loaded: false, progress: [], notes: [], unsub: null });
+}
+function onOpenQuestions(list) {
+  const prev = TRS.knownQ;
+  TRS.openQ = (list || []).filter((n) => n.from === "trainee" && n.traineeUid !== state.user.uid);
+  if (prev) for (const n of TRS.openQ) {
+    const before = prev.get(n.id), last = (n.replies || []).slice(-1)[0];
+    const go = () => { setTool("training"); TRS.view = "team"; renderTraining(); };
+    if (before === undefined) notify({ kind: "ticket", title: "Training question", body: `${n.traineeName}: ${n.text}`, action: go });
+    else if ((n.replies || []).length > before && last && last.byUid !== state.user.uid) notify({ kind: "ticket", title: "Training reply", body: `${n.traineeName}: ${last.text}`, action: go });
+  }
+  TRS.knownQ = new Map(TRS.openQ.map((n) => [n.id, (n.replies || []).length]));
+  updateTrainingBadge();
+  if (currentTool === "training" && TRS.view === "home") renderTraining();
 }
 function updateTrainingBadge() {
   const item = $('[data-tool="training"]'); if (!item) return;
-  const open = isTrainerMe() ? TRS.notes.filter((n) => n.status === "open" && n.from === "trainee").length : 0;
+  const open = isTrainerMe() ? TRS.openQ.length : 0;
   let b = $(".rail-badge", item);
   if (!b) { b = document.createElement("span"); b.className = "rail-badge"; $(".rail-icon", item).appendChild(b); }
   b.textContent = open > 9 ? "9+" : String(open); b.hidden = !open;
@@ -4381,7 +4430,7 @@ function saveStep(c, patch) {
   doc.courses = doc.courses || {};
   doc.courses[c.id] = { ...(doc.courses[c.id] || {}), ...course, done: { ...(doc.courses[c.id]?.done || {}), ...(course.done || {}) }, quiz: { ...(doc.courses[c.id]?.quiz || {}), ...(course.quiz || {}) }, watched: { ...(doc.courses[c.id]?.watched || {}), ...(course.watched || {}) } };
   doc.lastAt = now;
-  state.store.saveProgress(uid, data).catch((e) => { console.error(e); toast("Your progress couldn't be saved. Check your connection.", "#E2632B"); });
+  state.store.saveProgress(uid, data).catch((e) => trDbError(e, "save"));
 }
 
 /* ---------- home (catalog) ---------- */
@@ -4389,15 +4438,16 @@ function renderTraining() {
   const root = $("#training-root"); if (!root || currentTool !== "training") return;
   if (TRS.view !== "player") document.body.classList.remove("in-course");
   startTraining();
+  if (TRS.view === "team" && isTrainerMe()) { startTeamWatch(); return renderTeam(); }
+  stopTeamWatch();
   if (TRS.view === "player" && TRS.course) return renderPlayer(true);
-  if (TRS.view === "team" && isTrainerMe()) return renderTeam();
   TRS.view = "home";
   const avail = visibleCourses().filter((c) => !c.soon && c.modules);
   const mine = avail.map((c) => ({ c, p: progFor(state.user.uid, c.id) }));
   const resume = mine.filter((x) => x.p.startedAt && !x.p.completedAt).sort((a, b) => (b.p.lastAt || "").localeCompare(a.p.lastAt || ""))[0] || mine.find((x) => !x.p.startedAt) || null;
   const overall = mine.length ? Math.round(mine.reduce((t, x) => t + pctFor(x.c, x.p), 0) / mine.length) : 0;
   const doneCount = mine.filter((x) => x.p.completedAt).length;
-  const openQ = TRS.notes.filter((n) => n.status === "open" && n.from === "trainee").length;
+  const openQ = TRS.openQ.length;
   root.innerHTML = `
     <div class="tr-hero">
       <div><h1 class="hero-title">Training</h1><p class="hero-sub">Short, step-by-step lessons. Go at your own pace; your progress saves automatically.</p></div>
@@ -4676,10 +4726,10 @@ async function sendQuestion() {
     await state.store.addNote({ traineeUid: state.user.uid, traineeName: state.user.name, traineeEmail: state.user.email, courseId: c.id, courseTitle: c.title, stepId: st.id, stepTitle: st.title, from: "trainee", text, createdAt: now, updatedAt: now, status: "open", replies: [] });
     TRS.askOpen = false; renderPlayer(true);
     toast("Question sent. You'll get a notification when your manager replies.", "var(--s-done)");
-  } catch (e) { console.error(e); toast("Your question couldn't be sent. Try again.", "#E2632B"); }
+  } catch (e) { trDbError(e, "question"); }
 }
 async function replyToNote(id, resolve) {
-  const n = TRS.notes.find((x) => x.id === id); if (!n) return;
+  const n = TRS.notes.find((x) => x.id === id) || TRS.team.notes.find((x) => x.id === id) || TRS.openQ.find((x) => x.id === id); if (!n) return;
   const input = $(`[data-tq-input="${CSS.escape(id)}"]`); const text = input?.value.trim();
   const trainer = isTrainerMe() && n.traineeUid !== state.user.uid;
   const now = new Date().toISOString();
@@ -4695,7 +4745,7 @@ async function replyToNote(id, resolve) {
 /* ---------- team progress (managers) ---------- */
 function roster(c) {
   const map = new Map();
-  for (const p of TRS.progress) if (p.uid) map.set(lower(p.email || p.uid), { uid: p.uid, name: p.name || nameFromEmail(p.email || ""), email: p.email || "", p: p.courses?.[c.id] || {}, lastAt: p.lastAt });
+  for (const p of TRS.team.progress) if (p.uid) map.set(lower(p.email || p.uid), { uid: p.uid, name: p.name || nameFromEmail(p.email || ""), email: p.email || "", p: p.courses?.[c.id] || {}, lastAt: p.lastAt });
   for (const e of [...MEMBERS]) if (!map.has(e)) map.set(e, { uid: null, name: nameFromEmail(e), email: e, p: {}, lastAt: null });
   return [...map.values()].filter((r) => r.uid !== state.user.uid || r.p.startedAt);
 }
@@ -4710,10 +4760,11 @@ function renderTeam() {
   const avail = visibleCourses().filter((c) => !c.soon && c.modules);
   const c = courseById(TRS.teamCourse) || avail[0]; TRS.teamCourse = c?.id;
   if (!c) { root.innerHTML = ""; return; }
-  const steps = courseSteps(c), rows = roster(c);
+  const loading = !TRS.team.loaded;
+  const steps = courseSteps(c), rows = loading ? [] : roster(c);
   const quizzes = steps.filter((x) => x.type === "quiz");
   const st = (k) => rows.filter((r) => traineeStatus(r)[0] === k).length;
-  const openQ = TRS.notes.filter((n) => n.status === "open" && n.from === "trainee");
+  const openQ = loading ? TRS.openQ : TRS.team.notes.filter((n) => n.status === "open" && n.from === "trainee");
   root.innerHTML = `
     <div class="tr-hero">
       <div><h1 class="hero-title">Team progress</h1><p class="hero-sub">See how new team members are moving through training, and help when someone gets stuck.</p></div>
@@ -4721,12 +4772,12 @@ function renderTeam() {
       ${avail.length > 1 ? ddHTML("tr-course", { label: "Course", value: c.id, options: avail.map((x) => ({ value: x.id, label: x.title })) }) : `<span class="tr-course-label">${esc(c.title)}</span>`}</div>
     </div>
     <div class="kpis tr-kpis" style="--n:5;--half:3">
-      ${[["Team members", rows.length, "#00377F"], ["In progress", st("active"), "#2D6BFF"], ["Completed", st("done"), "#0E9F7E"], ["Need a nudge", st("stuck"), "#E0A800"], ["Open questions", openQ.length, "#F26A26"]].map(([l, v, col], i) => `<div class="kpi" style="--accent:${col};--i:${i}"><div class="kpi-top"><span class="kpi-label">${l}</span></div><div class="kpi-row"><div class="kpi-value">${v}</div></div></div>`).join("")}
+      ${[["Team members", rows.length, "#00377F"], ["In progress", st("active"), "#2D6BFF"], ["Completed", st("done"), "#0E9F7E"], ["Need a nudge", st("stuck"), "#E0A800"], ["Open questions", openQ.length, "#F26A26"]].map(([l, v, col], i) => `<div class="kpi" style="--accent:${col};--i:${i}"><div class="kpi-top"><span class="kpi-label">${l}</span></div><div class="kpi-row"><div class="kpi-value">${loading && i < 4 ? `<span class="sk" style="width:48px;height:30px;display:block"></span>` : v}</div></div></div>`).join("")}
     </div>
     <div class="tr-team">
       <section class="in-card tr-roster">
         <header class="in-card-head"><div><h2>${esc(c.title)}</h2><p>Select a person to see their details or send them a note</p></div></header>
-        ${rows.length ? `<div class="tr-rows">${rows.sort((a, b) => ({ stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(a)[0]] - { stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(b)[0]])).map((r, i) => {
+        ${loading ? `<div class="tr-rows">${Array.from({ length: 4 }, () => `<div class="tr-row"><span class="sk" style="width:40px;height:40px;border-radius:50%"></span><span class="tr-row-main"><span class="sk" style="width:40%"></span><span class="sk" style="width:70%;height:8px;margin-top:6px"></span></span></div>`).join("")}<p class="tr-loading">Loading team progress…</p></div>` : rows.length ? `<div class="tr-rows">${rows.sort((a, b) => ({ stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(a)[0]] - { stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(b)[0]])).map((r, i) => {
           const [sk, sl] = traineeStatus(r), pct = pctFor(c, r.p), cur = steps[Math.min(r.p.current || 0, steps.length - 1)];
           const qs = quizzes.filter((q) => r.p.quiz?.[q.id]); const first = qs.filter((q) => r.p.quiz[q.id].firstTry).length;
           return `<button type="button" class="tr-row" ${r.uid ? `data-tr-trainee="${esc(r.uid)}"` : "disabled"} style="--i:${i}">
@@ -4739,7 +4790,7 @@ function renderTeam() {
       </section>
       <section class="in-card tr-qs">
         <header class="in-card-head"><div><h2>Questions</h2><p>${openQ.length ? `${openQ.length} waiting for a reply` : "You're all caught up"}</p></div></header>
-        <div class="tr-qlist">${TRS.notes.length ? TRS.notes.slice(0, 30).map((n) => noteThreadHTML(n, true)).join("") : `<p class="in-empty">No questions yet.</p>`}</div>
+        <div class="tr-qlist">${(loading ? TRS.openQ : TRS.team.notes).length ? (loading ? TRS.openQ : TRS.team.notes).slice(0, 30).map((n) => noteThreadHTML(n, true)).join("") : `<p class="in-empty">${loading ? "Loading…" : "No questions yet."}</p>`}</div>
       </section>
     </div>`;
   requestAnimationFrame(() => $$(".tr-seg").forEach(moveIndicator));
@@ -4749,7 +4800,7 @@ function renderTraineeDrawer(uid) {
   const c = courseById(TRS.teamCourse) || (TR.courses || []).find((x) => !x.soon);
   const doc = progDoc(uid); if (!doc) return;
   const p = doc.courses?.[c.id] || {}, steps = courseSteps(c), [sk, sl] = traineeStatus({ p, lastAt: doc.lastAt });
-  const notes = TRS.notes.filter((n) => n.traineeUid === uid);
+  const notes = TRS.team.notes.filter((n) => n.traineeUid === uid);
   $("#tr-drawer-body").innerHTML = `
     <div class="trd-head"><span class="ldr-avatar trd-av">${esc(initials(doc.name || "?"))}</span><div><h2 id="trd-title">${esc(doc.name || "")}</h2><small>${esc(doc.email || "")}</small></div><span class="tr-pill is-${sk}">${esc(sl)}</span></div>
     <div class="trd-prog">${ring(pctFor(c, p), 72, 7)}<div><strong>${esc(c.title)}</strong><small>${p.startedAt ? `Started ${esc(ago(p.startedAt))}` : "Not started"}${p.lastAt ? ` · active ${esc(ago(p.lastAt))}` : ""}</small></div></div>
