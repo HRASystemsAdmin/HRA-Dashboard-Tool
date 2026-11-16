@@ -159,7 +159,7 @@ function createDemoStore() {
       const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
       const cur = d.progress[uid] || {};
       const courses = { ...(cur.courses || {}) };
-      for (const [k, v] of Object.entries(data.courses || {})) courses[k] = { ...(courses[k] || {}), ...v, done: { ...(courses[k]?.done || {}), ...(v.done || {}) }, quiz: { ...(courses[k]?.quiz || {}), ...(v.quiz || {}) } };
+      for (const [k, v] of Object.entries(data.courses || {})) courses[k] = { ...(courses[k] || {}), ...v, done: { ...(courses[k]?.done || {}), ...(v.done || {}) }, quiz: { ...(courses[k]?.quiz || {}), ...(v.quiz || {}) }, watched: { ...(courses[k]?.watched || {}), ...(v.watched || {}) } };
       d.progress[uid] = { ...cur, ...data, courses };
       localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
     },
@@ -1658,7 +1658,16 @@ function bind() {
       else { L.wrong = L.pick; renderPlayer(true); $(".tp-opt.is-wrong")?.animate([{ transform: "translateX(0)" }, { transform: "translateX(-6px)" }, { transform: "translateX(6px)" }, { transform: "translateX(0)" }], { duration: 350 }); }
       return;
     }
-    const trRev = t.closest("[data-tr-reveal]"); if (trRev) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); const i = Number(trRev.dataset.trReveal); L.revealed = [...new Set([...(L.revealed || []), i])]; trRev.classList.add("is-open"); const left = st.items.length - L.revealed.length; const h = $(".tp-hint"); if (h) h.textContent = left ? `${left} left to reveal` : "Nice! You've got all five."; const nb = $("[data-tr-next]"); if (nb) nb.disabled = !canContinue(st); return; }
+    const trRev = t.closest("[data-tr-reveal]"); if (trRev) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); const i = Number(trRev.dataset.trReveal); L.revealed = [...new Set([...(L.revealed || []), i])]; trRev.classList.add("is-open"); const left = st.items.length - L.revealed.length; const h = $(".tp-hint"); if (h) h.textContent = left ? `${left} left to reveal` : "Nice! You've revealed them all."; if (!left && st.callout) renderPlayer(true); const nb = $("[data-tr-next]"); if (nb) nb.disabled = !canContinue(st); return; }
+    const trW = t.closest("[data-tr-watch]"); if (trW) {
+      const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {});
+      const i = Number(trW.dataset.trWatch); const w = watchedSet(st);
+      if (!trW.href && w.has(i)) { L.watched = (L.watched || []).filter((x) => x !== i); const saved = (progFor(state.user.uid, TRS.course.id).watched?.[st.id] || []).filter((x) => x !== i); saveStep(TRS.course, { watched: { [st.id]: saved } }); }
+      else { L.watched = [...new Set([...(L.watched || []), i])]; saveStep(TRS.course, { watched: { [st.id]: [...new Set([...w, i])] } }); }
+      setTimeout(() => renderPlayer(true), trW.href ? 150 : 0);
+      if (!trW.href) e.preventDefault();
+      return;
+    }
     if (t.closest("[data-tr-walk]")) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.shown = Math.min((L.shown || 1) + 1, st.items.length); renderPlayer(true); return; }
     if (t.closest("[data-tr-questions]")) { if (TRS.view === "player") { TRS.panel = true; renderPlayer(true); } else openTrainingQuestions(); return; }
     if (t.closest("[data-tr-panel-close]")) { TRS.panel = false; renderPlayer(true); return; }
@@ -4274,7 +4283,8 @@ const TR_ICONS = {
 };
 const trColor = (c) => CT_COLORS[c] || CT_COLORS.navy;
 const linkUrl = (key) => (TR.links || {})[key] || "";
-const courseById = (id) => (TR.courses || []).find((c) => c.id === id);
+const courseById = (id) => (TR.courses || []).find((c) => c.id === id && !c.hidden);
+const visibleCourses = () => (TR.courses || []).filter((c) => !c.hidden);
 function courseSteps(c) {
   const out = [];
   (c?.modules || []).forEach((m, mi) => (m.steps || []).forEach((st, si) => out.push({ ...st, moduleId: m.id, moduleTitle: m.title, mi, si })));
@@ -4369,7 +4379,7 @@ function saveStep(c, patch) {
   let doc = progDoc(uid);
   if (!doc) { doc = { uid, name: state.user.name, email: state.user.email, courses: {} }; TRS.progress.push(doc); }
   doc.courses = doc.courses || {};
-  doc.courses[c.id] = { ...(doc.courses[c.id] || {}), ...course, done: { ...(doc.courses[c.id]?.done || {}), ...(course.done || {}) }, quiz: { ...(doc.courses[c.id]?.quiz || {}), ...(course.quiz || {}) } };
+  doc.courses[c.id] = { ...(doc.courses[c.id] || {}), ...course, done: { ...(doc.courses[c.id]?.done || {}), ...(course.done || {}) }, quiz: { ...(doc.courses[c.id]?.quiz || {}), ...(course.quiz || {}) }, watched: { ...(doc.courses[c.id]?.watched || {}), ...(course.watched || {}) } };
   doc.lastAt = now;
   state.store.saveProgress(uid, data).catch((e) => { console.error(e); toast("Your progress couldn't be saved. Check your connection.", "#E2632B"); });
 }
@@ -4382,7 +4392,7 @@ function renderTraining() {
   if (TRS.view === "player" && TRS.course) return renderPlayer(true);
   if (TRS.view === "team" && isTrainerMe()) return renderTeam();
   TRS.view = "home";
-  const avail = (TR.courses || []).filter((c) => !c.soon && c.modules);
+  const avail = visibleCourses().filter((c) => !c.soon && c.modules);
   const mine = avail.map((c) => ({ c, p: progFor(state.user.uid, c.id) }));
   const resume = mine.filter((x) => x.p.startedAt && !x.p.completedAt).sort((a, b) => (b.p.lastAt || "").localeCompare(a.p.lastAt || ""))[0] || mine.find((x) => !x.p.startedAt) || null;
   const overall = mine.length ? Math.round(mine.reduce((t, x) => t + pctFor(x.c, x.p), 0) / mine.length) : 0;
@@ -4399,7 +4409,7 @@ function renderTraining() {
     ${resume ? continueCard(resume.c, resume.p) : ""}
     ${TRS.notes.some((n) => n.traineeUid === state.user.uid) ? `<button type="button" class="tr-myq" data-tr-questions>${TR_ICONS.chat}My questions and notes<span>${TRS.notes.filter((n) => n.traineeUid === state.user.uid).length}</span></button>` : ""}
     ${(TR.categories || []).map((cat) => {
-      const list = (TR.courses || []).filter((c) => c.category === cat.id);
+      const list = visibleCourses().filter((c) => c.category === cat.id);
       if (!list.length) return "";
       return `<section class="tr-cat"><h2>${esc(cat.label)}</h2><div class="tr-grid">${list.map((c, i) => courseCard(c, i)).join("")}</div></section>`;
     }).join("")}`;
@@ -4442,6 +4452,12 @@ function openCourse(id, fromStart) {
   renderPlayer();
   window.scrollTo({ top: 0 });
 }
+function watchedSet(st) {
+  const saved = progFor(state.user.uid, TRS.course?.id).watched?.[st.id] || [];
+  return new Set([...saved, ...((TRS.local[st.id] || {}).watched || [])]);
+}
+// "7.51" = a video length (7:51). A whole number = minutes ("87" → "1 h 27 min").
+const fmtMin = (m) => { if (m == null) return ""; const v = String(m); if (v.includes(".")) { const [a, b] = v.split("."); return `${a}:${b.padEnd(2, "0").slice(0, 2)}`; } const n = Number(v); return n >= 60 ? `${Math.floor(n / 60)} h${n % 60 ? ` ${n % 60} min` : ""}` : `${n} min`; };
 function stepDone(c, st) { return Boolean(progFor(state.user.uid, c.id).done?.[st.id]); }
 function canContinue(st) {
   const L = TRS.local[st.id] || {};
@@ -4450,6 +4466,7 @@ function canContinue(st) {
   if (st.type === "quiz") return Boolean(L.correct);
   if (st.type === "values") return (L.revealed || []).length >= (st.items || []).length;
   if (st.type === "steps") return (L.shown || 1) >= (st.items || []).length;
+  if (st.type === "resources") return st.optional || watchedSet(st).size >= (st.items || []).length;
   return true;
 }
 function renderPlayer(keepAnim) {
@@ -4473,7 +4490,7 @@ function renderPlayer(keepAnim) {
           return `<button type="button" class="tp-ol-step${i === TRS.idx ? " is-now" : ""}${done ? " is-done" : ""}${myNote(c.id, x.id) ? " has-note" : ""}" data-sid="${esc(x.id)}" ${reach ? `data-tr-goto="${i}"` : "disabled"}><span class="tp-ol-dot">${done ? TR_ICONS.check : ""}</span>${esc(x.title)}</button>`;
         }).join("")}</div>`).join("")}</aside>
         <main class="tp-stage">
-          <article class="tp-card tp-${st.type} ${keepAnim ? "" : "dir-" + TRS.dir}" data-step="${esc(st.id)}">${stepHTML(c, st)}</article>
+          <article class="tp-card tp-${st.type} ${keepAnim ? "is-static" : "dir-" + TRS.dir}" data-step="${esc(st.id)}">${stepHTML(c, st)}</article>
           ${st.type === "complete" ? "" : (() => { const note = myNote(c.id, st.id); const open = TRS.noteOpen || Boolean(note); return `<section class="tp-mynote${open ? " is-open" : ""}">
             <button type="button" class="tp-mynote-head" data-tr-note-toggle aria-expanded="${open}">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 18)}<strong>${note ? "My notes" : "Add a personal note"}</strong><small>Only you can see these</small><span class="tp-mynote-chev">${CHEV}</span></button>
             <div class="tp-mynote-body"><div><textarea id="tr-mynote" rows="3" maxlength="3000" placeholder="Write anything that helps you remember this step: passwords go in the Team Site, not here.">${esc(note)}</textarea><span class="tp-mynote-status">${note ? "Saved" : ""}</span></div></div>
@@ -4495,6 +4512,8 @@ function renderPlayer(keepAnim) {
 }
 function linkBtn(l, primary) {
   if (!l) return "";
+  if (l.course) return `<button type="button" class="${primary ? "tp-link is-primary" : "tp-link"}" data-tr-open="${esc(l.course)}">${esc(l.label)}${TR_ICONS.next}</button>`;
+  if (l.url) return `<a class="${primary ? "tp-link is-primary" : "tp-link"}" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}${TR_ICONS.ext}</a>`;
   const url = linkUrl(l.key) || linkUrl("teamSite");
   const fallback = !linkUrl(l.key);
   return `<a class="${primary ? "tp-link is-primary" : "tp-link"}" href="${esc(url)}" target="_blank" rel="noopener">${esc(l.label)}${TR_ICONS.ext}</a>${fallback && l.key !== "teamSite" && state.isAdmin ? `<small class="tp-fallback">Admins: this opens the Team Site until you add the direct link in training.js</small>` : ""}`;
@@ -4525,12 +4544,25 @@ function stepHTML(c, st) {
         : L.wrong !== undefined ? `<div class="tp-feedback is-wrong">${MSGR_ICONS.alert}<p><strong>Not quite.</strong> Give it another try.</p></div>` : ""}
       ${answered ? "" : `<button type="button" class="btn btn-primary tp-checkbtn" data-tr-check ${L.pick === undefined ? "disabled" : ""}>Check answer</button>`}`;
   }
+  if (st.type === "resources") {
+    const w = watchedSet(st);
+    return `${vis}${head}${bullets}<div class="tp-res">${st.items.map((it, i) => {
+      const on = w.has(i) || done;
+      const inner = `<span class="tp-res-ico">${it.url ? (/youtu|loom|video/i.test(it.url) ? TR_ICONS.play : TR_ICONS.ext) : TR_ICONS.book}</span>
+        <span class="tp-res-text">${it.q ? `<small>${esc(it.q)}</small>` : ""}<strong>${esc(it.title)}</strong>${it.note ? `<em>${esc(it.note)}</em>` : ""}</span>
+        ${it.minutes != null ? `<span class="tp-res-min">${esc(fmtMin(it.minutes))}</span>` : ""}<span class="tp-res-check">${TR_ICONS.check}</span>`;
+      return it.url
+        ? `<a class="tp-res-item${on ? " is-on" : ""}" href="${esc(it.url)}" target="_blank" rel="noopener" data-tr-watch="${i}" style="--i:${i}">${inner}</a>`
+        : `<button type="button" class="tp-res-item${on ? " is-on" : ""}" data-tr-watch="${i}" style="--i:${i}">${inner}</button>`;
+    }).join("")}</div>
+      <p class="tp-hint">${st.optional ? `${w.size} of ${st.items.length} started. You can keep going and come back to these.` : w.size < st.items.length ? `Open each one to continue (${w.size} of ${st.items.length})` : "All done. Nice work!"}</p>${callout(st.callout)}${st.link ? `<div class="tp-links">${linkBtn(st.link, true)}</div>` : ""}`;
+  }
   if (st.type === "values") {
     const rev = new Set(done ? st.items.map((_, i) => i) : (L.revealed || []));
-    return `${head}<div class="tp-vals-grid">${st.items.map((it, i) => `<button type="button" class="tp-val${rev.has(i) ? " is-open" : ""}" data-tr-reveal="${i}" style="--i:${i}">
-        <span class="tp-val-inner"><span class="tp-val-front"><b>${esc(it.key)}</b><small>Tap to reveal</small></span>
-        <span class="tp-val-back"><span class="tp-val-ico">${TR_ICONS[it.icon] || TR_ICONS.flag}</span><strong>${esc(it.name)}</strong><span>${esc(it.text)}</span></span></span></button>`).join("")}</div>
-      <p class="tp-hint">${rev.size < st.items.length ? `${st.items.length - rev.size} left to reveal` : "Nice! You've got all five."}</p>`;
+    return `${vis}${head}<div class="tp-vals-grid" style="--n:${st.items.length}">${st.items.map((it, i) => `<button type="button" class="tp-val${rev.has(i) ? " is-open" : ""}" data-tr-reveal="${i}" style="--i:${i}">
+        <span class="tp-val-inner"><span class="tp-val-front"><b class="${String(it.key).length > 2 ? "is-long" : ""}">${esc(it.key)}</b>${it.label ? `<span class="tp-val-label">${esc(it.label)}</span>` : ""}<small>Tap to reveal</small></span>
+        <span class="tp-val-back"><span class="tp-val-ico">${TR_ICONS[it.icon] || TR_ICONS.flag}</span><strong>${esc(it.label || it.name)}</strong>${it.label && it.name && it.name !== it.label ? `<em class="tp-val-sub">${esc(it.name)}</em>` : ""}<span>${esc(it.text)}</span></span></span></button>`).join("")}</div>
+      <p class="tp-hint">${rev.size < st.items.length ? `${st.items.length - rev.size} left to reveal` : "Nice! You've revealed them all."}</p>${rev.size >= st.items.length ? callout(st.callout) : ""}`;
   }
   if (st.type === "steps") {
     const shown = done ? st.items.length : (L.shown || 1);
@@ -4551,7 +4583,22 @@ function stepHTML(c, st) {
 /* ---------- mini illustrations ---------- */
 function trVisual(v) {
   const [name, hi] = String(v).split(":");
-  if (name === "hello") return `<div class="vz-hello"><span class="vz-orb o1"></span><span class="vz-orb o2"></span><span class="vz-orb o3"></span><img src="assets/icon-512.png" alt="" class="vz-hello-mark"/><span class="vz-hello-word">Welcome</span></div>`;
+  if (name === "hello") return `<div class="vz-hello${hi ? " is-" + hi : ""}"><span class="vz-orb o1"></span><span class="vz-orb o2"></span><span class="vz-orb o3"></span><img src="assets/icon-512.png" alt="" class="vz-hello-mark"/><span class="vz-hello-word">${esc(hi === "navy" ? "Let's learn" : hi === "teal" ? "Let's go" : "Welcome")}</span></div>`;
+  if (name === "invoice") return `<div class="vz-invoice"><div class="vz-inv-head"><strong>HRA Invoice</strong><span>Contract Employees</span></div>
+      <div class="vz-inv-grid"><span>Invoice date</span><b class="is-y">Monday you submit</b><span>Period of engagement</span><b class="is-y">Sunday – Saturday</b><span>Description</span><b class="is-y">Recruiting</b><span>Hours × rate</span><b class="is-y">40 × $00.00</b><span>Total</span><b class="is-calc">Calculates for you</b></div>
+      <div class="vz-inv-send">${TR_ICONS.mail}<span>accounting@hunterrecruitment.net <small>cc Mindy · by 10:30 AM ET every Monday</small></span></div></div>`;
+  if (name === "qb-timecard") {
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    return `<div class="vz-qb"><div class="vz-qb-top"><strong>Time Entries</strong><span class="vz-qb-tab">Manual Time Card</span></div>
+      <div class="vz-qb-row"><span>Customer</span><b>HRA</b><span>Service item</span><b>Operational Activities: HRA Time</b><span>Billable</span><b class="is-no">No</b></div>
+      <div class="vz-qb-days">${days.map((d, i) => `<span style="--i:${i}"><small>${d}</small><b>8:00</b><em>HRA Training</em></span>`).join("")}<span class="vz-qb-total"><small>Total</small><b>40:00</b></span></div>
+      <span class="vz-btn is-blue sm vz-qb-save">Save</span></div>`;
+  }
+  if (name === "jazz-portals") return `<div class="vz-portals"><div class="vz-portal"><span class="vz-portal-ico">HRA</span><strong>JazzHRA</strong><small>HRA reporting, and clients that don't have JazzHR</small></div><span class="vz-portal-or">or</span><div class="vz-portal is-b"><span class="vz-portal-ico">${TR_ICONS.home}</span><strong>Jazz Accounts Portal</strong><small>Clients that have their own JazzHR</small></div></div>`;
+  if (name === "jazz-sig") return `<div class="vz-sigs"><div class="vz-sig sm"><span class="vz-sig-tag is-b">Client JazzHR</span><em>I look forward to speaking with you!</em><span>Sincerely,</span><strong>Your Name</strong><span>Recruitment Consultant</span><span>Client Zoom phone number</span><span>Client name</span><a>Scheduling link</a></div>
+      <div class="vz-sig sm"><span class="vz-sig-tag">HRA JazzHR</span><em>I look forward to speaking with you!</em><span>Sincerely,</span><strong>Your Name</strong><span>Recruitment Consultant</span></div></div>`;
+  if (name === "trades") return `<div class="vz-trades">${[["HVAC", "Heating, ventilation and air conditioning", "M4 14a8 8 0 0 1 16 0M12 6v2M5 9l1.5 1.5M19 9l-1.5 1.5M8 20h8M12 14v6"], ["Plumbing", "Water, drains, gas and water heaters", "M5 4h6v6H5zM8 10v6a3 3 0 0 0 3 3h8"], ["Electrical", "The longest trade to master", "M13 2L4 14h7l-1 8 9-12h-7z"]].map(([t, d, ic], i) => `<div style="--i:${i}"><span>${svgI(`<path d="${ic}"/>`, 26)}</span><strong>${t}</strong><small>${d}</small></div>`).join("")}</div>`;
+  if (name === "levels") return `<div class="vz-levels">${["Apprentice", "Journeyman", "Master"].map((l, i) => `<div style="--i:${i};--h:${40 + i * 30}%"><span></span><strong>${l}</strong></div>`).join("")}</div>`;
   if (name === "lms-email") return `<div class="vz-split"><div class="vz-login"><span class="vz-brand">ZYWAVE</span><span class="vz-field">Username</span><span class="vz-btn is-blue">Log in</span><span class="vz-or">or</span><span class="vz-btn is-no">Continue with Microsoft</span><span class="vz-btn is-no">Continue with Google</span></div>
     <div class="vz-mail"><span class="vz-mail-from">notifications@learning.zywave.com</span><strong>New Learning Task Assigned</strong><span class="vz-line w80"></span><span class="vz-line w60"></span><span class="vz-line w70"></span><span class="vz-btn is-blue sm">Take training</span></div></div>`;
   if (name === "roadmap") return `<div class="vz-road"><svg viewBox="0 0 400 70" preserveAspectRatio="none"><path d="M10 50 C 80 10, 140 70, 200 35 S 320 10, 390 30" fill="none" stroke="url(#rg)" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8" class="vz-road-path"/><defs><linearGradient id="rg"><stop offset="0" stop-color="#F26A26"/><stop offset="1" stop-color="#2D6BFF"/></linearGradient></defs></svg><span class="vz-flag">${TR_ICONS.flag}</span></div>`;
@@ -4660,7 +4707,7 @@ function traineeStatus(r) {
 }
 function renderTeam() {
   const root = $("#training-root");
-  const avail = (TR.courses || []).filter((c) => !c.soon && c.modules);
+  const avail = visibleCourses().filter((c) => !c.soon && c.modules);
   const c = courseById(TRS.teamCourse) || avail[0]; TRS.teamCourse = c?.id;
   if (!c) { root.innerHTML = ""; return; }
   const steps = courseSteps(c), rows = roster(c);
@@ -4847,10 +4894,25 @@ async function downloadCoursePptx(cid, btn) {
           st.items.forEach((it, i) => { const x = 0.6 + i * (w + gap);
             s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w, h, fill: { color: "FFFFFF" }, line: { color: "FBD3BC", width: 1.25 }, rectRadius: 0.12 });
             s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: x + w / 2 - 0.4, y: y + 0.25, w: 0.8, h: 0.8, fill: { color: O }, line: { color: O }, rectRadius: 0.16 });
-            s1.addText(it.key, tb({ x: x + w / 2 - 0.4, y: y + 0.25, w: 0.8, h: 0.8, fontSize: 30, bold: true, color: "FFFFFF", align: "center", valign: "middle" }));
-            s1.addText(it.name, tb({ x: x + 0.12, y: y + 1.2, w: w - 0.24, h: 0.6, fontSize: 15, bold: true, color: INK, align: "center", valign: "top" }));
-            s1.addText(it.text, tb({ x: x + 0.15, y: y + 1.85, w: w - 0.3, h: h - 2, fontSize: 11.5, color: "4B5E7C", align: "center", valign: "top" })); });
+            s1.addText(it.key, tb({ x: x + w / 2 - 0.4, y: y + 0.25, w: 0.8, h: 0.8, fontSize: String(it.key).length > 2 ? 16 : 26, bold: true, color: "FFFFFF", align: "center", valign: "middle" }));
+            s1.addText(it.label && it.label !== it.name ? [{ text: it.label, options: { breakLine: true, color: O, fontSize: 11 } }, { text: it.name, options: { color: INK } }] : it.name, tb({ x: x + 0.12, y: y + 1.15, w: w - 0.24, h: 0.65, fontSize: n > 5 ? 12.5 : 14, bold: true, color: INK, align: "center", valign: "top" }));
+            s1.addText(it.text, tb({ x: x + 0.12, y: y + 1.85, w: w - 0.24, h: h - 2, fontSize: n > 5 ? 10 : 11, color: "4B5E7C", align: "center", valign: "top" })); });
           y += h + 0.2;
+        }
+        if (st.type === "resources") {
+          const watched = new Set(p.watched?.[st.id] || []);
+          const rowH = st.items.length > 5 ? 0.5 : 0.6, fs = st.items.length > 5 ? 12.5 : 14;
+          st.items.forEach((it, i) => {
+            const on = watched.has(i) || Boolean(p.done?.[st.id]);
+            s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.6, y, w: cw, h: rowH - 0.08, fill: { color: on ? "E6F7F1" : LI }, line: { color: on ? G : "E1E8F2", width: 0.75 }, rectRadius: 0.08 });
+            const runs = [{ text: `${on ? "☑" : "☐"}  `, options: { color: on ? G : MU, bold: true } }];
+            if (it.q) runs.push({ text: `${it.q}:  `, options: { color: O, bold: true } });
+            runs.push(it.url ? { text: it.title, options: { hyperlink: { url: it.url }, color: N, bold: true, underline: { style: "sng" } } } : { text: it.title, options: { color: INK, bold: true } });
+            if (it.minutes != null) runs.push({ text: `   ${fmtMin(it.minutes)}`, options: { color: MU } });
+            s1.addText(runs, tb({ x: 0.8, y, w: cw - 0.4, h: rowH - 0.08, fontSize: fs, valign: "middle" }));
+            y += rowH;
+          });
+          y += 0.1;
         }
         if (st.type === "steps") {
           st.items.forEach((it, i) => { s1.addShape(pres.shapes.OVAL, { x: 0.6, y: y + 0.05, w: 0.42, h: 0.42, fill: { color: O }, line: { color: O } });
@@ -4863,7 +4925,10 @@ async function downloadCoursePptx(cid, btn) {
           s1.addText(st.callout.text, tb({ x: 0.85, y, w: cw - 0.5, h, fontSize: 14, bold: true, color: warn ? "A3400B" : "1E4FA8", valign: "middle" })); y += h + 0.2; }
         const links = [...(st.link ? [st.link] : []), ...(st.links || [])];
         if (links.length) {
-          const runs = []; links.forEach((l, i) => { const url = linkUrl(l.key) || linkUrl("teamSite"); runs.push({ text: `${l.label}  ↗`, options: { hyperlink: { url }, color: N, bold: true, underline: { style: "sng" } } }); if (i < links.length - 1) runs.push({ text: "     " }); });
+          const runs = []; links.forEach((l, i) => {
+            if (l.course) runs.push({ text: `${l.label} (in Training)`, options: { color: N, bold: true } });
+            else { const url = l.url || linkUrl(l.key) || linkUrl("teamSite"); runs.push({ text: `${l.label}  ↗`, options: { hyperlink: { url }, color: N, bold: true, underline: { style: "sng" } } }); }
+            if (i < links.length - 1) runs.push({ text: "     " }); });
           s1.addText(runs, tb({ x: 0.6, y, w: cw, h: 0.4, fontSize: 15 })); y += 0.55;
         }
         if (st.type === "action") { const done = Boolean(p.done?.[st.id]);
