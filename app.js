@@ -163,6 +163,20 @@ function createDemoStore() {
       d.progress[uid] = { ...cur, ...data, courses };
       localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
     },
+    watchPrivate(uid, cb) {
+      const key = "hra_demo_trprivate_" + uid;
+      const emit = () => { try { cb(JSON.parse(localStorage.getItem(key)) || {}); } catch { cb({}); } };
+      const fn = (e) => { if (!e || e.key === key) emit(); };
+      addEventListener("storage", fn); setTimeout(emit, 0);
+      return () => removeEventListener("storage", fn);
+    },
+    async savePrivateNote(uid, courseId, stepId, text) {
+      const key = "hra_demo_trprivate_" + uid;
+      const d = JSON.parse(localStorage.getItem(key)) || {};
+      d.notes = d.notes || {}; d.notes[courseId] = d.notes[courseId] || {};
+      if (text) d.notes[courseId][stepId] = { text, at: new Date().toISOString() }; else delete d.notes[courseId][stepId];
+      localStorage.setItem(key, JSON.stringify(d));
+    },
     async addNote(n) {
       const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
       d.notes.unshift({ ...n, id: Math.random().toString(36).slice(2, 10) });
@@ -271,6 +285,12 @@ async function createFirebaseStore() {
       return () => { u1(); u2(); };
     },
     saveProgress(uid, data) { return fsMod.setDoc(fsMod.doc(db, "training_progress", uid), data, { merge: true }); },
+    watchPrivate(uid, cb) { return fsMod.onSnapshot(fsMod.doc(db, "training_private", uid), (s) => cb(s.exists() ? s.data() : {}), (e) => console.warn("Personal notes unavailable", e)); },
+    savePrivateNote(uid, courseId, stepId, text) {
+      const ref = fsMod.doc(db, "training_private", uid);
+      if (text) return fsMod.setDoc(ref, { notes: { [courseId]: { [stepId]: { text, at: new Date().toISOString() } } } }, { merge: true });
+      return fsMod.setDoc(ref, { notes: { [courseId]: { [stepId]: fsMod.deleteField() } } }, { merge: true });
+    },
     addNote(n) { return fsMod.addDoc(fsMod.collection(db, "training_notes"), n); },
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
     watchBroadcast(cb) {
@@ -1626,7 +1646,7 @@ function bind() {
     if (t.closest("[data-tr-exit]")) { TRS.view = "home"; TRS.course = null; TRS.panel = false; renderTraining(); window.scrollTo({ top: 0 }); return; }
     if (t.closest("[data-tr-next]")) { nextStep(); return; }
     if (t.closest("[data-tr-prev]")) { goStep(TRS.idx - 1, "back"); return; }
-    const trGo = t.closest("[data-tr-goto]"); if (trGo) { const i = Number(trGo.dataset.trGoto); goStep(i, i < TRS.idx ? "back" : "fwd"); return; }
+    const trGo = t.closest("[data-tr-goto]"); if (trGo) { const i = Number(trGo.dataset.trGoto); if (trGo.hasAttribute("data-tr-panel-go")) TRS.panel = false; goStep(i, i < TRS.idx ? "back" : "fwd"); return; }
     if (t.closest("[data-tr-restart]")) { goStep(0, "back"); return; }
     if (t.closest("[data-tr-confirm]")) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.confirmed = !L.confirmed; renderPlayer(true); return; }
     const trPick = t.closest("[data-tr-pick]"); if (trPick) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.pick = Number(trPick.dataset.trPick); delete L.wrong; renderPlayer(true); return; }
@@ -1642,6 +1662,9 @@ function bind() {
     if (t.closest("[data-tr-walk]")) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.shown = Math.min((L.shown || 1) + 1, st.items.length); renderPlayer(true); return; }
     if (t.closest("[data-tr-questions]")) { if (TRS.view === "player") { TRS.panel = true; renderPlayer(true); } else openTrainingQuestions(); return; }
     if (t.closest("[data-tr-panel-close]")) { TRS.panel = false; renderPlayer(true); return; }
+    const trPtab = t.closest("[data-tr-ptab]"); if (trPtab) { TRS.panelTab = trPtab.dataset.trPtab; renderQuestionsPanel(); return; }
+    const trPx = t.closest("[data-tr-pptx]"); if (trPx) { downloadCoursePptx(trPx.dataset.trPptx, trPx); return; }
+    if (t.closest("[data-tr-note-toggle]")) { const sec = t.closest(".tp-mynote"); const open = !sec.classList.contains("is-open"); sec.classList.toggle("is-open", open); TRS.noteOpen = open; t.closest("[data-tr-note-toggle]").setAttribute("aria-expanded", String(open)); if (open) setTimeout(() => $("#tr-mynote")?.focus(), 250); return; }
     if (t.closest("[data-tr-ask]")) { TRS.askOpen = !TRS.askOpen; const box = $(".tp-askbox"); if (box) { box.hidden = !TRS.askOpen; if (TRS.askOpen) $("#tr-ask-text")?.focus(); } return; }
     if (t.closest("[data-tr-ask-cancel]")) { TRS.askOpen = false; const box = $(".tp-askbox"); if (box) box.hidden = true; return; }
     if (t.closest("[data-tr-ask-send]")) { sendQuestion(); return; }
@@ -1883,6 +1906,7 @@ function bind() {
 
   document.addEventListener("input", (e) => {
     if (e.target.id === "ac-title" || e.target.id === "ac-msg") { if (AL.draft) { AL.draft.title = $("#ac-title").value; AL.draft.message = $("#ac-msg").value; renderPreview(); $("#ac-error").textContent = ""; } return; }
+    if (e.target.id === "tr-mynote") { const st = courseSteps(TRS.course)[TRS.idx]; queueNoteSave(TRS.course.id, st.id, e.target.value); return; }
     if (e.target.id === "ct-q") { CT.q = e.target.value; CT.open = null; renderContactList(); return; }
     if (e.target.id === "pl-search") {
       PL.search = e.target.value;
@@ -4219,7 +4243,7 @@ function stopHelper() { HP.open = false; HP.msgs = []; const h = $("#helper"); i
    Training: course catalog, step-by-step player, team progress for managers
    ========================================================================== */
 const TR = window.HRA_TRAINING || { courses: [], categories: [], links: {}, trainers: [] };
-const TRS = { started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, dir: "fwd", local: {}, knownNotes: null, teamCourse: null, askOpen: false, panel: false };
+const TRS = { priv: {}, unsubPriv: null, panelTab: "questions", started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, dir: "fwd", local: {}, knownNotes: null, teamCourse: null, askOpen: false, panel: false };
 const isTrainerMe = () => Boolean(state.user) && (state.isAdmin || (TR.trainers || []).map(lower).includes(state.user.email));
 const svgI = (d, w = 22) => `<svg viewBox="0 0 24 24" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const TR_ICONS = {
@@ -4271,14 +4295,37 @@ function ring(pct, size = 54, stroke = 5, color = "var(--orange)") {
     <text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" class="tr-ring-t">${pct}%</text></svg>`;
 }
 
+const myNote = (cid, sid) => TRS.priv?.notes?.[cid]?.[sid]?.text || "";
+const noteCount = (cid) => Object.values(TRS.priv?.notes?.[cid] || {}).filter((n) => n?.text).length;
+let noteTimer = null;
+function queueNoteSave(cid, sid, text) {
+  TRS.priv.notes = TRS.priv.notes || {}; TRS.priv.notes[cid] = TRS.priv.notes[cid] || {};
+  if (text) TRS.priv.notes[cid][sid] = { text, at: new Date().toISOString() }; else delete TRS.priv.notes[cid][sid];
+  const st = $(".tp-mynote-status"); if (st) { st.textContent = "Saving…"; st.classList.remove("is-saved"); }
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(async () => {
+    try { await state.store.savePrivateNote(state.user.uid, cid, sid, text.trim()); const s2 = $(".tp-mynote-status"); if (s2) { s2.textContent = "Saved"; s2.classList.add("is-saved"); } refreshNoteMarks(); }
+    catch (e) { console.error(e); const s2 = $(".tp-mynote-status"); if (s2) s2.textContent = "Couldn't save. Check your connection."; }
+  }, 650);
+}
+function refreshNoteMarks() {
+  const c = TRS.course; if (!c) return;
+  $$(".tp-ol-step").forEach((b) => { const sid = b.dataset.sid; b.classList.toggle("has-note", Boolean(sid && myNote(c.id, sid))); });
+  const n = noteCount(c.id); const t = $(".tp-dl-notes"); if (t) t.textContent = n ? `${n} note${n === 1 ? "" : "s"}` : "";
+}
+
 /* ---------- data ---------- */
 function startTraining() {
   if (TRS.started) return;
   TRS.started = true;
   TRS.unsub = state.store.watchTraining(state.user.uid, isTrainerMe(), onTrainingData);
+  TRS.unsubPriv = state.store.watchPrivate(state.user.uid, (d) => {
+    TRS.priv = d || {};
+    if (currentTool === "training" && TRS.view === "player") { refreshNoteMarks(); if (TRS.panel && TRS.panelTab === "notes") renderQuestionsPanel(); }
+  });
 }
 function stopTraining() {
-  TRS.unsub?.(); Object.assign(TRS, { started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, local: {}, knownNotes: null, askOpen: false, panel: false });
+  TRS.unsub?.(); TRS.unsubPriv?.(); Object.assign(TRS, { priv: {}, unsubPriv: null, started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, local: {}, knownNotes: null, askOpen: false, panel: false });
   const r = $("#training-root"); if (r) r.innerHTML = "";
 }
 function onTrainingData(progress, notes) {
@@ -4416,16 +4463,21 @@ function renderPlayer(keepAnim) {
       <header class="tp-top">
         <button type="button" class="tp-exit" data-tr-exit aria-label="Back to all courses">${TR_ICONS.back}<span>All courses</span></button>
         <div class="tp-title"><small>${esc(st.moduleTitle)}</small><strong>${esc(c.title)}</strong></div>
+        <button type="button" class="tp-ask tp-dl" data-tr-pptx="${esc(c.id)}" title="Download this course as PowerPoint">${svgI('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/>', 18)}<span>PowerPoint</span></button>
         <button type="button" class="tp-ask" data-tr-questions>${TR_ICONS.chat}<span>Questions</span>${TRS.notes.filter((n) => n.traineeUid === state.user.uid && n.courseId === c.id).length ? `<i>${TRS.notes.filter((n) => n.traineeUid === state.user.uid && n.courseId === c.id).length}</i>` : ""}</button>
       </header>
       <div class="tp-mods" role="list">${c.modules.map((m, mi) => `<div class="tp-mod${mi === st.mi ? " is-now" : ""}${modPct(m, mi) === 100 ? " is-done" : ""}" role="listitem" title="${esc(m.title)}"><span class="tp-mod-bar"><span style="width:${mi === st.mi ? Math.max(modPct(m, mi), 4) : modPct(m, mi)}%"></span></span><span class="tp-mod-name">${modPct(m, mi) === 100 ? TR_ICONS.check : ""}${esc(m.title)}</span></div>`).join("")}</div>
       <div class="tp-body">
         <aside class="tp-outline" aria-label="Course outline">${c.modules.map((m, mi) => `<div class="tp-ol-mod${mi === st.mi ? " is-now" : ""}"><span class="tp-ol-title">${esc(m.title)}</span>${steps.filter((x) => x.mi === mi).map((x) => {
           const i = steps.indexOf(x), done = p.done?.[x.id], reach = done || i <= (p.current || 0) || i <= TRS.idx;
-          return `<button type="button" class="tp-ol-step${i === TRS.idx ? " is-now" : ""}${done ? " is-done" : ""}" ${reach ? `data-tr-goto="${i}"` : "disabled"}><span class="tp-ol-dot">${done ? TR_ICONS.check : ""}</span>${esc(x.title)}</button>`;
+          return `<button type="button" class="tp-ol-step${i === TRS.idx ? " is-now" : ""}${done ? " is-done" : ""}${myNote(c.id, x.id) ? " has-note" : ""}" data-sid="${esc(x.id)}" ${reach ? `data-tr-goto="${i}"` : "disabled"}><span class="tp-ol-dot">${done ? TR_ICONS.check : ""}</span>${esc(x.title)}</button>`;
         }).join("")}</div>`).join("")}</aside>
         <main class="tp-stage">
           <article class="tp-card tp-${st.type} ${keepAnim ? "" : "dir-" + TRS.dir}" data-step="${esc(st.id)}">${stepHTML(c, st)}</article>
+          ${st.type === "complete" ? "" : (() => { const note = myNote(c.id, st.id); const open = TRS.noteOpen || Boolean(note); return `<section class="tp-mynote${open ? " is-open" : ""}">
+            <button type="button" class="tp-mynote-head" data-tr-note-toggle aria-expanded="${open}">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 18)}<strong>${note ? "My notes" : "Add a personal note"}</strong><small>Only you can see these</small><span class="tp-mynote-chev">${CHEV}</span></button>
+            <div class="tp-mynote-body"><div><textarea id="tr-mynote" rows="3" maxlength="3000" placeholder="Write anything that helps you remember this step: passwords go in the Team Site, not here.">${esc(note)}</textarea><span class="tp-mynote-status">${note ? "Saved" : ""}</span></div></div>
+          </section>`; })()}
           ${st.type === "complete" ? "" : `<button type="button" class="tp-askstep" data-tr-ask>${TR_ICONS.chat}Have a question about this step?</button>
           <div class="tp-askbox" ${TRS.askOpen ? "" : "hidden"}><textarea id="tr-ask-text" rows="3" maxlength="600" placeholder="Ask your manager anything about “${esc(st.title)}”"></textarea><div><button type="button" class="btn btn-ghost btn-mini" data-tr-ask-cancel>Cancel</button><button type="button" class="btn btn-primary btn-mini" data-tr-ask-send>Send question</button></div></div>`}
         </main>
@@ -4491,7 +4543,7 @@ function stepHTML(c, st) {
     const mins = p.startedAt ? Math.max(1, Math.round((new Date(p.completedAt || Date.now()) - new Date(p.startedAt)) / 60000)) : null;
     return `<div class="tp-finish"><div class="tp-trophy">${TR_ICONS.award}</div><h2>${esc(st.title)}</h2><p class="tp-text">${esc(st.text)}</p>
       <div class="tp-stats"><div><b>${steps.length - 1}</b><small>steps completed</small></div><div><b>${first}/${quizzes.length}</b><small>quiz answers first try</small></div>${mins ? `<div><b>${mins < 120 ? mins + " min" : Math.round(mins / 60) + " h"}</b><small>total time</small></div>` : ""}</div>
-      <div class="tp-finish-acts"><button type="button" class="btn btn-ghost" data-tr-restart>Review again</button><button type="button" class="btn btn-primary" data-tr-exit>Back to training ${TR_ICONS.next}</button></div></div>`;
+      <div class="tp-finish-acts"><button type="button" class="btn btn-ghost" data-tr-pptx="${esc(c.id)}">${svgI('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/>', 16)}Download as PowerPoint</button><button type="button" class="btn btn-ghost" data-tr-restart>Review again</button><button type="button" class="btn btn-primary" data-tr-exit>Back to training ${TR_ICONS.next}</button></div></div>`;
   }
   return head;
 }
@@ -4549,8 +4601,16 @@ function openTrainingQuestions() {
 function renderQuestionsPanel() {
   const el = $("#tp-panel"); if (!el) return;
   const mine = TRS.notes.filter((n) => n.traineeUid === state.user.uid);
-  el.innerHTML = `<div class="tp-panel-head"><strong>Questions and notes</strong><button type="button" class="icon-btn" data-tr-panel-close aria-label="Close">${MSGR_ICONS ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' : ""}</button></div>
-    <div class="tp-panel-list">${mine.length ? mine.map((n) => noteThreadHTML(n, false)).join("") : `<div class="nc-empty">${TR_ICONS.chat}<strong>No questions yet</strong><span>Use “Have a question about this step?” on any step. Your manager gets it right away.</span></div>`}</div>`;
+  const c = TRS.course, steps = c ? courseSteps(c) : [];
+  const notes = c ? steps.map((x, i) => ({ x, i, t: myNote(c.id, x.id) })).filter((n) => n.t) : [];
+  const tab = TRS.panelTab;
+  el.innerHTML = `<div class="tp-panel-head"><div class="seg tp-panel-seg"><button class="seg-btn${tab === "questions" ? " is-active" : ""}" data-tr-ptab="questions">Questions${mine.length ? `<span class="tab-count">${mine.length}</span>` : ""}</button><button class="seg-btn${tab === "notes" ? " is-active" : ""}" data-tr-ptab="notes">My notes${notes.length ? `<span class="tab-count">${notes.length}</span>` : ""}</button><span class="seg-indicator"></span></div>
+    <button type="button" class="icon-btn" data-tr-panel-close aria-label="Close"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="tp-panel-list">${tab === "notes"
+      ? (notes.length ? `<p class="tp-panel-note">Only you can see these. They're included when you download the course as PowerPoint.</p>${notes.map((n) => `<button type="button" class="tp-noteitem" data-tr-goto="${n.i}" data-tr-panel-go><span>${esc(n.x.moduleTitle)} · ${esc(n.x.title)}</span><p>${esc(n.t)}</p></button>`).join("")}`
+        : `<div class="nc-empty">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 30)}<strong>No notes yet</strong><span>Use “Add a personal note” under any step. Only you can see them.</span></div>`)
+      : (mine.length ? mine.map((n) => noteThreadHTML(n, false)).join("") : `<div class="nc-empty">${TR_ICONS.chat}<strong>No questions yet</strong><span>Use “Have a question about this step?” on any step. Your manager gets it right away.</span></div>`)}</div>`;
+  requestAnimationFrame(() => $$(".tp-panel-seg").forEach(moveIndicator));
 }
 function noteThreadHTML(n, trainerView) {
   const msgs = [{ by: n.from === "manager" ? n.byName : n.traineeName, text: n.text, at: n.createdAt, mgr: n.from === "manager" }, ...(n.replies || []).map((r) => ({ by: r.by, text: r.text, at: r.at, mgr: r.role === "manager" }))];
@@ -4685,4 +4745,148 @@ function seedTraining() {
     { id: "dq2", traineeUid: "demo-t1", traineeName: "Avery Collins", traineeEmail: "avery.collins@demo.local", courseId: c.id, courseTitle: c.title, stepId: "zoom-phone", stepTitle: "The Zoom Phone platform", from: "trainee", text: "Zoom was already installed. Should I still download the latest version?", createdAt: iso(5), updatedAt: iso(3), status: "answered", replies: [{ by: "Juan Rochin", byUid: "demo-admin", role: "manager", text: "If it opens and you can sign in, you're good. Zoom updates itself.", at: iso(3) }] }
   ];
   return { progress, notes };
+}
+
+/* ---------- Download a course as PowerPoint ---------- */
+function loadPptx() {
+  if (window.PptxGenJS) return Promise.resolve(window.PptxGenJS);
+  return new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js";
+    sc.onload = () => res(window.PptxGenJS); sc.onerror = () => rej(new Error("PowerPoint library didn't load"));
+    document.head.appendChild(sc);
+  });
+}
+async function imgData(url) {
+  try { const r = await fetch(url); const b = await r.blob(); return await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }); } catch { return null; }
+}
+async function downloadCoursePptx(cid, btn) {
+  const c = courseById(cid); if (!c) return;
+  btn?.classList.add("is-loading"); btn && (btn.disabled = true);
+  try {
+    const PptxGenJS = await loadPptx();
+    const logo = await imgData("assets/logo.png");
+    const pres = new PptxGenJS();
+    pres.layout = "LAYOUT_WIDE";            // 13.33 x 7.5 in
+    pres.author = state.user?.name || "HRA"; pres.company = "Hunter Recruitment Advisors"; pres.title = c.title;
+    pres.theme = { headFontFace: "Calibri", bodyFontFace: "Calibri" };
+    const O = "F26A26", N = "00377F", INK = "0A1E3F", MU = "62789A", LI = "F4F7FB", G = "0E9F7E", W = 13.333, H = 7.5;
+    const steps = courseSteps(c), p = progFor(state.user.uid, c.id);
+    const tb = (o) => ({ isTextBox: true, margin: 0, fontFace: "Calibri", ...o });
+    const estH = (text, pt, w) => { const per = Math.max(10, Math.floor(w * 72 / (pt * 0.47))); const lines = String(text || "").split("\n").reduce((t, l) => t + Math.max(1, Math.ceil(l.length / per)), 0); return lines * pt * 1.3 / 72 + 0.05; };
+    pres.defineSlideMaster({ title: "HRA Content", background: { color: "FFFFFF" },
+      objects: [{ rect: { x: 0, y: 0, w: W, h: 0.12, fill: { color: O } } }, ...(logo ? [{ image: { data: logo, x: 0.6, y: H - 0.62, w: 1.55, h: 0.4 } }] : []),
+        { text: { text: c.title, options: { x: 2.4, y: H - 0.55, w: 8, h: 0.3, fontSize: 10, color: MU, fontFace: "Calibri", margin: 0 } } }],
+      slideNumber: { x: W - 1.1, y: H - 0.55, w: 0.6, h: 0.3, fontSize: 10, color: MU, align: "right" } });
+    pres.defineSlideMaster({ title: "HRA Section", background: { color: N },
+      objects: [{ rect: { x: 0, y: H - 0.12, w: W, h: 0.12, fill: { color: O } } }], slideNumber: { x: W - 1.1, y: H - 0.55, w: 0.6, h: 0.3, fontSize: 10, color: "B9C7DD", align: "right" } });
+
+    // Title
+    const t = pres.addSlide(); t.background = { color: O };
+    t.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.7, y: 0.6, w: 2.9, h: 0.95, fill: { color: "FFFFFF" }, rectRadius: 0.12, line: { color: "FFFFFF" } });
+    if (logo) t.addImage({ data: logo, x: 0.85, y: 0.72, w: 2.6, h: 0.68 });
+    t.addText("HRA TRAINING", tb({ x: 0.75, y: 2.35, w: 8, h: 0.4, fontSize: 14, bold: true, color: "FFE3D3", charSpacing: 3 }));
+    t.addText(c.title, tb({ x: 0.75, y: 2.8, w: 11.5, h: 1.3, fontSize: 46, bold: true, color: "FFFFFF", valign: "top" }));
+    t.addText(c.summary || "", tb({ x: 0.75, y: 4.15, w: 10.5, h: 0.9, fontSize: 18, color: "FFFFFF", valign: "top" }));
+    t.addShape(pres.shapes.LINE, { x: 0.75, y: 5.55, w: 11.8, h: 0, line: { color: "FFFFFF", width: 1.5 } });
+    t.addText(`Downloaded by ${state.user?.name || ""} on ${new Date().toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" })}${p.completedAt ? `  ·  Completed ${new Date(p.completedAt).toLocaleDateString()}` : ""}`, tb({ x: 0.75, y: 5.75, w: 11.8, h: 0.4, fontSize: 13, color: "FFFFFF" }));
+
+    // Contents
+    const ct = pres.addSlide({ masterName: "HRA Content" });
+    ct.addText("What's in this course", tb({ x: 0.6, y: 0.5, w: 12, h: 0.7, fontSize: 30, bold: true, color: INK }));
+    c.modules.forEach((m, i) => {
+      const col = i % 2, row = Math.floor(i / 2), x = 0.6 + col * 6.2, y = 1.55 + row * 1.25;
+      ct.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w: 5.9, h: 1.0, fill: { color: LI }, line: { color: "E1E8F2" }, rectRadius: 0.1 });
+      ct.addShape(pres.shapes.OVAL, { x: x + 0.25, y: y + 0.22, w: 0.56, h: 0.56, fill: { color: O }, line: { color: O } });
+      ct.addText(String(i + 1), tb({ x: x + 0.25, y: y + 0.22, w: 0.56, h: 0.56, fontSize: 18, bold: true, color: "FFFFFF", align: "center", valign: "middle" }));
+      ct.addText(m.title, tb({ x: x + 1.05, y: y + 0.18, w: 4.6, h: 0.4, fontSize: 18, bold: true, color: INK }));
+      ct.addText(`${m.steps.filter((x) => x.type !== "complete").length} steps`, tb({ x: x + 1.05, y: y + 0.58, w: 4.6, h: 0.3, fontSize: 12, color: MU }));
+    });
+
+    // Steps
+    c.modules.forEach((m, mi) => {
+      const sec = pres.addSlide({ masterName: "HRA Section" });
+      sec.addText(`PART ${mi + 1}`, tb({ x: 0.9, y: 2.5, w: 10, h: 0.45, fontSize: 16, bold: true, color: "FFB088", charSpacing: 3 }));
+      sec.addText(m.title, tb({ x: 0.9, y: 3.0, w: 11.5, h: 1.2, fontSize: 48, bold: true, color: "FFFFFF", valign: "top" }));
+      m.steps.forEach((st) => {
+        const s1 = pres.addSlide({ masterName: "HRA Content" });
+        const note = myNote(c.id, st.id);
+        const cw = note ? 8.1 : 12.1;
+        let y = 0.42;
+        if (st.type === "complete") {
+          s1.addText(st.title, tb({ x: 0.6, y: 2.4, w: 12.1, h: 0.9, fontSize: 40, bold: true, color: O, align: "center" }));
+          s1.addText(st.text || "", tb({ x: 1.6, y: 3.4, w: 10.1, h: 1, fontSize: 20, color: INK, align: "center", valign: "top" }));
+          return;
+        }
+        s1.addText(m.title.toUpperCase(), tb({ x: 0.6, y, w: cw, h: 0.3, fontSize: 12, bold: true, color: O, charSpacing: 2 })); y += 0.38;
+        const th = estH(st.title, 30, cw); s1.addText(st.title, tb({ x: 0.6, y, w: cw, h: th, fontSize: 30, bold: true, color: INK, valign: "top" })); y += th + 0.15;
+        if (st.text) { const h = estH(st.text, 17, cw); s1.addText(st.text, tb({ x: 0.6, y, w: cw, h, fontSize: 17, color: "34455F", valign: "top" })); y += h + 0.2; }
+        if (st.bullets?.length) {
+          const items = st.bullets.map((b, i) => ({ text: b, options: { bullet: { indent: 18 }, breakLine: i < st.bullets.length - 1, paraSpaceAfter: 6 } }));
+          const h = st.bullets.reduce((t, b) => t + estH(b, 16, cw - 0.3) + 0.08, 0.05);
+          s1.addText(items, tb({ x: 0.65, y, w: cw - 0.05, h, fontSize: 16, color: INK, valign: "top" })); y += h + 0.15;
+        }
+        if (st.chips?.length) {
+          let cx = 0.6, cy = y; const ch = 0.42;
+          st.chips.forEach((chip, i) => { const w = Math.min(cw, 0.55 + chip.length * 0.11); if (cx + w > 0.6 + cw) { cx = 0.6; cy += ch + 0.12; }
+            s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: cx, y: cy, w, h: ch, fill: { color: "FFF1E8" }, line: { color: "FBD3BC" }, rectRadius: 0.2 });
+            s1.addText(`${i + 1}. ${chip}`, tb({ x: cx, y: cy, w, h: ch, fontSize: 13, bold: true, color: "A3400B", align: "center", valign: "middle" })); cx += w + 0.12; });
+          y = cy + ch + 0.25;
+        }
+        if (st.type === "quiz") {
+          s1.addText(st.question, tb({ x: 0.6, y, w: cw, h: estH(st.question, 20, cw), fontSize: 20, bold: true, color: INK, valign: "top" })); y += estH(st.question, 20, cw) + 0.15;
+          st.options.forEach((o, i) => { const ok = i === st.answer;
+            s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.6, y, w: cw, h: 0.5, fill: { color: ok ? "E6F7F1" : LI }, line: { color: ok ? G : "E1E8F2", width: ok ? 1.5 : 0.75 }, rectRadius: 0.08 });
+            s1.addText([{ text: `${String.fromCharCode(65 + i)}   `, options: { bold: true, color: ok ? G : MU } }, { text: o, options: { color: INK, bold: ok } }, ...(ok ? [{ text: "   ✓ Correct", options: { color: G, bold: true } }] : [])], tb({ x: 0.85, y, w: cw - 0.4, h: 0.5, fontSize: 15, valign: "middle" }));
+            y += 0.6; });
+          if (st.explain) { const h = estH(st.explain, 14, cw - 0.5) + 0.2; s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.6, y: y + 0.05, w: cw, h, fill: { color: "EEF4FF" }, line: { color: "EEF4FF" }, rectRadius: 0.08 });
+            s1.addText(st.explain, tb({ x: 0.85, y: y + 0.05, w: cw - 0.5, h, fontSize: 14, color: "1E4FA8", valign: "middle" })); y += h + 0.2; }
+        }
+        if (st.type === "values") {
+          const n = st.items.length, gap = 0.18, w = (cw - gap * (n - 1)) / n, h = 3.6;
+          st.items.forEach((it, i) => { const x = 0.6 + i * (w + gap);
+            s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w, h, fill: { color: "FFFFFF" }, line: { color: "FBD3BC", width: 1.25 }, rectRadius: 0.12 });
+            s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: x + w / 2 - 0.4, y: y + 0.25, w: 0.8, h: 0.8, fill: { color: O }, line: { color: O }, rectRadius: 0.16 });
+            s1.addText(it.key, tb({ x: x + w / 2 - 0.4, y: y + 0.25, w: 0.8, h: 0.8, fontSize: 30, bold: true, color: "FFFFFF", align: "center", valign: "middle" }));
+            s1.addText(it.name, tb({ x: x + 0.12, y: y + 1.2, w: w - 0.24, h: 0.6, fontSize: 15, bold: true, color: INK, align: "center", valign: "top" }));
+            s1.addText(it.text, tb({ x: x + 0.15, y: y + 1.85, w: w - 0.3, h: h - 2, fontSize: 11.5, color: "4B5E7C", align: "center", valign: "top" })); });
+          y += h + 0.2;
+        }
+        if (st.type === "steps") {
+          st.items.forEach((it, i) => { s1.addShape(pres.shapes.OVAL, { x: 0.6, y: y + 0.05, w: 0.42, h: 0.42, fill: { color: O }, line: { color: O } });
+            s1.addText(String(i + 1), tb({ x: 0.6, y: y + 0.05, w: 0.42, h: 0.42, fontSize: 14, bold: true, color: "FFFFFF", align: "center", valign: "middle" }));
+            s1.addText([{ text: it.title, options: { bold: true, color: INK, breakLine: true } }, { text: it.text, options: { color: "4B5E7C" } }], tb({ x: 1.2, y, w: cw - 0.6, h: 0.62, fontSize: 14, valign: "top" }));
+            y += 0.68; });
+        }
+        if (st.callout) { const h = estH(st.callout.text, 14, cw - 0.5) + 0.22, warn = st.callout.tone === "warn";
+          s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.6, y, w: cw, h, fill: { color: warn ? "FFF4EC" : "EEF4FF" }, line: { color: warn ? "FBD3BC" : "D6E4FF" }, rectRadius: 0.08 });
+          s1.addText(st.callout.text, tb({ x: 0.85, y, w: cw - 0.5, h, fontSize: 14, bold: true, color: warn ? "A3400B" : "1E4FA8", valign: "middle" })); y += h + 0.2; }
+        const links = [...(st.link ? [st.link] : []), ...(st.links || [])];
+        if (links.length) {
+          const runs = []; links.forEach((l, i) => { const url = linkUrl(l.key) || linkUrl("teamSite"); runs.push({ text: `${l.label}  ↗`, options: { hyperlink: { url }, color: N, bold: true, underline: { style: "sng" } } }); if (i < links.length - 1) runs.push({ text: "     " }); });
+          s1.addText(runs, tb({ x: 0.6, y, w: cw, h: 0.4, fontSize: 15 })); y += 0.55;
+        }
+        if (st.type === "action") { const done = Boolean(p.done?.[st.id]);
+          s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 0.6, y, w: cw, h: 0.6, fill: { color: done ? "E6F7F1" : "FAFCFF" }, line: { color: done ? G : "CBD5E3", width: 1.25, dashType: done ? "solid" : "dash" }, rectRadius: 0.1 });
+          s1.addText(`${done ? "☑" : "☐"}   ${st.confirm || "Done"}`, tb({ x: 0.85, y, w: cw - 0.5, h: 0.6, fontSize: 16, bold: true, color: done ? "0B6B55" : INK, valign: "middle" })); }
+        if (note) {
+          s1.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: 9.0, y: 0.55, w: 3.75, h: 5.9, fill: { color: "FFF8DB" }, line: { color: "F2DE8A" }, rectRadius: 0.12 });
+          s1.addText("MY NOTES", tb({ x: 9.25, y: 0.75, w: 3.3, h: 0.3, fontSize: 12, bold: true, color: "8A6400", charSpacing: 2 }));
+          s1.addText(note, tb({ x: 9.25, y: 1.15, w: 3.3, h: 5.1, fontSize: 13, color: "4A3B00", valign: "top" }));
+        }
+      });
+    });
+    const name = `${c.title} - HRA Training.pptx`.replace(/[\\/:*?"<>|]/g, "-");
+    // Rebuild the file without folder entries so it opens and co-edits cleanly from SharePoint/OneDrive.
+    const raw = await pres.write({ outputType: "arraybuffer" });
+    const zin = await window.JSZip.loadAsync(raw), zout = new window.JSZip();
+    for (const [path, f] of Object.entries(zin.files)) { if (!f.dir) zout.file(path, await f.async("uint8array"), { createFolders: false }); }
+    const blob = await zout.generateAsync({ type: "blob", compression: "DEFLATE", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast("PowerPoint downloaded", "var(--s-done)");
+  } catch (e) {
+    console.error(e); toast("The PowerPoint couldn't be created. Check your connection and try again.", "#E2632B");
+  } finally { btn?.classList.remove("is-loading"); if (btn) btn.disabled = false; }
 }

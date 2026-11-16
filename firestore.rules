@@ -117,6 +117,10 @@ service cloud.firestore {
       allow read: if isMember() && (request.auth.uid == uid || isTrainer());
       allow write: if isMember() && request.auth.uid == uid;
     }
+    // Personal notes on training steps: private to each person (managers can't read them).
+    match /training_private/{uid} {
+      allow read, write: if isMember() && request.auth.uid == uid;
+    }
     // Questions from trainees and notes from managers.
     match /training_notes/{noteId} {
       allow read: if isMember() && (resource.data.traineeUid == request.auth.uid || isTrainer());
