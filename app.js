@@ -71,7 +71,7 @@ function toast(msg, color, action) {
 /* --------------------------------------------------------------------------
    Data stores
    -------------------------------------------------------------------------- */
-const bcListeners = new Set(), logListeners = new Set();
+const bcListeners = new Set(), logListeners = new Set(), trListeners = new Set();
 function createDemoStore() {
   const KEY = "hra_demo_tickets_v3", UKEY = "hra_demo_user_v2", FKEY = "hra_demo_files_v1";
   const loadFiles = () => { try { return JSON.parse(localStorage.getItem(FKEY)) || {}; } catch { return {}; } };
@@ -146,6 +146,33 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Training (demo: shared between tabs of this browser)
+    watchTraining(uid, all, cb) {
+      const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_training_v1")) || null; } catch { return null; } };
+      if (!read()) localStorage.setItem("hra_demo_training_v1", JSON.stringify(seedTraining()));
+      const emit = () => { const d = read() || { progress: {}, notes: [] }; cb(all ? Object.values(d.progress) : (d.progress[uid] ? [d.progress[uid]] : []), all ? d.notes : d.notes.filter((n) => n.traineeUid === uid)); };
+      const fn = (e) => { if (!e || e.key === "hra_demo_training_v1") emit(); };
+      addEventListener("storage", fn); trListeners.add(fn); setTimeout(emit, 0);
+      return () => { removeEventListener("storage", fn); trListeners.delete(fn); };
+    },
+    async saveProgress(uid, data) {
+      const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
+      const cur = d.progress[uid] || {};
+      const courses = { ...(cur.courses || {}) };
+      for (const [k, v] of Object.entries(data.courses || {})) courses[k] = { ...(courses[k] || {}), ...v, done: { ...(courses[k]?.done || {}), ...(v.done || {}) }, quiz: { ...(courses[k]?.quiz || {}), ...(v.quiz || {}) } };
+      d.progress[uid] = { ...cur, ...data, courses };
+      localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
+    },
+    async addNote(n) {
+      const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
+      d.notes.unshift({ ...n, id: Math.random().toString(36).slice(2, 10) });
+      localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
+    },
+    async replyNote(id, reply, patch) {
+      const d = JSON.parse(localStorage.getItem("hra_demo_training_v1")) || { progress: {}, notes: [] };
+      d.notes = d.notes.map((n) => n.id === id ? { ...n, ...patch, replies: [...(n.replies || []), reply] } : n);
+      localStorage.setItem("hra_demo_training_v1", JSON.stringify(d)); trListeners.forEach((fn) => fn());
+    },
     // All-employees alert (demo: shared between tabs of this browser)
     watchBroadcast(cb) {
       const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_broadcast")) || null; } catch { return null; } };
@@ -233,6 +260,19 @@ async function createFirebaseStore() {
       if (!snap.exists()) throw { code: "not-found" };
       return snap.data().data;
     },
+    watchTraining(uid, all, cb) {
+      let progress = [], notes = [];
+      const pq = all ? fsMod.collection(db, "training_progress") : fsMod.doc(db, "training_progress", uid);
+      const u1 = all
+        ? fsMod.onSnapshot(pq, (s) => { progress = s.docs.map((d) => ({ uid: d.id, ...d.data() })); cb(progress, notes); }, (e) => console.warn("Training progress unavailable", e))
+        : fsMod.onSnapshot(pq, (s) => { progress = s.exists() ? [{ uid: s.id, ...s.data() }] : []; cb(progress, notes); }, (e) => console.warn("Training progress unavailable", e));
+      const nq = all ? fsMod.collection(db, "training_notes") : fsMod.query(fsMod.collection(db, "training_notes"), fsMod.where("traineeUid", "==", uid));
+      const u2 = fsMod.onSnapshot(nq, (s) => { notes = s.docs.map((d) => ({ id: d.id, ...d.data() })); cb(progress, notes); }, (e) => console.warn("Training notes unavailable", e));
+      return () => { u1(); u2(); };
+    },
+    saveProgress(uid, data) { return fsMod.setDoc(fsMod.doc(db, "training_progress", uid), data, { merge: true }); },
+    addNote(n) { return fsMod.addDoc(fsMod.collection(db, "training_notes"), n); },
+    replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
     watchBroadcast(cb) {
       return fsMod.onSnapshot(fsMod.doc(db, "broadcast", "current"), (snap) => cb(snap.exists() ? snap.data() : null), (e) => console.warn("Alerts unavailable", e));
     },
@@ -328,6 +368,7 @@ function handleUser(u) {
   state.tickets = []; state.loaded = false; state.known.clear();
 
   if (!u) {
+    stopTraining();
     stopHelper();
     stopAlerts();
     stopPipeline();
@@ -368,6 +409,7 @@ function handleUser(u) {
   $("#alert-btn").hidden = !isAdmin;
   startAlerts();
   startHelper();
+  startTraining();
   const sp = $("#rail-sharepoint");
   if (sp) { sp.href = CFG.links?.sharepoint || "#"; sp.hidden = !CFG.links?.sharepoint; }
   let savedTool = "requests";
@@ -665,6 +707,7 @@ function closeOverlay(el, instant) {
   const done = () => { el.hidden = true; if ($$(".overlay:not([hidden])").length === 0) document.body.style.overflow = ""; };
   instant ? done() : setTimeout(done, 380);
   if (el.id === "drawer") state.openId = null;
+  if (el.id === "tr-drawer") TRS.drawerUid = null;
   if (!instant && lastFocus && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
 }
 function closeAll(instant) { $$(".overlay").forEach((o) => closeOverlay(o, instant)); }
@@ -1576,6 +1619,36 @@ function bind() {
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (t.matches?.("input[type=file]")) return;
+    // ---- Training ----
+    const trOpen = t.closest("[data-tr-open]"); if (trOpen) { openCourse(trOpen.dataset.trOpen); return; }
+    if (t.closest("[data-tr-soon]")) { toast("This course is coming soon.", "var(--s-progress)"); return; }
+    const trView = t.closest("[data-tr-view]"); if (trView) { TRS.view = trView.dataset.trView; renderTraining(); return; }
+    if (t.closest("[data-tr-exit]")) { TRS.view = "home"; TRS.course = null; TRS.panel = false; renderTraining(); window.scrollTo({ top: 0 }); return; }
+    if (t.closest("[data-tr-next]")) { nextStep(); return; }
+    if (t.closest("[data-tr-prev]")) { goStep(TRS.idx - 1, "back"); return; }
+    const trGo = t.closest("[data-tr-goto]"); if (trGo) { const i = Number(trGo.dataset.trGoto); goStep(i, i < TRS.idx ? "back" : "fwd"); return; }
+    if (t.closest("[data-tr-restart]")) { goStep(0, "back"); return; }
+    if (t.closest("[data-tr-confirm]")) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.confirmed = !L.confirmed; renderPlayer(true); return; }
+    const trPick = t.closest("[data-tr-pick]"); if (trPick) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.pick = Number(trPick.dataset.trPick); delete L.wrong; renderPlayer(true); return; }
+    if (t.closest("[data-tr-check]")) {
+      const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {});
+      if (L.pick === undefined) return;
+      L.attempts = (L.attempts || 0) + 1;
+      if (L.pick === st.answer) { L.correct = true; delete L.wrong; renderPlayer(true); if (!reduceMotion) { const ok = $(".tp-opt.is-right"); ok?.animate([{ transform: "scale(1)" }, { transform: "scale(1.04)" }, { transform: "scale(1)" }], { duration: 450, easing: "cubic-bezier(.34,1.56,.64,1)" }); } }
+      else { L.wrong = L.pick; renderPlayer(true); $(".tp-opt.is-wrong")?.animate([{ transform: "translateX(0)" }, { transform: "translateX(-6px)" }, { transform: "translateX(6px)" }, { transform: "translateX(0)" }], { duration: 350 }); }
+      return;
+    }
+    const trRev = t.closest("[data-tr-reveal]"); if (trRev) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); const i = Number(trRev.dataset.trReveal); L.revealed = [...new Set([...(L.revealed || []), i])]; trRev.classList.add("is-open"); const left = st.items.length - L.revealed.length; const h = $(".tp-hint"); if (h) h.textContent = left ? `${left} left to reveal` : "Nice! You've got all five."; const nb = $("[data-tr-next]"); if (nb) nb.disabled = !canContinue(st); return; }
+    if (t.closest("[data-tr-walk]")) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.shown = Math.min((L.shown || 1) + 1, st.items.length); renderPlayer(true); return; }
+    if (t.closest("[data-tr-questions]")) { if (TRS.view === "player") { TRS.panel = true; renderPlayer(true); } else openTrainingQuestions(); return; }
+    if (t.closest("[data-tr-panel-close]")) { TRS.panel = false; renderPlayer(true); return; }
+    if (t.closest("[data-tr-ask]")) { TRS.askOpen = !TRS.askOpen; const box = $(".tp-askbox"); if (box) { box.hidden = !TRS.askOpen; if (TRS.askOpen) $("#tr-ask-text")?.focus(); } return; }
+    if (t.closest("[data-tr-ask-cancel]")) { TRS.askOpen = false; const box = $(".tp-askbox"); if (box) box.hidden = true; return; }
+    if (t.closest("[data-tr-ask-send]")) { sendQuestion(); return; }
+    const tqS = t.closest("[data-tq-send]"); if (tqS) { replyToNote(tqS.dataset.tqSend); return; }
+    const tqR = t.closest("[data-tq-resolve]"); if (tqR) { replyToNote(tqR.dataset.tqResolve, true); return; }
+    const trT = t.closest("[data-tr-trainee]"); if (trT) { renderTraineeDrawer(trT.dataset.trTrainee); openOverlay($("#tr-drawer")); return; }
+    const trdS = t.closest("[data-trd-send]"); if (trdS) { sendManagerNote(trdS.dataset.trdSend); return; }
     if (t.closest("[data-hp-toggle]")) { toggleHelper(); return; }
     if (t.closest("[data-hp-clear]")) { HP.msgs = []; try { sessionStorage.removeItem("hra_helper_" + state.user.uid); } catch {} renderHelper(); $("#hp-q")?.focus(); return; }
     const hpAsk = t.closest("[data-hp-ask]"); if (hpAsk) { askHelper(hpAsk.dataset.hpAsk); return; }
@@ -1833,6 +1906,11 @@ function bind() {
     if (e.key === "/" && currentTool === "contacts" && !e.target.closest?.("input, textarea, select, [contenteditable]")) { e.preventDefault(); $("#ct-q")?.focus(); return; }
     if (e.key === "Escape" && e.target.id === "ct-q" && e.target.value) { e.target.value = ""; CT.q = ""; renderContactList(); return; }
     if (e.key === "Escape" && $(".alert-takeover")) { ackTakeover(); return; }
+    if (currentTool === "training" && TRS.view === "player" && !e.target.closest?.("input, textarea, select") && !$(".overlay.is-open")) {
+      if (e.key === "ArrowRight") { const b = $("[data-tr-next]"); if (b && !b.disabled) { e.preventDefault(); nextStep(); } return; }
+      if (e.key === "ArrowLeft" && TRS.idx > 0) { e.preventDefault(); goStep(TRS.idx - 1, "back"); return; }
+    }
+    if (e.key === "Enter" && e.target.matches?.("[data-tq-input]")) { e.preventDefault(); replyToNote(e.target.dataset.tqInput); return; }
     if (e.key === "Escape" && HP.open && !$(".overlay.is-open")) { toggleHelper(false); $("#hp-bubble")?.focus(); return; }
     const openDd = $(".dd.is-open");
     if (openDd && e.key === "Escape") { closeDropdowns(); $(".dd-trigger", openDd)?.focus(); e.stopPropagation(); return; }
@@ -1949,6 +2027,7 @@ function setTool(id, silent) {
   moveRailGlow();
   if (id === "pipeline") startPipeline();
   if (id === "insights") { IN.animate = true; startInsights(); }
+  if (id === "training") { renderTraining(); } else document.body.classList.remove("in-course");
   if (id === "contacts") { renderContacts(); if (!silent && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#ct-q")?.focus({ preventScroll: true }), 350); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
   if (!silent) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
@@ -1983,6 +2062,7 @@ function ddSelect(id, value) {
     PL.weeksAll = false;
     saveViewPrefs({ pipelineWeekSel: PL.weekSel }); renderSheet(); return;
   }
+  if (id === "tr-course") { TRS.teamCourse = value; renderTeam(); return; }
   if (id.startsWith("in-")) { onInsightsSelect(id.slice(3), value); }
 }
 
@@ -4134,3 +4214,475 @@ function startHelper() {
   $("#hp-title").textContent = HC.name || "HRA Helper";
 }
 function stopHelper() { HP.open = false; HP.msgs = []; const h = $("#helper"); if (h) { h.hidden = true; $("#hp-panel").hidden = true; $("#hp-panel").classList.remove("is-open"); } }
+
+/* ==========================================================================
+   Training: course catalog, step-by-step player, team progress for managers
+   ========================================================================== */
+const TR = window.HRA_TRAINING || { courses: [], categories: [], links: {}, trainers: [] };
+const TRS = { started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, dir: "fwd", local: {}, knownNotes: null, teamCourse: null, askOpen: false, panel: false };
+const isTrainerMe = () => Boolean(state.user) && (state.isAdmin || (TR.trainers || []).map(lower).includes(state.user.email));
+const svgI = (d, w = 22) => `<svg viewBox="0 0 24 24" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const TR_ICONS = {
+  rocket: svgI('<path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2"/><path d="M9 15l-3-3c1-4 4.5-8 12-9-1 7.5-5 11-9 12z"/><circle cx="14.5" cy="9.5" r="1.6"/>'),
+  book: svgI('<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5"/>'),
+  search: svgI('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>'),
+  clock: svgI('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  layers: svgI('<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>'),
+  cap: svgI('<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>'),
+  video: svgI('<rect x="3" y="6" width="13" height="12" rx="2.5"/><path d="M16 10l5-3v10l-5-3z"/>'),
+  grid: svgI('<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'),
+  mail: svgI('<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/>'),
+  home: svgI('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>'),
+  folder: svgI('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  tool: svgI('<path d="M14.5 6.5a4 4 0 0 0 5 5L13 18l-3 3-4-4 3-3 6.5-6.5a4 4 0 0 0-1-1z"/>'),
+  play: svgI('<circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5z"/>'),
+  coffee: svgI('<path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 10h1.5a2.5 2.5 0 0 1 0 5H17M8 3v3M12 3v3"/>'),
+  hands: svgI('<path d="M7 11V6a1.5 1.5 0 0 1 3 0v4M10 10V4.5a1.5 1.5 0 0 1 3 0V10M13 10V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M16 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-1a7 7 0 0 1-5.6-2.8L3 15.5a1.6 1.6 0 0 1 2.5-2L7 15"/>'),
+  chart: svgI('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
+  award: svgI('<circle cx="12" cy="9" r="6"/><path d="M8.5 14L7 22l5-3 5 3-1.5-8"/>'),
+  flag: svgI('<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'),
+  check: svgI('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18),
+  lock: svgI('<rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', 16),
+  chat: svgI('<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5z"/>', 18),
+  ext: svgI('<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>', 16),
+  back: svgI('<path d="M15 6l-6 6 6 6"/>', 18),
+  next: svgI('<path d="M5 12h14M13 6l6 6-6 6"/>', 18)
+};
+const trColor = (c) => CT_COLORS[c] || CT_COLORS.navy;
+const linkUrl = (key) => (TR.links || {})[key] || "";
+const courseById = (id) => (TR.courses || []).find((c) => c.id === id);
+function courseSteps(c) {
+  const out = [];
+  (c?.modules || []).forEach((m, mi) => (m.steps || []).forEach((st, si) => out.push({ ...st, moduleId: m.id, moduleTitle: m.title, mi, si })));
+  return out;
+}
+function progDoc(uid) { return TRS.progress.find((p) => p.uid === uid) || null; }
+function progFor(uid, cid) { return progDoc(uid)?.courses?.[cid] || {}; }
+function pctFor(c, p) {
+  const steps = courseSteps(c); if (!steps.length) return 0;
+  if (p.completedAt) return 100;
+  const done = steps.filter((s) => p.done?.[s.id]).length;
+  return Math.round(done / steps.length * 100);
+}
+function ring(pct, size = 54, stroke = 5, color = "var(--orange)") {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  return `<svg class="tr-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="rgba(0,55,127,.1)" stroke-width="${stroke}"/>
+    <circle class="tr-ring-fill" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}" transform="rotate(-90 ${size / 2} ${size / 2})" style="--c:${c}"/>
+    <text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" class="tr-ring-t">${pct}%</text></svg>`;
+}
+
+/* ---------- data ---------- */
+function startTraining() {
+  if (TRS.started) return;
+  TRS.started = true;
+  TRS.unsub = state.store.watchTraining(state.user.uid, isTrainerMe(), onTrainingData);
+}
+function stopTraining() {
+  TRS.unsub?.(); Object.assign(TRS, { started: false, unsub: null, progress: [], notes: [], view: "home", course: null, idx: 0, local: {}, knownNotes: null, askOpen: false, panel: false });
+  const r = $("#training-root"); if (r) r.innerHTML = "";
+}
+function onTrainingData(progress, notes) {
+  const prevKnown = TRS.knownNotes;
+  TRS.progress = progress || [];
+  TRS.notes = (notes || []).sort((a, b) => (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || ""));
+  const known = new Map(TRS.notes.map((n) => [n.id, (n.replies || []).length]));
+  if (prevKnown) {
+    for (const n of TRS.notes) {
+      const before = prevKnown.get(n.id);
+      const last = (n.replies || []).slice(-1)[0];
+      if (before === undefined) {
+        if (n.from === "trainee" && isTrainerMe() && n.traineeUid !== state.user.uid) notify({ kind: "ticket", title: "Training question", body: `${n.traineeName}: ${n.text}`, action: () => { setTool("training"); TRS.view = "team"; renderTraining(); } });
+        if (n.from === "manager" && n.traineeUid === state.user.uid) notify({ kind: "info", title: `Note from ${n.byName || "your manager"}`, body: n.text, action: () => openTrainingQuestions() });
+      } else if ((n.replies || []).length > before && last && last.byUid !== state.user.uid) {
+        if (n.traineeUid === state.user.uid) notify({ kind: "done", title: "Your training question was answered", body: `${last.by}: ${last.text}`, action: () => openTrainingQuestions() });
+        else if (isTrainerMe()) notify({ kind: "ticket", title: "Training reply", body: `${n.traineeName}: ${last.text}`, action: () => { setTool("training"); TRS.view = "team"; renderTraining(); } });
+      }
+    }
+  }
+  TRS.knownNotes = known;
+  updateTrainingBadge();
+  if (currentTool === "training" && TRS.view !== "player") renderTraining();
+  if (currentTool === "training" && TRS.view === "player" && TRS.panel) renderQuestionsPanel();
+  if (!$("#tr-drawer")?.hidden && TRS.drawerUid) renderTraineeDrawer(TRS.drawerUid);
+}
+function updateTrainingBadge() {
+  const item = $('[data-tool="training"]'); if (!item) return;
+  const open = isTrainerMe() ? TRS.notes.filter((n) => n.status === "open" && n.from === "trainee").length : 0;
+  let b = $(".rail-badge", item);
+  if (!b) { b = document.createElement("span"); b.className = "rail-badge"; $(".rail-icon", item).appendChild(b); }
+  b.textContent = open > 9 ? "9+" : String(open); b.hidden = !open;
+}
+function saveStep(c, patch) {
+  const uid = state.user.uid, now = new Date().toISOString();
+  const cur = progFor(uid, c.id);
+  const course = { lastAt: now, ...patch };
+  if (!cur.startedAt) course.startedAt = now;
+  const data = { uid, name: state.user.name, email: state.user.email, lastAt: now, courses: { [c.id]: course } };
+  // optimistic local update
+  let doc = progDoc(uid);
+  if (!doc) { doc = { uid, name: state.user.name, email: state.user.email, courses: {} }; TRS.progress.push(doc); }
+  doc.courses = doc.courses || {};
+  doc.courses[c.id] = { ...(doc.courses[c.id] || {}), ...course, done: { ...(doc.courses[c.id]?.done || {}), ...(course.done || {}) }, quiz: { ...(doc.courses[c.id]?.quiz || {}), ...(course.quiz || {}) } };
+  doc.lastAt = now;
+  state.store.saveProgress(uid, data).catch((e) => { console.error(e); toast("Your progress couldn't be saved. Check your connection.", "#E2632B"); });
+}
+
+/* ---------- home (catalog) ---------- */
+function renderTraining() {
+  const root = $("#training-root"); if (!root || currentTool !== "training") return;
+  if (TRS.view !== "player") document.body.classList.remove("in-course");
+  startTraining();
+  if (TRS.view === "player" && TRS.course) return renderPlayer(true);
+  if (TRS.view === "team" && isTrainerMe()) return renderTeam();
+  TRS.view = "home";
+  const avail = (TR.courses || []).filter((c) => !c.soon && c.modules);
+  const mine = avail.map((c) => ({ c, p: progFor(state.user.uid, c.id) }));
+  const resume = mine.filter((x) => x.p.startedAt && !x.p.completedAt).sort((a, b) => (b.p.lastAt || "").localeCompare(a.p.lastAt || ""))[0] || mine.find((x) => !x.p.startedAt) || null;
+  const overall = mine.length ? Math.round(mine.reduce((t, x) => t + pctFor(x.c, x.p), 0) / mine.length) : 0;
+  const doneCount = mine.filter((x) => x.p.completedAt).length;
+  const openQ = TRS.notes.filter((n) => n.status === "open" && n.from === "trainee").length;
+  root.innerHTML = `
+    <div class="tr-hero">
+      <div><h1 class="hero-title">Training</h1><p class="hero-sub">Short, step-by-step lessons. Go at your own pace; your progress saves automatically.</p></div>
+      <div class="tr-hero-side">
+        ${isTrainerMe() ? `<div class="seg tr-seg"><button class="seg-btn is-active" data-tr-view="home">My training</button><button class="seg-btn" data-tr-view="team">Team progress${openQ ? `<span class="tab-count">${openQ}</span>` : ""}</button><span class="seg-indicator"></span></div>` : ""}
+        <div class="tr-overall">${ring(overall, 64, 6)}<span><strong>${doneCount} of ${mine.length}</strong><small>course${mine.length === 1 ? "" : "s"} completed</small></span></div>
+      </div>
+    </div>
+    ${resume ? continueCard(resume.c, resume.p) : ""}
+    ${TRS.notes.some((n) => n.traineeUid === state.user.uid) ? `<button type="button" class="tr-myq" data-tr-questions>${TR_ICONS.chat}My questions and notes<span>${TRS.notes.filter((n) => n.traineeUid === state.user.uid).length}</span></button>` : ""}
+    ${(TR.categories || []).map((cat) => {
+      const list = (TR.courses || []).filter((c) => c.category === cat.id);
+      if (!list.length) return "";
+      return `<section class="tr-cat"><h2>${esc(cat.label)}</h2><div class="tr-grid">${list.map((c, i) => courseCard(c, i)).join("")}</div></section>`;
+    }).join("")}`;
+  requestAnimationFrame(() => $$(".tr-seg").forEach(moveIndicator));
+}
+function continueCard(c, p) {
+  const steps = courseSteps(c), pct = pctFor(c, p);
+  const next = steps[Math.min(p.current || 0, steps.length - 1)];
+  const [c1, c2] = trColor(c.color);
+  return `<button type="button" class="tr-continue" data-tr-open="${esc(c.id)}" style="--c1:${c1};--c2:${c2}">
+    <span class="tr-continue-glow" aria-hidden="true"></span>
+    <span class="tr-continue-ico">${TR_ICONS[c.icon] || TR_ICONS.book}</span>
+    <span class="tr-continue-text"><small>${p.startedAt ? "Pick up where you left off" : "Start here"}</small><strong>${esc(c.title)}</strong><span>${p.startedAt ? `Next: ${esc(next?.title || "")}` : `${steps.length} short steps, about ${c.minutes || 15} minutes`}</span>
+      <span class="tr-bar"><span style="--w:${pct}%"></span></span></span>
+    <span class="tr-continue-go">${p.startedAt ? "Continue" : "Start"} ${TR_ICONS.next}</span>
+  </button>`;
+}
+function courseCard(c, i) {
+  const [c1, c2] = trColor(c.color);
+  const p = progFor(state.user.uid, c.id), pct = c.soon ? 0 : pctFor(c, p);
+  const steps = c.soon ? 0 : courseSteps(c).length;
+  const label = c.soon ? "Coming soon" : p.completedAt ? "Review" : p.startedAt ? "Continue" : "Start";
+  return `<button type="button" class="tr-card${c.soon ? " is-soon" : ""}${p.completedAt ? " is-done" : ""}" ${c.soon ? 'data-tr-soon' : `data-tr-open="${esc(c.id)}"`} style="--c1:${c1};--c2:${c2};--i:${i}">
+    <span class="tr-card-top"><span class="tr-card-ico">${TR_ICONS[c.icon] || TR_ICONS.book}</span>${c.soon ? `<span class="tr-soon">${TR_ICONS.lock}Coming soon</span>` : ring(pct, 46, 4, c1)}</span>
+    <strong class="tr-card-title">${esc(c.title)}</strong>
+    <span class="tr-card-sum">${esc(c.summary || "")}</span>
+    <span class="tr-card-meta">${c.soon ? "" : `<span>${steps} steps</span><span>~${c.minutes || 15} min</span>`}${p.completedAt ? `<span class="tr-done-tag">${TR_ICONS.check}Completed</span>` : ""}</span>
+    ${c.soon ? "" : `<span class="tr-card-go">${label} ${TR_ICONS.next}</span>`}
+  </button>`;
+}
+
+/* ---------- player ---------- */
+function openCourse(id, fromStart) {
+  const c = courseById(id); if (!c || c.soon) return;
+  const p = progFor(state.user.uid, id), steps = courseSteps(c);
+  TRS.course = c; TRS.view = "player"; TRS.local = {}; TRS.askOpen = false; TRS.panel = false;
+  TRS.idx = fromStart || p.completedAt ? 0 : Math.min(p.current || 0, steps.length - 1);
+  TRS.dir = "fwd";
+  if (!p.startedAt) saveStep(c, { current: TRS.idx });
+  renderPlayer();
+  window.scrollTo({ top: 0 });
+}
+function stepDone(c, st) { return Boolean(progFor(state.user.uid, c.id).done?.[st.id]); }
+function canContinue(st) {
+  const L = TRS.local[st.id] || {};
+  if (stepDone(TRS.course, st) && st.type !== "complete") return true;
+  if (st.type === "action") return Boolean(L.confirmed);
+  if (st.type === "quiz") return Boolean(L.correct);
+  if (st.type === "values") return (L.revealed || []).length >= (st.items || []).length;
+  if (st.type === "steps") return (L.shown || 1) >= (st.items || []).length;
+  return true;
+}
+function renderPlayer(keepAnim) {
+  const root = $("#training-root"); const c = TRS.course; if (!root || !c) return;
+  document.body.classList.add("in-course");
+  const steps = courseSteps(c), st = steps[TRS.idx], p = progFor(state.user.uid, c.id);
+  const [c1, c2] = trColor(c.color);
+  const modPct = (m, mi) => { const ms = steps.filter((x) => x.mi === mi); const d = ms.filter((x) => p.done?.[x.id]).length; return Math.round(d / ms.length * 100); };
+  root.innerHTML = `
+    <div class="tp" style="--c1:${c1};--c2:${c2}">
+      <header class="tp-top">
+        <button type="button" class="tp-exit" data-tr-exit aria-label="Back to all courses">${TR_ICONS.back}<span>All courses</span></button>
+        <div class="tp-title"><small>${esc(st.moduleTitle)}</small><strong>${esc(c.title)}</strong></div>
+        <button type="button" class="tp-ask" data-tr-questions>${TR_ICONS.chat}<span>Questions</span>${TRS.notes.filter((n) => n.traineeUid === state.user.uid && n.courseId === c.id).length ? `<i>${TRS.notes.filter((n) => n.traineeUid === state.user.uid && n.courseId === c.id).length}</i>` : ""}</button>
+      </header>
+      <div class="tp-mods" role="list">${c.modules.map((m, mi) => `<div class="tp-mod${mi === st.mi ? " is-now" : ""}${modPct(m, mi) === 100 ? " is-done" : ""}" role="listitem" title="${esc(m.title)}"><span class="tp-mod-bar"><span style="width:${mi === st.mi ? Math.max(modPct(m, mi), 4) : modPct(m, mi)}%"></span></span><span class="tp-mod-name">${modPct(m, mi) === 100 ? TR_ICONS.check : ""}${esc(m.title)}</span></div>`).join("")}</div>
+      <div class="tp-body">
+        <aside class="tp-outline" aria-label="Course outline">${c.modules.map((m, mi) => `<div class="tp-ol-mod${mi === st.mi ? " is-now" : ""}"><span class="tp-ol-title">${esc(m.title)}</span>${steps.filter((x) => x.mi === mi).map((x) => {
+          const i = steps.indexOf(x), done = p.done?.[x.id], reach = done || i <= (p.current || 0) || i <= TRS.idx;
+          return `<button type="button" class="tp-ol-step${i === TRS.idx ? " is-now" : ""}${done ? " is-done" : ""}" ${reach ? `data-tr-goto="${i}"` : "disabled"}><span class="tp-ol-dot">${done ? TR_ICONS.check : ""}</span>${esc(x.title)}</button>`;
+        }).join("")}</div>`).join("")}</aside>
+        <main class="tp-stage">
+          <article class="tp-card tp-${st.type} ${keepAnim ? "" : "dir-" + TRS.dir}" data-step="${esc(st.id)}">${stepHTML(c, st)}</article>
+          ${st.type === "complete" ? "" : `<button type="button" class="tp-askstep" data-tr-ask>${TR_ICONS.chat}Have a question about this step?</button>
+          <div class="tp-askbox" ${TRS.askOpen ? "" : "hidden"}><textarea id="tr-ask-text" rows="3" maxlength="600" placeholder="Ask your manager anything about “${esc(st.title)}”"></textarea><div><button type="button" class="btn btn-ghost btn-mini" data-tr-ask-cancel>Cancel</button><button type="button" class="btn btn-primary btn-mini" data-tr-ask-send>Send question</button></div></div>`}
+        </main>
+      </div>
+      ${st.type === "complete" ? "" : `<footer class="tp-nav">
+        <button type="button" class="btn btn-ghost" data-tr-prev ${TRS.idx === 0 ? "disabled" : ""}>${TR_ICONS.back}Back</button>
+        <span class="tp-count"><b>${TRS.idx + 1}</b> of ${steps.length}</span>
+        <button type="button" class="btn btn-primary tp-next" data-tr-next ${canContinue(st) ? "" : "disabled"}>${TRS.idx === steps.length - 2 ? "Finish" : "Continue"}${TR_ICONS.next}</button>
+      </footer>`}
+    </div>
+    ${TRS.panel ? `<div class="tp-panel-scrim" data-tr-panel-close></div><aside class="tp-panel" id="tp-panel"></aside>` : ""}`;
+  if (TRS.panel) renderQuestionsPanel();
+  if (st.type === "complete" && !keepAnim) setTimeout(() => confettiBurst(), 350);
+  $(".tp-ol-step.is-now")?.scrollIntoView({ block: "nearest" });
+}
+function linkBtn(l, primary) {
+  if (!l) return "";
+  const url = linkUrl(l.key) || linkUrl("teamSite");
+  const fallback = !linkUrl(l.key);
+  return `<a class="${primary ? "tp-link is-primary" : "tp-link"}" href="${esc(url)}" target="_blank" rel="noopener">${esc(l.label)}${TR_ICONS.ext}</a>${fallback && l.key !== "teamSite" && state.isAdmin ? `<small class="tp-fallback">Admins: this opens the Team Site until you add the direct link in training.js</small>` : ""}`;
+}
+function callout(co) { return co ? `<div class="tp-callout is-${co.tone || "info"}"><span>${co.tone === "warn" ? MSGR_ICONS.alert : MSGR_ICONS.info}</span><p>${esc(co.text)}</p></div>` : ""; }
+function stepHTML(c, st) {
+  const L = TRS.local[st.id] || (TRS.local[st.id] = {});
+  const done = stepDone(c, st);
+  const head = `<div class="tp-head"><span class="tp-kicker">${esc(st.moduleTitle)}</span><h2>${esc(st.title)}</h2>${st.text ? `<p class="tp-text">${esc(st.text)}</p>` : ""}</div>`;
+  const vis = st.visual ? `<div class="tp-visual">${trVisual(st.visual)}</div>` : "";
+  const bullets = st.bullets ? `<ul class="tp-bullets">${st.bullets.map((b, i) => `<li style="--i:${i}">${esc(b)}</li>`).join("")}</ul>` : "";
+  const chips = st.chips ? `<div class="tp-chips">${st.chips.map((x, i) => `<span style="--i:${i}"><b>${i + 1}</b>${esc(x)}</span>`).join("")}</div>` : "";
+  if (st.type === "content") return `${vis}${head}${bullets}${chips}${callout(st.callout)}${st.link ? `<div class="tp-links">${linkBtn(st.link, true)}</div>` : ""}`;
+  if (st.type === "action") {
+    const on = L.confirmed || done;
+    return `${vis}${head}${bullets}${callout(st.callout)}
+      <div class="tp-links">${st.link ? linkBtn(st.link, true) : ""}${(st.links || []).map((l) => linkBtn(l)).join("")}</div>
+      <button type="button" class="tp-confirm${on ? " is-on" : ""}" data-tr-confirm aria-pressed="${on}"><span class="tp-check">${TR_ICONS.check}</span>${esc(st.confirm || "I've done this")}</button>`;
+  }
+  if (st.type === "quiz") {
+    const answered = L.correct || done;
+    return `${head}<p class="tp-q">${esc(st.question)}</p>
+      <div class="tp-opts" role="radiogroup">${st.options.map((o, i) => {
+        const cls = answered && i === st.answer ? " is-right" : L.wrong === i ? " is-wrong" : L.pick === i ? " is-pick" : "";
+        return `<button type="button" role="radio" aria-checked="${L.pick === i}" class="tp-opt${cls}" data-tr-pick="${i}" ${answered ? "disabled" : ""}><span class="tp-opt-key">${String.fromCharCode(65 + i)}</span>${esc(o)}${answered && i === st.answer ? `<span class="tp-opt-ok">${TR_ICONS.check}</span>` : ""}</button>`;
+      }).join("")}</div>
+      ${answered ? `<div class="tp-feedback is-right">${TR_ICONS.check}<p><strong>${L.attempts > 1 ? "Got it!" : "Correct!"}</strong> ${esc(st.explain || "")}</p></div>`
+        : L.wrong !== undefined ? `<div class="tp-feedback is-wrong">${MSGR_ICONS.alert}<p><strong>Not quite.</strong> Give it another try.</p></div>` : ""}
+      ${answered ? "" : `<button type="button" class="btn btn-primary tp-checkbtn" data-tr-check ${L.pick === undefined ? "disabled" : ""}>Check answer</button>`}`;
+  }
+  if (st.type === "values") {
+    const rev = new Set(done ? st.items.map((_, i) => i) : (L.revealed || []));
+    return `${head}<div class="tp-vals-grid">${st.items.map((it, i) => `<button type="button" class="tp-val${rev.has(i) ? " is-open" : ""}" data-tr-reveal="${i}" style="--i:${i}">
+        <span class="tp-val-inner"><span class="tp-val-front"><b>${esc(it.key)}</b><small>Tap to reveal</small></span>
+        <span class="tp-val-back"><span class="tp-val-ico">${TR_ICONS[it.icon] || TR_ICONS.flag}</span><strong>${esc(it.name)}</strong><span>${esc(it.text)}</span></span></span></button>`).join("")}</div>
+      <p class="tp-hint">${rev.size < st.items.length ? `${st.items.length - rev.size} left to reveal` : "Nice! You've got all five."}</p>`;
+  }
+  if (st.type === "steps") {
+    const shown = done ? st.items.length : (L.shown || 1);
+    return `${head}<ol class="tp-walk">${st.items.map((it, i) => `<li class="${i < shown ? "is-shown" : ""}${i === shown - 1 && !done ? " is-now" : ""}"><span class="tp-walk-n">${i + 1}</span><span><strong>${esc(it.title)}</strong><small>${esc(it.text)}</small></span></li>`).join("")}</ol>
+      ${shown < st.items.length ? `<button type="button" class="btn btn-ghost tp-walknext" data-tr-walk>Next step ${TR_ICONS.next}</button>` : ""}${shown >= st.items.length ? callout(st.callout) : ""}`;
+  }
+  if (st.type === "complete") {
+    const p = progFor(state.user.uid, c.id), steps = courseSteps(c);
+    const quizzes = steps.filter((x) => x.type === "quiz"), first = quizzes.filter((q) => p.quiz?.[q.id]?.firstTry).length;
+    const mins = p.startedAt ? Math.max(1, Math.round((new Date(p.completedAt || Date.now()) - new Date(p.startedAt)) / 60000)) : null;
+    return `<div class="tp-finish"><div class="tp-trophy">${TR_ICONS.award}</div><h2>${esc(st.title)}</h2><p class="tp-text">${esc(st.text)}</p>
+      <div class="tp-stats"><div><b>${steps.length - 1}</b><small>steps completed</small></div><div><b>${first}/${quizzes.length}</b><small>quiz answers first try</small></div>${mins ? `<div><b>${mins < 120 ? mins + " min" : Math.round(mins / 60) + " h"}</b><small>total time</small></div>` : ""}</div>
+      <div class="tp-finish-acts"><button type="button" class="btn btn-ghost" data-tr-restart>Review again</button><button type="button" class="btn btn-primary" data-tr-exit>Back to training ${TR_ICONS.next}</button></div></div>`;
+  }
+  return head;
+}
+
+/* ---------- mini illustrations ---------- */
+function trVisual(v) {
+  const [name, hi] = String(v).split(":");
+  if (name === "hello") return `<div class="vz-hello"><span class="vz-orb o1"></span><span class="vz-orb o2"></span><span class="vz-orb o3"></span><img src="assets/icon-512.png" alt="" class="vz-hello-mark"/><span class="vz-hello-word">Welcome</span></div>`;
+  if (name === "lms-email") return `<div class="vz-split"><div class="vz-login"><span class="vz-brand">ZYWAVE</span><span class="vz-field">Username</span><span class="vz-btn is-blue">Log in</span><span class="vz-or">or</span><span class="vz-btn is-no">Continue with Microsoft</span><span class="vz-btn is-no">Continue with Google</span></div>
+    <div class="vz-mail"><span class="vz-mail-from">notifications@learning.zywave.com</span><strong>New Learning Task Assigned</strong><span class="vz-line w80"></span><span class="vz-line w60"></span><span class="vz-line w70"></span><span class="vz-btn is-blue sm">Take training</span></div></div>`;
+  if (name === "roadmap") return `<div class="vz-road"><svg viewBox="0 0 400 70" preserveAspectRatio="none"><path d="M10 50 C 80 10, 140 70, 200 35 S 320 10, 390 30" fill="none" stroke="url(#rg)" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8" class="vz-road-path"/><defs><linearGradient id="rg"><stop offset="0" stop-color="#F26A26"/><stop offset="1" stop-color="#2D6BFF"/></linearGradient></defs></svg><span class="vz-flag">${TR_ICONS.flag}</span></div>`;
+  if (name === "teamsite") {
+    const tabs = ["HRA Team Site", "Recruiting", "Marketing", "Sales", "Human Resources", "Training", "Management", "Executive Team"];
+    const btns = ["Our Team", "Community Passwords", "HRA Team Meetings"];
+    return `<div class="vz-browser"><div class="vz-bar"><span></span><span></span><span></span><em>hunterrecruitmentnet.sharepoint.com</em></div>
+      <div class="vz-sp"><span class="vz-sp-logo">RECRUITMENT ADVISORS</span><span class="vz-sp-name">SharePoint</span><span class="vz-sp-search"></span></div>
+      <div class="vz-tabs">${tabs.map((t) => `<span class="${t === hi ? "is-hi" : ""}">${esc(t)}</span>`).join("")}</div>
+      <div class="vz-page"><div class="vz-page-l"><span class="vz-hra">HRA</span><strong>HRA Team Site</strong><small>Welcome to All Things HRA!</small></div>
+      <div class="vz-page-r">${btns.map((b) => `<span class="vz-spbtn${b === hi ? " is-hi" : ""}">${esc(b)}</span>`).join("")}</div></div>
+      ${hi ? `<span class="vz-cursor" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M5 3l14 8-6 1.5L10 19z" fill="#0A1E3F" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></span>` : ""}</div>`;
+  }
+  if (name === "signature") return `<div class="vz-sig"><strong>Your Name</strong><span>Your Title</span><span>(000) 000-0000</span><a>you@hunterrecruitment.net</a><a>www.hunterrecruitment.net</a><em>“A New Way to Hire. Hunt with Distinction!”</em><img src="assets/logo.png" alt="Hunter Recruitment Advisors logo"/><span class="vz-sig-tag">Links ✓</span></div>`;
+  if (name === "zoom-app") return `<div class="vz-zoom"><span class="vz-zoom-icon">zoom</span><div><strong>Zoom Workplace</strong><small>Phone, meetings and chat</small><span class="vz-btn is-blue sm">Download</span></div><span class="vz-zoom-check">${TR_ICONS.check}Already installed? You're set!</span></div>`;
+  if (name === "zoom-bg") return `<div class="vz-cam"><span class="vz-cam-mark">Hunter</span><span class="vz-cam-person"></span><span class="vz-cam-bar"><i></i><i></i><i class="is-red"></i></span></div>`;
+  if (name === "recruiting") return `<div class="vz-tiles">${["Workable", "JazzHR", "Indeed", "LinkedIn", "Canva", "Weekly Schedule"].map((t, i) => `<span class="${i === 0 ? "is-hi" : ""}" style="--i:${i}">${svgI('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>', 18)}${esc(t)}</span>`).join("")}</div>`;
+  if (name === "it-flow") return `<div class="vz-flow"><span class="vz-node"><b>1</b>${TR_ICONS.hands}Your manager or Mindy</span><span class="vz-arrow"></span><span class="vz-node is-2"><b>2</b>${TR_ICONS.mail}it@hunterrecruitment.net</span></div>`;
+  if (name === "explore") return `<div class="vz-explore">${["Our Team", "Training", "Recruiting", "Human Resources", "Marketing", "Sales"].map((t, i) => `<span style="--i:${i}">${esc(t)}</span>`).join("")}</div>`;
+  return "";
+}
+
+/* ---------- player actions ---------- */
+function goStep(i, dir) {
+  const steps = courseSteps(TRS.course);
+  TRS.idx = Math.max(0, Math.min(i, steps.length - 1)); TRS.dir = dir || "fwd"; TRS.askOpen = false;
+  renderPlayer();
+  $(".tp-stage")?.scrollTo?.({ top: 0 });
+}
+function nextStep() {
+  const c = TRS.course, steps = courseSteps(c), st = steps[TRS.idx];
+  if (!canContinue(st)) return;
+  const now = new Date().toISOString(), patch = { done: { [st.id]: now }, current: Math.max(progFor(state.user.uid, c.id).current || 0, TRS.idx + 1) };
+  const L = TRS.local[st.id];
+  if (st.type === "quiz" && L && !progFor(state.user.uid, c.id).quiz?.[st.id]) patch.quiz = { [st.id]: { firstTry: (L.attempts || 1) === 1, attempts: L.attempts || 1 } };
+  if (TRS.idx + 1 === steps.length - 1) { patch.completedAt = now; patch.done[steps[steps.length - 1].id] = now; }
+  saveStep(c, patch);
+  goStep(TRS.idx + 1, "fwd");
+}
+
+/* ---------- questions ---------- */
+function openTrainingQuestions() {
+  setTool("training");
+  if (TRS.view !== "player") { const mineCourse = TRS.notes.find((n) => n.traineeUid === state.user.uid)?.courseId || (TR.courses || []).find((c) => !c.soon)?.id; if (mineCourse) openCourse(mineCourse); }
+  TRS.panel = true; renderPlayer(true);
+}
+function renderQuestionsPanel() {
+  const el = $("#tp-panel"); if (!el) return;
+  const mine = TRS.notes.filter((n) => n.traineeUid === state.user.uid);
+  el.innerHTML = `<div class="tp-panel-head"><strong>Questions and notes</strong><button type="button" class="icon-btn" data-tr-panel-close aria-label="Close">${MSGR_ICONS ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' : ""}</button></div>
+    <div class="tp-panel-list">${mine.length ? mine.map((n) => noteThreadHTML(n, false)).join("") : `<div class="nc-empty">${TR_ICONS.chat}<strong>No questions yet</strong><span>Use “Have a question about this step?” on any step. Your manager gets it right away.</span></div>`}</div>`;
+}
+function noteThreadHTML(n, trainerView) {
+  const msgs = [{ by: n.from === "manager" ? n.byName : n.traineeName, text: n.text, at: n.createdAt, mgr: n.from === "manager" }, ...(n.replies || []).map((r) => ({ by: r.by, text: r.text, at: r.at, mgr: r.role === "manager" }))];
+  return `<div class="tq${n.status === "open" ? " is-open" : ""}" data-note-id="${esc(n.id)}">
+    <div class="tq-top">${trainerView ? `<span class="tq-who"><span class="ldr-avatar tq-av">${esc(initials(n.traineeName || "?"))}</span><strong>${esc(n.traineeName)}</strong></span>` : ""}<span class="tq-step">${esc(n.courseTitle || "")}${n.stepTitle ? ` · ${esc(n.stepTitle)}` : ""}</span>${n.status === "open" ? `<span class="tq-badge">Waiting for reply</span>` : `<span class="tq-badge is-ok">Answered</span>`}</div>
+    <div class="tq-msgs">${msgs.map((m) => `<div class="tq-msg${m.mgr ? " is-mgr" : ""}"><span class="tq-by">${esc(m.by || "")}${m.mgr ? " · Manager" : ""} <small>${esc(ago(m.at))}</small></span><p>${esc(m.text)}</p></div>`).join("")}</div>
+    <div class="tq-reply"><input type="text" maxlength="600" placeholder="${trainerView ? "Write a reply" : "Reply"}" data-tq-input="${esc(n.id)}"/><button type="button" class="btn btn-primary btn-mini" data-tq-send="${esc(n.id)}">Send</button>
+      ${trainerView && n.status === "open" ? `<button type="button" class="btn btn-ghost btn-mini" data-tq-resolve="${esc(n.id)}">Mark answered</button>` : ""}</div>
+  </div>`;
+}
+async function sendQuestion() {
+  const ta = $("#tr-ask-text"); const text = ta?.value.trim(); if (!text) { ta?.focus(); return; }
+  const c = TRS.course, st = courseSteps(c)[TRS.idx];
+  const now = new Date().toISOString();
+  try {
+    await state.store.addNote({ traineeUid: state.user.uid, traineeName: state.user.name, traineeEmail: state.user.email, courseId: c.id, courseTitle: c.title, stepId: st.id, stepTitle: st.title, from: "trainee", text, createdAt: now, updatedAt: now, status: "open", replies: [] });
+    TRS.askOpen = false; renderPlayer(true);
+    toast("Question sent. You'll get a notification when your manager replies.", "var(--s-done)");
+  } catch (e) { console.error(e); toast("Your question couldn't be sent. Try again.", "#E2632B"); }
+}
+async function replyToNote(id, resolve) {
+  const n = TRS.notes.find((x) => x.id === id); if (!n) return;
+  const input = $(`[data-tq-input="${CSS.escape(id)}"]`); const text = input?.value.trim();
+  const trainer = isTrainerMe() && n.traineeUid !== state.user.uid;
+  const now = new Date().toISOString();
+  if (!text && !resolve) { input?.focus(); return; }
+  try {
+    const patch = { updatedAt: now, status: trainer ? "answered" : (n.from === "manager" ? "answered" : "open") };
+    if (text) await state.store.replyNote(id, { by: state.user.name, byUid: state.user.uid, role: trainer ? "manager" : "trainee", text, at: now }, patch);
+    else await state.store.replyNote(id, { by: state.user.name, byUid: state.user.uid, role: "manager", text: "Marked as answered.", at: now }, { updatedAt: now, status: "answered" });
+    if (input) input.value = "";
+  } catch (e) { console.error(e); toast("That didn't send. Try again.", "#E2632B"); }
+}
+
+/* ---------- team progress (managers) ---------- */
+function roster(c) {
+  const map = new Map();
+  for (const p of TRS.progress) if (p.uid) map.set(lower(p.email || p.uid), { uid: p.uid, name: p.name || nameFromEmail(p.email || ""), email: p.email || "", p: p.courses?.[c.id] || {}, lastAt: p.lastAt });
+  for (const e of [...MEMBERS]) if (!map.has(e)) map.set(e, { uid: null, name: nameFromEmail(e), email: e, p: {}, lastAt: null });
+  return [...map.values()].filter((r) => r.uid !== state.user.uid || r.p.startedAt);
+}
+function traineeStatus(r) {
+  if (r.p.completedAt) return ["done", "Completed"];
+  if (!r.p.startedAt) return ["new", "Not started"];
+  const idle = (Date.now() - new Date(r.p.lastAt || r.lastAt || 0)) / 86400e3;
+  return idle > 3 ? ["stuck", `Idle ${Math.floor(idle)} days`] : ["active", "In progress"];
+}
+function renderTeam() {
+  const root = $("#training-root");
+  const avail = (TR.courses || []).filter((c) => !c.soon && c.modules);
+  const c = courseById(TRS.teamCourse) || avail[0]; TRS.teamCourse = c?.id;
+  if (!c) { root.innerHTML = ""; return; }
+  const steps = courseSteps(c), rows = roster(c);
+  const quizzes = steps.filter((x) => x.type === "quiz");
+  const st = (k) => rows.filter((r) => traineeStatus(r)[0] === k).length;
+  const openQ = TRS.notes.filter((n) => n.status === "open" && n.from === "trainee");
+  root.innerHTML = `
+    <div class="tr-hero">
+      <div><h1 class="hero-title">Team progress</h1><p class="hero-sub">See how new team members are moving through training, and help when someone gets stuck.</p></div>
+      <div class="tr-hero-side"><div class="seg tr-seg"><button class="seg-btn" data-tr-view="home">My training</button><button class="seg-btn is-active" data-tr-view="team">Team progress${openQ.length ? `<span class="tab-count">${openQ.length}</span>` : ""}</button><span class="seg-indicator"></span></div>
+      ${avail.length > 1 ? ddHTML("tr-course", { label: "Course", value: c.id, options: avail.map((x) => ({ value: x.id, label: x.title })) }) : `<span class="tr-course-label">${esc(c.title)}</span>`}</div>
+    </div>
+    <div class="kpis tr-kpis" style="--n:5;--half:3">
+      ${[["Team members", rows.length, "#00377F"], ["In progress", st("active"), "#2D6BFF"], ["Completed", st("done"), "#0E9F7E"], ["Need a nudge", st("stuck"), "#E0A800"], ["Open questions", openQ.length, "#F26A26"]].map(([l, v, col], i) => `<div class="kpi" style="--accent:${col};--i:${i}"><div class="kpi-top"><span class="kpi-label">${l}</span></div><div class="kpi-row"><div class="kpi-value">${v}</div></div></div>`).join("")}
+    </div>
+    <div class="tr-team">
+      <section class="in-card tr-roster">
+        <header class="in-card-head"><div><h2>${esc(c.title)}</h2><p>Select a person to see their details or send them a note</p></div></header>
+        ${rows.length ? `<div class="tr-rows">${rows.sort((a, b) => ({ stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(a)[0]] - { stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(b)[0]])).map((r, i) => {
+          const [sk, sl] = traineeStatus(r), pct = pctFor(c, r.p), cur = steps[Math.min(r.p.current || 0, steps.length - 1)];
+          const qs = quizzes.filter((q) => r.p.quiz?.[q.id]); const first = qs.filter((q) => r.p.quiz[q.id].firstTry).length;
+          return `<button type="button" class="tr-row" ${r.uid ? `data-tr-trainee="${esc(r.uid)}"` : "disabled"} style="--i:${i}">
+            <span class="ldr-avatar">${esc(initials(r.name))}</span>
+            <span class="tr-row-main"><strong>${esc(r.name)}</strong><small>${r.p.completedAt ? `Finished ${esc(ago(r.p.completedAt))}` : r.p.startedAt ? `Now on: ${esc(cur?.title || "")}` : esc(r.email)}</small>
+              <span class="tr-bar"><span style="--w:${pct}%"></span></span></span>
+            <span class="tr-row-side"><span class="tr-pill is-${sk}">${esc(sl)}</span><small>${pct}%${qs.length ? ` · quiz ${first}/${qs.length} first try` : ""}</small><small>${r.p.lastAt ? "Active " + esc(ago(r.p.lastAt)) : ""}</small></span>
+          </button>`;
+        }).join("")}</div>` : `<p class="in-empty">No team members yet. Add employees in config.js and Firebase.</p>`}
+      </section>
+      <section class="in-card tr-qs">
+        <header class="in-card-head"><div><h2>Questions</h2><p>${openQ.length ? `${openQ.length} waiting for a reply` : "You're all caught up"}</p></div></header>
+        <div class="tr-qlist">${TRS.notes.length ? TRS.notes.slice(0, 30).map((n) => noteThreadHTML(n, true)).join("") : `<p class="in-empty">No questions yet.</p>`}</div>
+      </section>
+    </div>`;
+  requestAnimationFrame(() => $$(".tr-seg").forEach(moveIndicator));
+}
+function renderTraineeDrawer(uid) {
+  TRS.drawerUid = uid;
+  const c = courseById(TRS.teamCourse) || (TR.courses || []).find((x) => !x.soon);
+  const doc = progDoc(uid); if (!doc) return;
+  const p = doc.courses?.[c.id] || {}, steps = courseSteps(c), [sk, sl] = traineeStatus({ p, lastAt: doc.lastAt });
+  const notes = TRS.notes.filter((n) => n.traineeUid === uid);
+  $("#tr-drawer-body").innerHTML = `
+    <div class="trd-head"><span class="ldr-avatar trd-av">${esc(initials(doc.name || "?"))}</span><div><h2 id="trd-title">${esc(doc.name || "")}</h2><small>${esc(doc.email || "")}</small></div><span class="tr-pill is-${sk}">${esc(sl)}</span></div>
+    <div class="trd-prog">${ring(pctFor(c, p), 72, 7)}<div><strong>${esc(c.title)}</strong><small>${p.startedAt ? `Started ${esc(ago(p.startedAt))}` : "Not started"}${p.lastAt ? ` · active ${esc(ago(p.lastAt))}` : ""}</small></div></div>
+    <div class="trd-mods">${c.modules.map((m, mi) => `<div class="trd-mod"><strong>${esc(m.title)}</strong>${steps.filter((x) => x.mi === mi).map((x) => {
+      const d = p.done?.[x.id], q = p.quiz?.[x.id];
+      return `<span class="trd-step${d ? " is-done" : ""}"><i>${d ? TR_ICONS.check : ""}</i>${esc(x.title)}${q ? `<em class="${q.firstTry ? "is-ok" : "is-retry"}">${q.firstTry ? "First try" : `${q.attempts} tries`}</em>` : ""}</span>`;
+    }).join("")}</div>`).join("")}</div>
+    <h3 class="drawer-h">Send a note</h3>
+    <div class="trd-note"><textarea id="trd-note-text" rows="3" maxlength="600" placeholder="Encourage them, or ask how it's going"></textarea><button type="button" class="btn btn-primary" data-trd-send="${esc(uid)}">Send note</button></div>
+    ${notes.length ? `<h3 class="drawer-h">Conversation</h3>${notes.map((n) => noteThreadHTML(n, true)).join("")}` : ""}`;
+}
+async function sendManagerNote(uid) {
+  const ta = $("#trd-note-text"); const text = ta?.value.trim(); if (!text) { ta?.focus(); return; }
+  const doc = progDoc(uid); const c = courseById(TRS.teamCourse) || (TR.courses || []).find((x) => !x.soon);
+  const p = doc?.courses?.[c.id] || {}, st = courseSteps(c)[Math.min(p.current || 0, courseSteps(c).length - 1)];
+  const now = new Date().toISOString();
+  try {
+    await state.store.addNote({ traineeUid: uid, traineeName: doc?.name || "", traineeEmail: doc?.email || "", courseId: c.id, courseTitle: c.title, stepId: st?.id || "", stepTitle: st?.title || "", from: "manager", byName: state.user.name, byUid: state.user.uid, text, createdAt: now, updatedAt: now, status: "answered", replies: [] });
+    ta.value = ""; toast(`Note sent to ${doc?.name || "them"}`, "var(--s-done)");
+  } catch (e) { console.error(e); toast("The note didn't send. Try again.", "#E2632B"); }
+}
+
+/* ---------- demo seed ---------- */
+function seedTraining() {
+  const c = (TR.courses || []).find((x) => !x.soon && x.modules); if (!c) return { progress: {}, notes: [] };
+  const steps = courseSteps(c), now = Date.now(), iso = (h) => new Date(now - h * 3600e3).toISOString();
+  const mk = (uid, name, email, upto, lastH, startH, done) => {
+    const d = {}; steps.slice(0, upto).forEach((s, i) => { d[s.id] = iso(startH - (startH - lastH) * (i / Math.max(upto, 1))); });
+    const quiz = {}; steps.slice(0, upto).filter((s) => s.type === "quiz").forEach((s, i) => { quiz[s.id] = { firstTry: i % 3 !== 1, attempts: i % 3 !== 1 ? 1 : 2 }; });
+    return { uid, name, email, lastAt: iso(lastH), courses: { [c.id]: { done: d, quiz, current: upto, startedAt: iso(startH), lastAt: iso(lastH), ...(done ? { completedAt: iso(lastH) } : {}) } } };
+  };
+  const progress = {
+    "demo-t1": mk("demo-t1", "Avery Collins", "avery.collins@demo.local", 11, 2, 26, false),
+    "demo-t2": mk("demo-t2", "Jordan Patel", "jordan.patel@demo.local", 7, 110, 140, false),
+    "demo-t3": mk("demo-t3", "Sam Rivera", "sam.rivera@demo.local", steps.length, 30, 75, true)
+  };
+  const comm = steps.find((s) => s.id === "community") || steps[6];
+  const notes = [
+    { id: "dq1", traineeUid: "demo-t2", traineeName: "Jordan Patel", traineeEmail: "jordan.patel@demo.local", courseId: c.id, courseTitle: c.title, stepId: comm.id, stepTitle: comm.title, from: "trainee", text: "I can't see the Community Passwords button on the Team Site. Do I need special access?", createdAt: iso(112), updatedAt: iso(112), status: "open", replies: [] },
+    { id: "dq2", traineeUid: "demo-t1", traineeName: "Avery Collins", traineeEmail: "avery.collins@demo.local", courseId: c.id, courseTitle: c.title, stepId: "zoom-phone", stepTitle: "The Zoom Phone platform", from: "trainee", text: "Zoom was already installed. Should I still download the latest version?", createdAt: iso(5), updatedAt: iso(3), status: "answered", replies: [{ by: "Juan Rochin", byUid: "demo-admin", role: "manager", text: "If it opens and you can sign in, you're good. Zoom updates itself.", at: iso(3) }] }
+  ];
+  return { progress, notes };
+}

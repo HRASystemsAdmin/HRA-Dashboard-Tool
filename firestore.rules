@@ -21,6 +21,13 @@ service cloud.firestore {
       ];
     }
 
+    // Managers who can see everyone's training progress (admins always can).
+    // Keep in sync with training.js → trainers. Trainers must also be in memberEmails().
+    function trainerEmails() {
+      return [
+      ];
+    }
+
     function signedIn() { return request.auth != null && request.auth.token.email != null; }
     function email()    { return request.auth.token.email.lower(); }
     function isAdmin()  { return signedIn() && email() in adminEmails(); }
@@ -102,6 +109,20 @@ service cloud.firestore {
     // Each person's own dashboard preferences (like their column layout).
     match /user_prefs/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Training: people save their own progress; admins and trainers can see everyone's.
+    function isTrainer() { return isAdmin() || (isMember() && email() in trainerEmails()); }
+    match /training_progress/{uid} {
+      allow read: if isMember() && (request.auth.uid == uid || isTrainer());
+      allow write: if isMember() && request.auth.uid == uid;
+    }
+    // Questions from trainees and notes from managers.
+    match /training_notes/{noteId} {
+      allow read: if isMember() && (resource.data.traineeUid == request.auth.uid || isTrainer());
+      allow create: if isMember() && (request.resource.data.traineeUid == request.auth.uid || isTrainer());
+      allow update: if isMember() && (resource.data.traineeUid == request.auth.uid || isTrainer());
+      allow delete: if isTrainer();
     }
 
     // Everything else is closed.
