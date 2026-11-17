@@ -71,7 +71,7 @@ function toast(msg, color, action) {
 /* --------------------------------------------------------------------------
    Data stores
    -------------------------------------------------------------------------- */
-const bcListeners = new Set(), logListeners = new Set(), trListeners = new Set();
+const bcListeners = new Set(), logListeners = new Set(), trListeners = new Set(), profListeners = new Set();
 function createDemoStore() {
   const KEY = "hra_demo_tickets_v3", UKEY = "hra_demo_user_v2", FKEY = "hra_demo_files_v1";
   const loadFiles = () => { try { return JSON.parse(localStorage.getItem(FKEY)) || {}; } catch { return {}; } };
@@ -146,6 +146,19 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Profiles (demo)
+    watchProfiles(cb) {
+      const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_profiles")) || {}; } catch { return {}; } };
+      const fn = (e) => { if (!e || e.key === "hra_demo_profiles") cb(Object.entries(read()).map(([uid, d]) => ({ uid, ...d }))); };
+      addEventListener("storage", fn); profListeners.add(fn); setTimeout(() => fn(), 0);
+      return () => { removeEventListener("storage", fn); profListeners.delete(fn); };
+    },
+    async saveProfile(uid, data) {
+      const all = JSON.parse(localStorage.getItem("hra_demo_profiles") || "{}");
+      all[uid] = { ...(all[uid] || {}), ...data };
+      try { localStorage.setItem("hra_demo_profiles", JSON.stringify(all)); } catch { throw { code: "demo-quota" }; }
+      profListeners.forEach((fn) => fn());
+    },
     // Training (demo: shared between tabs of this browser)
     watchTraining(uid, all, cb) {
       const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_training_v1")) || null; } catch { return null; } };
@@ -315,6 +328,10 @@ async function createFirebaseStore() {
       return fsMod.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => trDbError(e, "questions"));
     },
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
+    watchProfiles(cb) {
+      return fsMod.onSnapshot(fsMod.collection(db, "profiles"), (s) => cb(s.docs.map((d) => ({ uid: d.id, ...d.data() }))), (e) => console.warn("Profiles unavailable", e));
+    },
+    saveProfile(uid, data) { return fsMod.setDoc(fsMod.doc(db, "profiles", uid), data, { merge: true }); },
     watchBroadcast(cb) {
       return fsMod.onSnapshot(fsMod.doc(db, "broadcast", "current"), (snap) => cb(snap.exists() ? snap.data() : null), (e) => console.warn("Alerts unavailable", e));
     },
@@ -410,6 +427,7 @@ function handleUser(u) {
   state.tickets = []; state.loaded = false; state.known.clear();
 
   if (!u) {
+    stopProfiles();
     stopTraining();
     stopHelper();
     stopAlerts();
@@ -435,12 +453,10 @@ function handleUser(u) {
   state.isAdmin = isAdmin;
   state.tab = "mine";
 
-  $("#user-name").textContent = state.user.name;
-  $("#user-role").textContent = isAdmin ? "Admin" : "Team member";
-  $("#user-avatar").textContent = initials(state.user.name);
+  state.user.baseName = state.user.name;
+  refreshUserUI();
   buildBoards();
-  const h = new Date().getHours();
-  $("#greeting").textContent = `${h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"}, ${state.user.name.split(" ")[0]}`;
+  startProfiles();
 
   setTab("mine", true);
   stopPipeline();
@@ -504,7 +520,7 @@ function typeLabel(key) {
   return g ? `${g.label}: ${t.short || t.label}` : t.label;
 }
 
-function renderTypes() {
+function typeOptions() {
   const tiles = [], seen = new Set();
   for (const [key, t] of Object.entries(CFG.requestTypes)) {
     if (!canUseType(t)) continue;
@@ -515,17 +531,36 @@ function renderTypes() {
       tiles.push({ open: "group:" + t.group, icon: g.icon, label: g.label, blurb: g.blurb });
     } else tiles.push({ open: key, icon: t.icon, label: t.label, blurb: t.blurb });
   }
-  $("#type-tiles").classList.toggle("is-stacked", tiles.length >= 3);
-  $("#type-tiles").innerHTML = tiles.map((t) => `
-    <button class="type-tile" data-new="${esc(t.open)}">
-      <span class="type-icon">${ICONS[t.icon] || ICONS.spark}</span>
-      <span>
-        <span class="type-name" style="display:block">${esc(t.label)}</span>
-        <span class="type-blurb" style="display:block">${esc(t.blurb)}</span>
-      </span>
-      <span class="type-go" aria-hidden="true">${ICONS.plus}</span>
-    </button>`).join("");
+  return tiles;
 }
+function renderTypes() {
+  const tiles = typeOptions();
+  $("#type-tiles").innerHTML = `
+    <button type="button" class="create-cta" data-new="picker">
+      <span class="create-cta-shine" aria-hidden="true"></span>
+      <span class="create-cta-plus" aria-hidden="true">${ICONS.plus}</span>
+      <span class="create-cta-text"><strong>Create a ticket</strong><small>Phone queues, access, QuickBooks, Indeed credits or anything else</small></span>
+      <span class="create-cta-icons" aria-hidden="true">${tiles.slice(0, 5).map((t, i) => `<i style="--i:${i}">${ICONS[t.icon] || ICONS.spark}</i>`).join("")}</span>
+    </button>`;
+}
+function openPicker(dir) {
+  const tiles = typeOptions();
+  pending.length = 0;
+  swapModal(`
+    <div class="tkp">
+      <div class="tkp-head"><h2 id="modal-title">What do you need?</h2><p>Choose one to get started.</p></div>
+      <div class="tkp-grid" role="list">
+        ${tiles.map((t, i) => `<button type="button" class="tkp-opt" data-new="${esc(t.open)}" role="listitem" style="--i:${i}">
+          <span class="tkp-ico">${ICONS[t.icon] || ICONS.spark}</span>
+          <span class="tkp-text"><strong>${esc(t.label)}</strong><small>${esc(t.blurb)}</small></span>
+          <span class="tkp-go" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+        </button>`).join("")}
+      </div>
+    </div>`, dir);
+  $("#modal")?.classList.add("is-picker");
+  setTimeout(() => $(".tkp-opt")?.focus({ preventScroll: true }), 320);
+}
+const backToPicker = `<button type="button" class="back-link" data-new="picker" data-dir="back"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>All request types</button>`;
 
 function track(status) {
   const n = STATUS[status]?.n ?? 0;
@@ -581,7 +616,7 @@ function renderMine() {
     ? items.map((t, i) => row(t, i, false)).join("")
     : state.mineFilter === "completed"
       ? empty("Nothing completed yet", "Finished requests will show up here.")
-      : empty("No open requests", "Choose a request type above to send your first one.");
+      : empty("No open requests", "Select “Create a ticket” to send your first one.");
 }
 
 const PRI = { Urgent: 0, Soon: 1 };
@@ -638,7 +673,7 @@ function buildBoards() {
   BOARDS = state.isAdmin ? getBoards() : [];
   const ind = $("#tabs .tab-indicator");
   for (const b of BOARDS) {
-    boardState[b.id] = { filter: "active", search: "" };
+    boardState[b.id] = { filter: "active", search: "", archive: false };
     ind.insertAdjacentHTML("beforebegin", `<button class="tab" data-tab="${b.id}" data-board-tab><span class="tab-long">${esc(b.label)}</span><span class="tab-short">${esc(b.short)}</span> <span class="tab-count is-zero" id="${b.id}-count">0</span></button>`);
     $(".main").insertAdjacentHTML("beforeend", boardPanelHTML(b));
     $(".main").lastElementChild.dataset.board = b.id;
@@ -648,7 +683,9 @@ function buildBoards() {
 function renderBoard(b) {
   const st = boardState[b.id];
   const panel = $(`.panel[data-panel="${b.id}"]`);
-  const pool = state.tickets.filter(b.match);
+  const all = state.tickets.filter(b.match);
+  const archived = all.filter((t) => t.archived);
+  const pool = all.filter((t) => !t.archived);
   const counts = { open: 0, in_progress: 0, completed: 0 };
   pool.forEach((t) => { if (counts[t.status] !== undefined) counts[t.status]++; });
   $$("[data-count]", panel).forEach((el) => countTo(el, counts[el.dataset.count]));
@@ -660,9 +697,13 @@ function renderBoard(b) {
 
   const list = $("#" + b.id + "-list");
   if (!state.loaded) { list.innerHTML = skeleton(); return; }
+  panel.classList.toggle("is-archive", st.archive);
+  const link = $(".archive-link", panel) || (() => { list.insertAdjacentHTML("afterend", `<button type="button" class="archive-link" data-archive-view="${b.id}"></button>`); return $(".archive-link", panel); })();
+  link.innerHTML = st.archive ? `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>Back to ${esc(b.id === "queue" ? "the queue" : b.label)}` : `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg>Archive${archived.length ? ` · ${archived.length}` : ""}`;
+  link.hidden = !st.archive && !archived.length;
   const s = lower(st.search);
-  const items = pool
-    .filter((t) => matchFilter(t, st.filter))
+  const items = (st.archive ? archived : pool)
+    .filter((t) => st.archive || matchFilter(t, st.filter))
     .filter((t) => !s || lower([ref(t.id), t.title, t.createdBy?.name, t.createdBy?.email, JSON.stringify(t.fields || {})].join(" ")).includes(s))
     .sort((a, b2) => {
       if (a.status !== "completed" && b2.status !== "completed") {
@@ -671,10 +712,11 @@ function renderBoard(b) {
       }
       return toDate(b2.createdAt) - toDate(a.createdAt);
     });
-  list.innerHTML = items.length
+  list.innerHTML = (st.archive ? `<li class="archive-banner"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg><span><strong>Archived requests</strong> Open one to restore it.</span></li>` : "") + (items.length
     ? items.map((t, i) => row(t, i, true)).join("")
+    : st.archive ? empty("The archive is empty", "Archived requests will show up here.")
     : s ? empty("No matches", "Try a name, a reference like HRA-1A2B3C, or fewer words.")
-        : empty(b.id === "queue" ? "The queue is clear" : `No ${b.label.toLowerCase()} requests`, "New requests appear here the moment they're sent.");
+        : empty(b.id === "queue" ? "The queue is clear" : `No ${b.label.toLowerCase()} requests`, "New requests appear here the moment they're sent."));
 }
 
 function renderQueue() {
@@ -885,6 +927,7 @@ function openGroup(groupKey, dir) {
   if (!g || !options.length) return;
   pending.length = 0;
   swapModal(`
+    ${backToPicker}
     <div class="modal-head">
       <span class="type-icon">${ICONS[g.icon] || ICONS.spark}</span>
       <div><h2 id="modal-title">${esc(g.label)}</h2><p>${esc(g.question || "Choose a request type.")}</p></div>
@@ -901,13 +944,15 @@ function openGroup(groupKey, dir) {
 }
 
 function openNew(key, dir) {
+  if (key === "picker") { openPicker(dir); return; }
+  $("#modal")?.classList.remove("is-picker");
   if (key.startsWith("group:")) { openGroup(key.slice(6), dir); return; }
   const type = CFG.requestTypes[key];
   if (!canUseType(type)) return;
   pending.length = 0;
   const back = type.group && GROUPS[type.group]
     ? `<button type="button" class="back-link" data-new="group:${esc(type.group)}" data-dir="back"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>${esc(GROUPS[type.group].label)}</button>`
-    : "";
+    : backToPicker;
   swapModal(`
     ${back}
     <div class="modal-head">
@@ -1345,6 +1390,21 @@ function confirmDialog({ title, body, confirm, danger = true }) {
   });
 }
 
+async function archiveTicket(on) {
+  const t = state.tickets.find((x) => x.id === state.openId);
+  if (!t || !state.isAdmin) return;
+  const now = new Date().toISOString();
+  try {
+    await state.store.update(t.id, { archived: on, archivedAt: on ? now : null, archivedBy: on ? state.user.name : null },
+      { status: t.status, by: state.user.name, at: now, note: on ? "Archived" : "Restored from archive" });
+    closeOverlay($("#drawer"));
+    toast(on ? `${ref(t.id)} archived` : `${ref(t.id)} restored`, on ? "var(--muted)" : "var(--s-done)");
+  } catch (e) {
+    console.error(e);
+    toast("That didn't save. Check your connection and try again.", "#E2632B");
+  }
+}
+
 async function deleteTicket() {
   const t = state.tickets.find((x) => x.id === state.openId);
   if (!t) return;
@@ -1556,7 +1616,9 @@ function renderDrawer() {
     const actions = {
       open:        `<button class="btn btn-primary" data-set="in_progress">Take request</button><button class="btn btn-success" data-set="completed">Complete</button>`,
       in_progress: `<button class="btn btn-success" data-set="completed">Complete</button><button class="btn btn-ghost" data-set="open">Move back to submitted</button>`,
-      completed:   `<button class="btn btn-ghost" data-set="in_progress">Reopen</button><button class="btn btn-danger" data-delete>${ICONS.trash.replace(/22/g, "17")}Delete request</button>`
+      completed:   t.archived
+        ? `<button class="btn btn-primary" data-archive="0">Restore from archive</button>`
+        : `<button class="btn btn-ghost" data-set="in_progress">Reopen</button><button class="btn btn-ghost btn-archive" data-archive="1"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg>Archive</button>`
     }[t.status];
     admin = `
       <div class="admin-box">
@@ -1567,17 +1629,10 @@ function renderDrawer() {
       </div>`;
   }
 
-  if (!state.isAdmin && t.status === "completed" && t.createdBy?.uid === state.user.uid) {
-    admin = `
-      <div class="owner-actions">
-        <p>This request is complete. Delete it to keep your list tidy.</p>
-        <button class="btn btn-danger" data-delete>${ICONS.trash.replace(/22/g, "17")}Delete request</button>
-      </div>`;
-  }
 
   $("#drawer-body").innerHTML = `
     <div class="drawer-top">
-      <span class="pill" data-status="${t.status}">${STATUS[t.status].label}</span>
+      <span class="pill" data-status="${t.status}">${STATUS[t.status].label}</span>${t.archived ? `<span class="pill pill-archived">Archived</span>` : ""}
       <span class="t-ref">${ref(t.id)}</span>
     </div>
     <h2 class="drawer-title" id="drawer-title">${esc(t.title)}</h2>
@@ -1691,14 +1746,17 @@ function bind() {
       return;
     }
     if (t.closest("[data-tr-walk]")) { const st = courseSteps(TRS.course)[TRS.idx]; const L = TRS.local[st.id] || (TRS.local[st.id] = {}); L.shown = Math.min((L.shown || 1) + 1, st.items.length); renderPlayer(true); return; }
-    if (t.closest("[data-tr-questions]")) { if (TRS.view === "player") { TRS.panel = true; renderPlayer(true); } else openTrainingQuestions(); return; }
+    if (t.closest("[data-tr-questions]")) { TRS.panelTab = "questions"; if (TRS.view === "player") { TRS.panel = true; renderPlayer(true); } else openTrainingQuestions(); return; }
     if (t.closest("[data-tr-panel-close]")) { TRS.panel = false; renderPlayer(true); return; }
     const trPtab = t.closest("[data-tr-ptab]"); if (trPtab) { TRS.panelTab = trPtab.dataset.trPtab; renderQuestionsPanel(); return; }
     if (t.closest("[data-tr-manage]")) { openManageTraining(); return; }
     const tmB = t.closest("[data-tm]"); if (tmB) { runManage(tmB.dataset.tm, tmB); return; }
     const trPx = t.closest("[data-tr-pptx]"); if (trPx) { downloadCoursePptx(trPx.dataset.trPptx, trPx); return; }
-    if (t.closest("[data-tr-note-toggle]")) { const sec = t.closest(".tp-mynote"); const open = !sec.classList.contains("is-open"); sec.classList.toggle("is-open", open); TRS.noteOpen = open; t.closest("[data-tr-note-toggle]").setAttribute("aria-expanded", String(open)); if (open) setTimeout(() => $("#tr-mynote")?.focus(), 250); return; }
-    if (t.closest("[data-tr-ask]")) { TRS.askOpen = !TRS.askOpen; const box = $(".tp-askbox"); if (box) { box.hidden = !TRS.askOpen; if (TRS.askOpen) $("#tr-ask-text")?.focus(); } return; }
+    if (t.closest("[data-tr-note-toggle]")) { const btn = t.closest("[data-tr-note-toggle]"), sec = $(".tp-mynote"); const open = !sec.classList.contains("is-open"); sec.classList.toggle("is-open", open); btn.classList.toggle("is-on", open); TRS.noteOpen = open; btn.setAttribute("aria-expanded", String(open)); if (open) setTimeout(() => $("#tr-mynote")?.focus(), 250); return; }
+    if (t.closest("[data-tr-more]")) { TRS.moreOpen = !TRS.moreOpen; const m = $(".tp-menu"); if (m) m.hidden = !TRS.moreOpen; t.closest("[data-tr-more]").setAttribute("aria-expanded", String(TRS.moreOpen)); return; }
+    const trOP = t.closest("[data-tr-open-panel]"); if (trOP) { TRS.moreOpen = false; TRS.panelTab = trOP.dataset.trOpenPanel; TRS.panel = true; renderPlayer(true); return; }
+    if (TRS.moreOpen && !t.closest(".tp-more-wrap")) { TRS.moreOpen = false; const m = $(".tp-menu"); if (m) m.hidden = true; $("[data-tr-more]")?.setAttribute("aria-expanded", "false"); }
+    if (t.closest("[data-tr-ask]")) { TRS.askOpen = !TRS.askOpen; const box = $(".tp-askbox"); t.closest("[data-tr-ask]").classList.toggle("is-on", TRS.askOpen); if (box) { box.hidden = !TRS.askOpen; if (TRS.askOpen) $("#tr-ask-text")?.focus(); } return; }
     if (t.closest("[data-tr-ask-cancel]")) { TRS.askOpen = false; const box = $(".tp-askbox"); if (box) box.hidden = true; return; }
     if (t.closest("[data-tr-ask-send]")) { sendQuestion(); return; }
     const tqS = t.closest("[data-tq-send]"); if (tqS) { replyToNote(tqS.dataset.tqSend); return; }
@@ -1706,6 +1764,10 @@ function bind() {
     const trT = t.closest("[data-tr-trainee]"); if (trT) { renderTraineeDrawer(trT.dataset.trTrainee); openOverlay($("#tr-drawer")); return; }
     const trdS = t.closest("[data-trd-send]"); if (trdS) { sendManagerNote(trdS.dataset.trdSend); return; }
     if (t.closest("[data-rail-toggle]")) { toggleRail(); return; }
+    if (t.closest("[data-profile]")) { openProfile(); return; }
+    if (t.closest("[data-prof-pick]")) { $("#prof-file")?.click(); return; }
+    if (t.closest("[data-prof-remove]")) { PRF.photo = null; $("#prof-img").textContent = initials($("#prof-name").value || state.user.name); $(".prof-avatar").classList.remove("has-photo"); t.closest("[data-prof-remove]").remove(); return; }
+    const pSave = t.closest("[data-prof-save]"); if (pSave) { saveProfile(pSave); return; }
     if (t.closest("[data-hp-toggle]")) { toggleHelper(); return; }
     if (t.closest("[data-hp-clear]")) { HP.msgs = []; try { sessionStorage.removeItem("hra_helper_" + state.user.uid); } catch {} renderHelper(); $("#hp-q")?.focus(); return; }
     const hpAsk = t.closest("[data-hp-ask]"); if (hpAsk) { askHelper(hpAsk.dataset.hpAsk); return; }
@@ -1863,6 +1925,8 @@ function bind() {
     }
     const set = t.closest("[data-set]"); if (set) { setStatus(set.dataset.set, set); return; }
     if (t.closest("[data-delete]")) { deleteTicket(); return; }
+    const arc = t.closest("[data-archive]"); if (arc) { archiveTicket(arc.dataset.archive === "1"); return; }
+    const arcV = t.closest("[data-archive-view]"); if (arcV) { const b = BOARDS.find((x) => x.id === arcV.dataset.archiveView); if (b) { boardState[b.id].archive = !boardState[b.id].archive; renderBoard(b); $(`.panel[data-panel="${b.id}"]`)?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" }); } return; }
     const rs = t.closest("[data-resend]"); if (rs) { resendEmail(rs); return; }
     const dr = t.closest("[data-draft]"); if (dr) {
       const tk = state.tickets.find((x) => x.id === dr.dataset.draft);
@@ -2095,6 +2159,104 @@ function toggleRail() {
   applyRail(collapsed, true);
 }
 try { if (localStorage.getItem("hra_rail_collapsed") === "1") document.documentElement.classList.add("rail-collapsed", "rail-settled"); } catch {}
+
+/* ---------- Profiles: display name + photo ---------- */
+const PROF = { byUid: new Map(), byEmail: new Map(), unsub: null };
+function avatarInner(name, uid, email) {
+  const p = (uid && PROF.byUid.get(uid)) || (email && PROF.byEmail.get(lower(email)));
+  return p?.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy" decoding="async"/>` : esc(initials(p?.name || name || "?"));
+}
+const displayName = (name, uid, email) => ((uid && PROF.byUid.get(uid)) || (email && PROF.byEmail.get(lower(email))))?.name || name;
+function refreshUserUI() {
+  if (!state.user) return;
+  const me = PROF.byUid.get(state.user.uid);
+  state.user.name = me?.name || state.user.baseName || state.user.name;
+  $("#user-name").textContent = state.user.name;
+  $("#user-role").textContent = state.isAdmin ? "Admin" : "Team member";
+  const av = $("#user-avatar"); av.innerHTML = avatarInner(state.user.name, state.user.uid, state.user.email); av.classList.toggle("has-photo", Boolean(me?.photo));
+  const h = new Date().getHours();
+  $("#greeting").textContent = `${h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"}, ${state.user.name.split(" ")[0]}`;
+}
+function startProfiles() {
+  PROF.unsub?.();
+  PROF.unsub = state.store.watchProfiles((list) => {
+    PROF.byUid = new Map((list || []).map((p) => [p.uid, p]));
+    PROF.byEmail = new Map((list || []).filter((p) => p.email).map((p) => [lower(p.email), p]));
+    refreshUserUI();
+    if (currentTool === "training") renderTraining();
+  });
+}
+function stopProfiles() { PROF.unsub?.(); PROF.unsub = null; PROF.byUid = new Map(); PROF.byEmail = new Map(); }
+
+const PRF = { photo: undefined };
+function openProfile() {
+  const me = PROF.byUid.get(state.user.uid) || {};
+  PRF.photo = undefined; // undefined = unchanged, null = removed, string = new
+  const photo = me.photo || null;
+  $("#modal")?.classList.remove("is-picker");
+  swapModal(`<div class="prof">
+    <div class="prof-stage">
+      <span class="prof-ring" aria-hidden="true"></span>
+      <button type="button" class="prof-avatar${photo ? " has-photo" : ""}" data-prof-pick aria-label="Change your photo">
+        <span class="prof-img" id="prof-img">${photo ? `<img src="${esc(photo)}" alt=""/>` : esc(initials(state.user.name))}</span>
+        <span class="prof-cam" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><small>Change photo</small></span>
+      </button>
+      <input type="file" id="prof-file" accept="image/png,image/jpeg,image/webp,image/heic" hidden />
+    </div>
+    <h2 id="modal-title" class="prof-title">Your profile</h2>
+    <p class="prof-hint">Drop a photo on the circle, or click it to choose one. It's resized automatically.</p>
+    <label class="field"><span class="field-label">Your name</span><input id="prof-name" maxlength="60" value="${esc(state.user.name)}" autocomplete="name" /></label>
+    <div class="prof-email">${esc(state.user.email)} · ${state.isAdmin ? "Admin" : "Team member"}</div>
+    <p class="form-error" id="prof-error" role="alert"></p>
+    <div class="modal-actions">
+      ${photo ? `<button type="button" class="btn btn-ghost prof-remove" data-prof-remove>Remove photo</button>` : ""}
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="button" class="btn btn-primary" data-prof-save><span class="btn-text">Save</span><span class="spinner" aria-hidden="true"></span></button>
+    </div>
+  </div>`);
+  const av = $(".prof-avatar");
+  ["dragenter", "dragover"].forEach((ev) => av.addEventListener(ev, (e) => { e.preventDefault(); av.classList.add("is-drop"); }));
+  ["dragleave", "drop"].forEach((ev) => av.addEventListener(ev, (e) => { e.preventDefault(); av.classList.remove("is-drop"); }));
+  av.addEventListener("drop", (e) => { const f = e.dataTransfer?.files?.[0]; if (f) loadProfilePhoto(f); });
+  $("#prof-file").addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f) loadProfilePhoto(f); });
+}
+async function loadProfilePhoto(file) {
+  const err = $("#prof-error");
+  if (!/^image\//.test(file.type)) { err.textContent = "Please choose an image (JPG or PNG)."; return; }
+  if (file.size > 15 * 1024 * 1024) { err.textContent = "That image is too large. Please pick one under 15 MB."; return; }
+  err.textContent = "";
+  try {
+    const url = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const S = 256, c = document.createElement("canvas"); c.width = S; c.height = S;
+    const ctx = c.getContext("2d"), side = Math.min(img.width, img.height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S);
+    let q = 0.86, out = c.toDataURL("image/jpeg", q);
+    while (out.length > 60000 && q > 0.5) { q -= 0.08; out = c.toDataURL("image/jpeg", q); }
+    PRF.photo = out;
+    const box = $("#prof-img"); box.innerHTML = `<img src="${out}" alt=""/>`;
+    const av = $(".prof-avatar"); av.classList.add("has-photo"); av.classList.remove("is-pop"); void av.offsetWidth; av.classList.add("is-pop");
+  } catch (e) { console.error(e); err.textContent = "That image couldn't be read. Try a JPG or PNG."; }
+}
+async function saveProfile(btn) {
+  const name = $("#prof-name").value.trim().replace(/\s+/g, " ");
+  if (!name) { $("#prof-error").textContent = "Please enter your name."; $("#prof-name").focus(); return; }
+  btn.classList.add("is-loading"); btn.disabled = true;
+  const data = { name, email: state.user.email, updatedAt: new Date().toISOString() };
+  if (PRF.photo !== undefined) data.photo = PRF.photo;
+  try {
+    await state.store.saveProfile(state.user.uid, data);
+    const cur = PROF.byUid.get(state.user.uid) || {};
+    PROF.byUid.set(state.user.uid, { ...cur, ...data, uid: state.user.uid }); PROF.byEmail.set(lower(state.user.email), PROF.byUid.get(state.user.uid));
+    refreshUserUI();
+    closeOverlay($("#modal"));
+    toast("Profile saved", "var(--s-done)");
+  } catch (e) {
+    console.error(e); btn.classList.remove("is-loading"); btn.disabled = false;
+    $("#prof-error").textContent = e?.code === "permission-denied" ? "Saving is blocked. An admin needs to publish the latest firestore.rules." : "Your profile couldn't be saved. Check your connection and try again.";
+  }
+}
 
 function setTool(id, silent) {
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
@@ -3666,7 +3828,7 @@ function notifItems() {
   for (const t of state.tickets) {
     const created = toDate(t.createdAt).toISOString();
     if (state.isAdmin && t.createdBy?.uid !== state.user.uid && new Date(created).getTime() > since)
-      items.push({ id: "n:" + t.id, group: "more", kind: "ticket", title: `${t.createdBy?.name || "Someone"} sent a request`, text: t.title, who: t.createdBy?.name, at: created, open: () => { setTool("requests"); openTicket(t.id); } });
+      items.push({ id: "n:" + t.id, group: "more", kind: "ticket", title: `${t.createdBy?.name || "Someone"} sent a request`, text: t.title, who: t.createdBy?.name, whoUid: t.createdBy?.uid, whoEmail: t.createdBy?.email, at: created, open: () => { setTool("requests"); openTicket(t.id); } });
     if (t.createdBy?.uid === state.user.uid) {
       const done = [...(t.history || [])].reverse().find((h) => h.status === "completed");
       if (t.status === "completed" && done?.at && new Date(done.at).getTime() > since)
@@ -3691,7 +3853,7 @@ function refreshBell() {
 }
 
 function itemHTML(it) {
-  const av = it.kind === "ticket" ? `<span class="nc-av nc-person">${esc(initials(it.who || "?"))}</span>`
+  const av = it.kind === "ticket" ? `<span class="nc-av nc-person">${avatarInner(it.who || "?", it.whoUid, it.whoEmail)}</span>`
     : `<span class="nc-av nc-${it.kind}${it.level ? " lv-" + it.level : ""}">${MSGR_ICONS[it.kind] || MSGR_ICONS.info}</span>`;
   return `<li><button type="button" class="nc-item${isUnread(it) ? " is-unread" : ""}" data-nc="${esc(it.id)}">
     <span class="nc-dot" aria-hidden="true"></span>${av}
@@ -4486,25 +4648,25 @@ function renderTraining() {
   TRS.view = "home";
   const avail = visibleCourses().filter((c) => !c.soon && c.modules);
   const mine = avail.map((c) => ({ c, p: progFor(state.user.uid, c.id) }));
-  const resume = mine.filter((x) => x.p.startedAt && !x.p.completedAt).sort((a, b) => (b.p.lastAt || "").localeCompare(a.p.lastAt || ""))[0] || mine.find((x) => !x.p.startedAt) || null;
+  const resume = mine.filter((x) => x.p.startedAt && !x.p.completedAt).sort((a, b) => (b.p.lastAt || "").localeCompare(a.p.lastAt || ""))[0] || mine.find((x) => !x.p.startedAt) || mine[0] || null;
   const overall = mine.length ? Math.round(mine.reduce((t, x) => t + pctFor(x.c, x.p), 0) / mine.length) : 0;
   const doneCount = mine.filter((x) => x.p.completedAt).length;
   const openQ = TRS.openQ.length;
   root.innerHTML = `
     <div class="tr-hero">
-      <div><h1 class="hero-title">Training</h1><p class="hero-sub">Short, step-by-step lessons. Go at your own pace; your progress saves automatically.</p></div>
+      <div><h1 class="hero-title">Training</h1><p class="hero-sub">Go at your own pace. Your progress saves automatically.</p></div>
       <div class="tr-hero-side">
         ${isTrainerMe() ? `<div class="seg tr-seg"><button class="seg-btn is-active" data-tr-view="home">My training</button><button class="seg-btn" data-tr-view="team">Team progress${openQ ? `<span class="tab-count">${openQ}</span>` : ""}</button><span class="seg-indicator"></span></div>` : ""}
-        <div class="tr-overall">${ring(overall, 64, 6)}<span><strong>${doneCount} of ${mine.length}</strong><small>course${mine.length === 1 ? "" : "s"} completed</small></span></div>
       </div>
     </div>
     ${resume ? continueCard(resume.c, resume.p) : ""}
     ${TRS.notes.some((n) => n.traineeUid === state.user.uid) ? `<button type="button" class="tr-myq" data-tr-questions>${TR_ICONS.chat}My questions and notes<span>${TRS.notes.filter((n) => n.traineeUid === state.user.uid).length}</span></button>` : ""}
-    ${(TR.categories || []).map((cat) => {
-      const list = visibleCourses().filter((c) => c.category === cat.id);
-      if (!list.length) return "";
-      return `<section class="tr-cat"><h2>${esc(cat.label)}</h2><div class="tr-grid">${list.map((c, i) => courseCard(c, i)).join("")}</div></section>`;
-    }).join("")}`;
+    ${(() => {
+      const cats = (TR.categories || []).map((cat) => ({ cat, list: visibleCourses().filter((c) => c.category === cat.id) })).filter((x) => x.list.length);
+      const total = cats.reduce((t, x) => t + x.list.length, 0);
+      if (total <= 1) return "";  // the big card above already covers a single course
+      return cats.map(({ cat, list }) => `<section class="tr-cat">${cats.length > 1 ? `<h2>${esc(cat.label)}</h2>` : `<h2>All courses</h2>`}<div class="tr-grid">${list.map((c, i) => courseCard(c, i)).join("")}</div></section>`).join("");
+    })()}`;
   requestAnimationFrame(() => $$(".tr-seg").forEach(moveIndicator));
 }
 function continueCard(c, p) {
@@ -4514,9 +4676,9 @@ function continueCard(c, p) {
   return `<button type="button" class="tr-continue" data-tr-open="${esc(c.id)}" style="--c1:${c1};--c2:${c2}">
     <span class="tr-continue-glow" aria-hidden="true"></span>
     <span class="tr-continue-ico">${TR_ICONS[c.icon] || TR_ICONS.book}</span>
-    <span class="tr-continue-text"><small>${p.startedAt ? "Pick up where you left off" : "Start here"}</small><strong>${esc(c.title)}</strong><span>${p.startedAt ? `Next: ${esc(next?.title || "")}` : `${steps.length} short steps, about ${c.minutes || 15} minutes`}</span>
+    <span class="tr-continue-text"><small>${p.completedAt ? "Completed ✓" : p.startedAt ? "Pick up where you left off" : "Start here"}</small><strong>${esc(c.title)}</strong><span>${p.completedAt ? "Review it anytime" : p.startedAt ? `Next: ${esc(next?.title || "")}` : `${steps.length} short steps, about ${c.minutes || 15} minutes`}</span>
       <span class="tr-bar"><span style="--w:${pct}%"></span></span></span>
-    <span class="tr-continue-go">${p.startedAt ? "Continue" : "Start"} ${TR_ICONS.next}</span>
+    <span class="tr-continue-go">${p.completedAt ? "Review" : p.startedAt ? "Continue" : "Start"} ${TR_ICONS.next}</span>
   </button>`;
 }
 function courseCard(c, i) {
@@ -4566,41 +4728,46 @@ function renderPlayer(keepAnim) {
   document.body.classList.add("in-course");
   const steps = courseSteps(c), st = steps[TRS.idx], p = progFor(state.user.uid, c.id);
   const [c1, c2] = trColor(c.color);
-  const modPct = (m, mi) => { const ms = steps.filter((x) => x.mi === mi); const d = ms.filter((x) => p.done?.[x.id]).length; return Math.round(d / ms.length * 100); };
+  const pct = Math.round(TRS.idx / Math.max(1, steps.length - 1) * 100);
+  const myQ = TRS.notes.filter((n) => n.traineeUid === state.user.uid && n.courseId === c.id).length;
+  const note = st.type === "complete" ? "" : myNote(c.id, st.id);
+  const noteOpen = TRS.noteOpen || Boolean(note);
   root.innerHTML = `
-    <div class="tp" style="--c1:${c1};--c2:${c2}">
+    <div class="tp tp-simple" style="--c1:${c1};--c2:${c2}">
       <header class="tp-top">
-        <button type="button" class="tp-exit" data-tr-exit aria-label="Back to all courses">${TR_ICONS.back}<span>All courses</span></button>
-        <div class="tp-title"><small>${esc(st.moduleTitle)}</small><strong>${esc(c.title)}</strong></div>
-        <button type="button" class="tp-ask tp-dl" data-tr-pptx="${esc(c.id)}" title="Download this course as PowerPoint">${svgI('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/>', 18)}<span>PowerPoint</span></button>
-        <button type="button" class="tp-ask" data-tr-questions>${TR_ICONS.chat}<span>Questions</span>${TRS.notes.filter((n) => n.traineeUid === state.user.uid && n.courseId === c.id).length ? `<i>${TRS.notes.filter((n) => n.traineeUid === state.user.uid && n.courseId === c.id).length}</i>` : ""}</button>
+        <button type="button" class="tp-exit" data-tr-exit aria-label="Back to all courses">${TR_ICONS.back}<span>Courses</span></button>
+        <div class="tp-title"><strong>${esc(c.title)}</strong><small>Step ${TRS.idx + 1} of ${steps.length} · ${esc(st.moduleTitle)}</small></div>
+        <div class="tp-more-wrap">
+          <button type="button" class="tp-more" data-tr-more aria-label="More options" aria-expanded="${Boolean(TRS.moreOpen)}">${svgI('<circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/>', 20)}${myQ ? `<i>${myQ}</i>` : ""}</button>
+          <div class="tp-menu" ${TRS.moreOpen ? "" : "hidden"}>
+            <button type="button" data-tr-open-panel="outline">${svgI('<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>', 17)}Course outline</button>
+            <button type="button" data-tr-open-panel="notes">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 17)}My notes</button>
+            <button type="button" data-tr-open-panel="questions">${TR_ICONS.chat}My questions${myQ ? `<em>${myQ}</em>` : ""}</button>
+            <button type="button" data-tr-pptx="${esc(c.id)}">${svgI('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/>', 17)}Download as PowerPoint</button>
+          </div>
+        </div>
       </header>
-      <div class="tp-mods" role="list">${c.modules.map((m, mi) => `<div class="tp-mod${mi === st.mi ? " is-now" : ""}${modPct(m, mi) === 100 ? " is-done" : ""}" role="listitem" title="${esc(m.title)}"><span class="tp-mod-bar"><span style="width:${mi === st.mi ? Math.max(modPct(m, mi), 4) : modPct(m, mi)}%"></span></span><span class="tp-mod-name">${modPct(m, mi) === 100 ? TR_ICONS.check : ""}${esc(m.title)}</span></div>`).join("")}</div>
-      <div class="tp-body">
-        <aside class="tp-outline" aria-label="Course outline">${c.modules.map((m, mi) => `<div class="tp-ol-mod${mi === st.mi ? " is-now" : ""}"><span class="tp-ol-title">${esc(m.title)}</span>${steps.filter((x) => x.mi === mi).map((x) => {
-          const i = steps.indexOf(x), done = p.done?.[x.id], reach = done || i <= (p.current || 0) || i <= TRS.idx;
-          return `<button type="button" class="tp-ol-step${i === TRS.idx ? " is-now" : ""}${done ? " is-done" : ""}${myNote(c.id, x.id) ? " has-note" : ""}" data-sid="${esc(x.id)}" ${reach ? `data-tr-goto="${i}"` : "disabled"}><span class="tp-ol-dot">${done ? TR_ICONS.check : ""}</span>${esc(x.title)}</button>`;
-        }).join("")}</div>`).join("")}</aside>
-        <main class="tp-stage">
-          <article class="tp-card tp-${st.type} ${keepAnim ? "is-static" : "dir-" + TRS.dir}" data-step="${esc(st.id)}">${stepHTML(c, st)}</article>
-          ${st.type === "complete" ? "" : (() => { const note = myNote(c.id, st.id); const open = TRS.noteOpen || Boolean(note); return `<section class="tp-mynote${open ? " is-open" : ""}">
-            <button type="button" class="tp-mynote-head" data-tr-note-toggle aria-expanded="${open}">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 18)}<strong>${note ? "My notes" : "Add a personal note"}</strong><small>Only you can see these</small><span class="tp-mynote-chev">${CHEV}</span></button>
-            <div class="tp-mynote-body"><div><textarea id="tr-mynote" rows="3" maxlength="3000" placeholder="Write anything that helps you remember this step: passwords go in the Team Site, not here.">${esc(note)}</textarea><span class="tp-mynote-status">${note ? "Saved" : ""}</span></div></div>
-          </section>`; })()}
-          ${st.type === "complete" ? "" : `<button type="button" class="tp-askstep" data-tr-ask>${TR_ICONS.chat}Have a question about this step?</button>
-          <div class="tp-askbox" ${TRS.askOpen ? "" : "hidden"}><textarea id="tr-ask-text" rows="3" maxlength="600" placeholder="Ask your manager anything about “${esc(st.title)}”"></textarea><div><button type="button" class="btn btn-ghost btn-mini" data-tr-ask-cancel>Cancel</button><button type="button" class="btn btn-primary btn-mini" data-tr-ask-send>Send question</button></div></div>`}
-        </main>
-      </div>
+      <div class="tp-progress" aria-hidden="true"><span style="width:${Math.max(pct, 2)}%"></span></div>
+      <main class="tp-stage">
+        <article class="tp-card tp-${st.type} ${keepAnim ? "is-static" : "dir-" + TRS.dir}" data-step="${esc(st.id)}">${stepHTML(c, st)}</article>
+        ${st.type === "complete" ? "" : `
+        <div class="tp-tools">
+          <button type="button" class="tp-tool${noteOpen ? " is-on" : ""}" data-tr-note-toggle aria-expanded="${noteOpen}">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 16)}${note ? "My note" : "Add a note"}</button>
+          <button type="button" class="tp-tool${TRS.askOpen ? " is-on" : ""}" data-tr-ask aria-expanded="${Boolean(TRS.askOpen)}">${svgI('<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5z"/>', 16)}Ask a question</button>
+        </div>
+        <section class="tp-mynote${noteOpen ? " is-open" : ""}">
+          <div class="tp-mynote-body"><div><small class="tp-mynote-priv">Only you can see this</small><textarea id="tr-mynote" rows="3" maxlength="3000" placeholder="Write anything that helps you remember this step.">${esc(note)}</textarea><span class="tp-mynote-status">${note ? "Saved" : ""}</span></div></div>
+        </section>
+        <div class="tp-askbox" ${TRS.askOpen ? "" : "hidden"}><textarea id="tr-ask-text" rows="3" maxlength="600" placeholder="Ask your manager anything about “${esc(st.title)}”"></textarea><div><button type="button" class="btn btn-ghost btn-mini" data-tr-ask-cancel>Cancel</button><button type="button" class="btn btn-primary btn-mini" data-tr-ask-send>Send question</button></div></div>`}
+      </main>
       ${st.type === "complete" ? "" : `<footer class="tp-nav">
         <button type="button" class="btn btn-ghost" data-tr-prev ${TRS.idx === 0 ? "disabled" : ""}>${TR_ICONS.back}Back</button>
-        <span class="tp-count"><b>${TRS.idx + 1}</b> of ${steps.length}</span>
         <button type="button" class="btn btn-primary tp-next" data-tr-next ${canContinue(st) ? "" : "disabled"}>${TRS.idx === steps.length - 2 ? "Finish" : "Continue"}${TR_ICONS.next}</button>
       </footer>`}
     </div>
     ${TRS.panel ? `<div class="tp-panel-scrim" data-tr-panel-close></div><aside class="tp-panel" id="tp-panel"></aside>` : ""}`;
   if (TRS.panel) renderQuestionsPanel();
   if (st.type === "complete" && !keepAnim) setTimeout(() => confettiBurst(), 350);
-  $(".tp-ol-step.is-now")?.scrollIntoView({ block: "nearest" });
 }
 function linkBtn(l, primary) {
   if (!l) return "";
@@ -4716,7 +4883,7 @@ function trVisual(v) {
 /* ---------- player actions ---------- */
 function goStep(i, dir) {
   const steps = courseSteps(TRS.course);
-  TRS.idx = Math.max(0, Math.min(i, steps.length - 1)); TRS.dir = dir || "fwd"; TRS.askOpen = false;
+  TRS.idx = Math.max(0, Math.min(i, steps.length - 1)); TRS.dir = dir || "fwd"; TRS.askOpen = false; TRS.noteOpen = false; TRS.moreOpen = false;
   renderPlayer();
   $(".tp-stage")?.scrollTo?.({ top: 0 });
 }
@@ -4743,18 +4910,23 @@ function renderQuestionsPanel() {
   const c = TRS.course, steps = c ? courseSteps(c) : [];
   const notes = c ? steps.map((x, i) => ({ x, i, t: myNote(c.id, x.id) })).filter((n) => n.t) : [];
   const tab = TRS.panelTab;
-  el.innerHTML = `<div class="tp-panel-head"><div class="seg tp-panel-seg"><button class="seg-btn${tab === "questions" ? " is-active" : ""}" data-tr-ptab="questions">Questions${mine.length ? `<span class="tab-count">${mine.length}</span>` : ""}</button><button class="seg-btn${tab === "notes" ? " is-active" : ""}" data-tr-ptab="notes">My notes${notes.length ? `<span class="tab-count">${notes.length}</span>` : ""}</button><span class="seg-indicator"></span></div>
+  const p = c ? progFor(state.user.uid, c.id) : {};
+  const outline = c ? c.modules.map((m, mi) => `<div class="tp-ol-mod${steps[TRS.idx]?.mi === mi ? " is-now" : ""}"><span class="tp-ol-title">${esc(m.title)}</span>${steps.filter((x) => x.mi === mi).map((x) => {
+      const i = steps.indexOf(x), done = p.done?.[x.id], reach = done || i <= (p.current || 0) || i <= TRS.idx;
+      return `<button type="button" class="tp-ol-step${i === TRS.idx ? " is-now" : ""}${done ? " is-done" : ""}${myNote(c.id, x.id) ? " has-note" : ""}" data-sid="${esc(x.id)}" ${reach ? `data-tr-goto="${i}" data-tr-panel-go` : "disabled"}><span class="tp-ol-dot">${done ? TR_ICONS.check : ""}</span>${esc(x.title)}</button>`;
+    }).join("")}</div>`).join("") : "";
+  el.innerHTML = `<div class="tp-panel-head"><div class="seg tp-panel-seg"><button class="seg-btn${tab === "outline" ? " is-active" : ""}" data-tr-ptab="outline">Outline</button><button class="seg-btn${tab === "questions" ? " is-active" : ""}" data-tr-ptab="questions">Questions${mine.length ? `<span class="tab-count">${mine.length}</span>` : ""}</button><button class="seg-btn${tab === "notes" ? " is-active" : ""}" data-tr-ptab="notes">My notes${notes.length ? `<span class="tab-count">${notes.length}</span>` : ""}</button><span class="seg-indicator"></span></div>
     <button type="button" class="icon-btn" data-tr-panel-close aria-label="Close"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-    <div class="tp-panel-list">${tab === "notes"
+    <div class="tp-panel-list">${tab === "outline" ? `<div class="tp-outline-list">${outline}</div>` : tab === "notes"
       ? (notes.length ? `<p class="tp-panel-note">Only you can see these. They're included when you download the course as PowerPoint.</p>${notes.map((n) => `<button type="button" class="tp-noteitem" data-tr-goto="${n.i}" data-tr-panel-go><span>${esc(n.x.moduleTitle)} · ${esc(n.x.title)}</span><p>${esc(n.t)}</p></button>`).join("")}`
         : `<div class="nc-empty">${svgI('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 30)}<strong>No notes yet</strong><span>Use “Add a personal note” under any step. Only you can see them.</span></div>`)
       : (mine.length ? mine.map((n) => noteThreadHTML(n, false)).join("") : `<div class="nc-empty">${TR_ICONS.chat}<strong>No questions yet</strong><span>Use “Have a question about this step?” on any step. Your manager gets it right away.</span></div>`)}</div>`;
-  requestAnimationFrame(() => $$(".tp-panel-seg").forEach(moveIndicator));
+  requestAnimationFrame(() => { $$(".tp-panel-seg").forEach(moveIndicator); $(".tp-panel .tp-ol-step.is-now")?.scrollIntoView({ block: "center" }); });
 }
 function noteThreadHTML(n, trainerView) {
   const msgs = [{ by: n.from === "manager" ? n.byName : n.traineeName, text: n.text, at: n.createdAt, mgr: n.from === "manager" }, ...(n.replies || []).map((r) => ({ by: r.by, text: r.text, at: r.at, mgr: r.role === "manager" }))];
   return `<div class="tq${n.status === "open" ? " is-open" : ""}" data-note-id="${esc(n.id)}">
-    <div class="tq-top">${trainerView ? `<span class="tq-who"><span class="ldr-avatar tq-av">${esc(initials(n.traineeName || "?"))}</span><strong>${esc(n.traineeName)}</strong></span>` : ""}<span class="tq-step">${esc(n.courseTitle || "")}${n.stepTitle ? ` · ${esc(n.stepTitle)}` : ""}</span>${n.status === "open" ? `<span class="tq-badge">Waiting for reply</span>` : `<span class="tq-badge is-ok">Answered</span>`}</div>
+    <div class="tq-top">${trainerView ? `<span class="tq-who"><span class="ldr-avatar tq-av">${avatarInner(n.traineeName || "?", n.traineeUid, n.traineeEmail)}</span><strong>${esc(n.traineeName)}</strong></span>` : ""}<span class="tq-step">${esc(n.courseTitle || "")}${n.stepTitle ? ` · ${esc(n.stepTitle)}` : ""}</span>${n.status === "open" ? `<span class="tq-badge">Waiting for reply</span>` : `<span class="tq-badge is-ok">Answered</span>`}</div>
     <div class="tq-msgs">${msgs.map((m) => `<div class="tq-msg${m.mgr ? " is-mgr" : ""}"><span class="tq-by">${esc(m.by || "")}${m.mgr ? " · Manager" : ""} <small>${esc(ago(m.at))}</small></span><p>${esc(m.text)}</p></div>`).join("")}</div>
     <div class="tq-reply"><input type="text" maxlength="600" placeholder="${trainerView ? "Write a reply" : "Reply"}" data-tq-input="${esc(n.id)}"/><button type="button" class="btn btn-primary btn-mini" data-tq-send="${esc(n.id)}">Send</button>
       ${trainerView && n.status === "open" ? `<button type="button" class="btn btn-ghost btn-mini" data-tq-resolve="${esc(n.id)}">Mark answered</button>` : ""}</div>
@@ -4824,7 +4996,7 @@ function renderTeam() {
           const [sk, sl] = traineeStatus(r), pct = pctFor(c, r.p), cur = steps[Math.min(r.p.current || 0, steps.length - 1)];
           const qs = quizzes.filter((q) => r.p.quiz?.[q.id]); const first = qs.filter((q) => r.p.quiz[q.id].firstTry).length;
           return `<button type="button" class="tr-row" ${r.uid ? `data-tr-trainee="${esc(r.uid)}"` : "disabled"} style="--i:${i}">
-            <span class="ldr-avatar">${esc(initials(r.name))}</span>
+            <span class="ldr-avatar">${avatarInner(r.name, r.uid, r.email)}</span>
             <span class="tr-row-main"><strong>${esc(r.name)}</strong><small>${r.p.completedAt ? `Finished ${esc(ago(r.p.completedAt))}` : r.p.startedAt ? `Now on: ${esc(cur?.title || "")}` : esc(r.email)}</small>
               <span class="tr-bar"><span style="--w:${pct}%"></span></span></span>
             <span class="tr-row-side"><span class="tr-pill is-${sk}">${esc(sl)}</span><small>${pct}%${qs.length ? ` · quiz ${first}/${qs.length} first try` : ""}</small><small>${r.p.lastAt ? "Active " + esc(ago(r.p.lastAt)) : ""}</small></span>
@@ -4845,7 +5017,7 @@ function renderTraineeDrawer(uid) {
   const p = doc.courses?.[c.id] || {}, steps = courseSteps(c), [sk, sl] = traineeStatus({ p, lastAt: doc.lastAt });
   const notes = TRS.team.notes.filter((n) => n.traineeUid === uid);
   $("#tr-drawer-body").innerHTML = `
-    <div class="trd-head"><span class="ldr-avatar trd-av">${esc(initials(doc.name || "?"))}</span><div><h2 id="trd-title">${esc(doc.name || "")}</h2><small>${esc(doc.email || "")}</small></div><span class="tr-pill is-${sk}">${esc(sl)}</span></div>
+    <div class="trd-head"><span class="ldr-avatar trd-av">${avatarInner(doc.name || "?", uid, doc.email)}</span><div><h2 id="trd-title">${esc(doc.name || "")}</h2><small>${esc(doc.email || "")}</small></div><span class="tr-pill is-${sk}">${esc(sl)}</span></div>
     <div class="trd-prog">${ring(pctFor(c, p), 72, 7)}<div><strong>${esc(c.title)}</strong><small>${p.startedAt ? `Started ${esc(ago(p.startedAt))}` : "Not started"}${p.lastAt ? ` · active ${esc(ago(p.lastAt))}` : ""}</small></div></div>
     <div class="trd-mods">${c.modules.map((m, mi) => `<div class="trd-mod"><strong>${esc(m.title)}</strong>${steps.filter((x) => x.mi === mi).map((x) => {
       const d = p.done?.[x.id], q = p.quiz?.[x.id];
