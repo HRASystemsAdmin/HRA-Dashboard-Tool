@@ -1764,6 +1764,7 @@ function bind() {
     const trT = t.closest("[data-tr-trainee]"); if (trT) { renderTraineeDrawer(trT.dataset.trTrainee); openOverlay($("#tr-drawer")); return; }
     const trdS = t.closest("[data-trd-send]"); if (trdS) { sendManagerNote(trdS.dataset.trdSend); return; }
     if (t.closest("[data-rail-toggle]")) { toggleRail(); return; }
+    if (t.closest("[data-range-clear]")) { PL.range = { preset: "all", from: "", to: "" }; saveRange(); PL.animate = true; renderPipeline(); return; }
     if (t.closest("[data-profile]")) { openProfile(); return; }
     if (t.closest("[data-prof-pick]")) { $("#prof-file")?.click(); return; }
     if (t.closest("[data-prof-remove]")) { PRF.photo = null; $("#prof-img").textContent = initials($("#prof-name").value || state.user.name); $(".prof-avatar").classList.remove("has-photo"); t.closest("[data-prof-remove]").remove(); return; }
@@ -1963,6 +1964,13 @@ function bind() {
     if (t.classList.contains("overlay") && t.id !== "confirm") closeOverlay(t);
   });
 
+  document.addEventListener("change", (e) => {
+    if (e.target.id === "pl-from" || e.target.id === "pl-to") {
+      PL.range[e.target.id === "pl-from" ? "from" : "to"] = e.target.value;
+      if (PL.range.from && PL.range.to && PL.range.from > PL.range.to) [PL.range.from, PL.range.to] = [PL.range.to, PL.range.from];
+      saveRange(); PL.animate = true; renderPipeline();
+    }
+  });
   document.addEventListener("submit", (e) => {
     if (e.target.id === "hp-form") { e.preventDefault(); const i = $("#hp-q"); const v = i.value; i.value = ""; askHelper(v); return; }
     if (e.target.id === "ac-form") { e.preventDefault(); sendAlert($(".ac-send", e.target)); return; }
@@ -2310,6 +2318,11 @@ function ddSelect(id, value) {
     saveViewPrefs({ pipelineWeekSel: PL.weekSel }); renderSheet(); return;
   }
   if (id === "tr-course") { TRS.teamCourse = value; renderTeam(); return; }
+  if (id === "range") {
+    PL.range.preset = value;
+    if (value === "custom" && !PL.range.from && !PL.range.to) { const t = new Date(), a = new Date(); a.setDate(a.getDate() - 29); PL.range.from = isoDay(a); PL.range.to = isoDay(t); }
+    saveRange(); PL.animate = true; renderPipeline(); return;
+  }
   if (id.startsWith("in-")) { onInsightsSelect(id.slice(3), value); }
 }
 
@@ -2371,6 +2384,7 @@ async function loadColPrefs() {
     const v = JSON.parse(localStorage.getItem("hra_view_" + state.user.uid)) || {};
     if (Array.isArray(v.pipelineWeekSel) && v.pipelineWeekSel.length) PL.weekSel = v.pipelineWeekSel.map(Number);
     if (Array.isArray(v.pipelineCollapsed)) PL.collapsed = new Set(v.pipelineCollapsed);
+    if (v.pipelineRange?.preset) PL.range = { preset: v.pipelineRange.preset, from: v.pipelineRange.from || "", to: v.pipelineRange.to || "" };
   } catch {}
   if (!PL.cols) PL.cols = defaultCols();
   try {
@@ -2390,7 +2404,7 @@ function saveColPrefs() {
   clearTimeout(colSaveTimer);
   colSaveTimer = setTimeout(() => state.store.setPrefs(state.user.uid, { pipelineColumns: PL.cols }).catch((e) => console.warn(e)), 600);
 }
-const PL = { weekSel: [0, 1], weeksAll: false, collapsed: new Set(), pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
+const PL = { range: { preset: "all", from: "", to: "" }, weekSel: [0, 1], weeksAll: false, collapsed: new Set(), pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
 
 const fmtDay = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number); return y ? `${m}/${d}/${y}` : String(iso); };
 const sameName = (a, b) => lower(a) === lower(b);
@@ -2409,11 +2423,12 @@ function startPipeline() {
   PL.started = true;
   PL.cols = null;
   loadColPrefs();
-  PL.store = state.store.demo ? "demo" : "firebase";
+  PL.testData = !state.store.demo && Boolean(WK.testData);
+  PL.store = state.store.demo || PL.testData ? "demo" : "firebase";
   renderPipelineLoading();
   if (PL.store === "demo") {
     const synced = new Date(Date.now() - 11 * 60e3).toISOString();
-    setTimeout(() => onPipelineData(demoClients().map((c) => ({ ...c, updatedAt: synced })), { ok: true, lastSync: synced, demo: true }), 450);
+    setTimeout(() => onPipelineData(demoClients().map((c) => ({ ...c, updatedAt: synced })), { ok: true, lastSync: synced, demo: true, test: PL.testData }), 450);
   } else {
     PL.unsub = state.store.watchPipeline(onPipelineData);
   }
@@ -2464,7 +2479,7 @@ function renderSync() {
   if (m.ok === false) { el.classList.add("is-bad"); $("span", el).textContent = `Last sync failed, showing ${ago(m.lastSync)} data`; el.title = m.message || ""; return; }
   const mins = (Date.now() - new Date(m.lastSync)) / 60e3;
   if (mins > (WK.syncEveryMinutes || 30) * 6) el.classList.add("is-wait");
-  $("span", el).textContent = `${m.demo ? "Demo data, synced" : "Synced"} ${ago(m.lastSync)}`;
+  $("span", el).textContent = m.test ? "Test data (made up)" : `${m.demo ? "Demo data, synced" : "Synced"} ${ago(m.lastSync)}`;
   el.title = m.lastSync ? `Last Workable sync: ${fullDate(m.lastSync)}` : "";
 }
 
@@ -2477,6 +2492,11 @@ function renderPipelineLoading() {
 
 function renderPipeline() {
   renderSync();
+  const panel = $('[data-tool-panel="pipeline"]');
+  let tb = $(".pl-testbar", panel);
+  if (PL.meta?.test) {
+    if (!tb) { panel.insertAdjacentHTML("afterbegin", `<div class="pl-testbar"><span class="pl-testbar-ico">${MSGR_ICONS.info}</span><div><strong>Test data</strong><span>These clients and candidates are made up, so you can try everything safely.${state.isAdmin ? " Admins: set <code>workable.testData</code> to <code>false</code> in config.js once Workable is connected." : ""}</span></div></div>`); }
+  } else tb?.remove();
   const amsEl = $("#pl-ams");
   if (!PL.ams.length) {
     amsEl.innerHTML = "";
@@ -2507,8 +2527,9 @@ function renderPipeline() {
   const list = amClients();
   if (!PL.client || !list.some((c) => sameName(c.name, PL.client))) PL.client = list[0]?.name || null;
   $("#pl-clients").innerHTML = list.map((c) => {
-    const n = c.candidates?.length || 0;
-    const live = (c.candidates || []).filter((r) => r.status === "in_process").length;
+    const inR = (c.candidates || []).filter((r) => inRange(r));
+    const n = inR.length;
+    const live = inR.filter((r) => r.status === "in_process").length;
     return `<button type="button" role="tab" class="sheet-tab${sameName(c.name, PL.client) ? " is-active" : ""}" data-client="${esc(c.name)}" aria-selected="${sameName(c.name, PL.client)}">
       <span class="sheet-tab-name">${esc(c.name)}</span>
       <span class="sheet-tab-count" title="${live} in process of ${n} submitted">${live ? `<i></i>${live}` : n}</span>
@@ -2518,12 +2539,43 @@ function renderPipeline() {
   renderSheet();
 }
 
+/* ---------- Date range ---------- */
+const RANGE_OPTS = [
+  { value: "all", label: "All dates" }, { value: "week", label: "This week" }, { value: "30", label: "Last 30 days" },
+  { value: "month", label: "This month" }, { value: "lastmonth", label: "Last month" }, { value: "90", label: "Last 90 days" },
+  { value: "year", label: "This year" }, { value: "custom", label: "Custom dates…" }
+];
+function rangeBounds() {
+  const r = PL.range || {}, t = new Date(), iso = isoDay;
+  const mk = (a, b) => ({ s: iso(a), e: iso(b) });
+  switch (r.preset) {
+    case "week": { const a = new Date(t); a.setDate(a.getDate() - ((a.getDay() + 6) % 7)); return mk(a, t); }
+    case "30": { const a = new Date(t); a.setDate(a.getDate() - 29); return mk(a, t); }
+    case "90": { const a = new Date(t); a.setDate(a.getDate() - 89); return mk(a, t); }
+    case "month": return mk(new Date(t.getFullYear(), t.getMonth(), 1), t);
+    case "lastmonth": return mk(new Date(t.getFullYear(), t.getMonth() - 1, 1), new Date(t.getFullYear(), t.getMonth(), 0));
+    case "year": return mk(new Date(t.getFullYear(), 0, 1), t);
+    case "custom": return (r.from || r.to) ? { s: r.from || "0000-01-01", e: r.to || "9999-12-31" } : null;
+    default: return null;
+  }
+}
+const inRange = (row, b = rangeBounds()) => !b || (row.submitted && row.submitted.slice(0, 10) >= b.s && row.submitted.slice(0, 10) <= b.e);
+function rangeLabel(b = rangeBounds()) {
+  if (!b) return "";
+  const f = (d) => d.startsWith("0000") || d.startsWith("9999") ? "" : new Date(d + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const a = f(b.s), z = f(b.e);
+  return a && z ? `${a} – ${z}` : a ? `From ${a}` : `Until ${z}`;
+}
+function saveRange() { saveViewPrefs({ pipelineRange: PL.range }); }
+
 function renderSheet() {
   const el = $("#pl-sheet");
   const c = amClients().find((x) => sameName(x.name, PL.client));
   if (!c) { el.innerHTML = `<div class="sheet-card">${emptyBlock("No clients for this account manager", "Add client names to this account manager in config.js.")}</div>`; return; }
   const extra = (WK.clients || {})[c.name] || {};
-  const rows = c.candidates || [];
+  const allRows = c.candidates || [];
+  const rb = rangeBounds();
+  const rows = rb ? allRows.filter((r) => inRange(r, rb)) : allRows;
   const counts = Object.fromEntries(Object.keys(PSTATUS).map((k) => [k, rows.filter((r) => r.status === k).length]));
   const s = lower(PL.search);
   let shown = rows.filter((r) => (!PL.filter.size || PL.filter.has(r.status)) && (!s || lower([r.name, r.role, r.recruiter, r.notes, r.interview, r.hired].join(" ")).includes(s)));
@@ -2539,6 +2591,7 @@ function renderSheet() {
         <div class="sheet-title">
           <h2>${esc(c.name)}</h2>
           ${loc ? `<span class="sheet-tag">${esc(loc)}</span>` : ""}${hrs ? `<span class="sheet-tag">${esc(hrs)}</span>` : ""}
+          ${rb ? `<span class="range-chip"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Submitted ${esc(rangeLabel(rb))}<button type="button" data-range-clear aria-label="Show all dates" title="Show all dates"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>` : ""}
         </div>
         <dl class="sheet-stats">
           <div><dt>Submitted</dt><dd>${rows.length}</dd></div>
@@ -2558,6 +2611,10 @@ function renderSheet() {
             </button>`).join("")}
         </div>
         <div class="sheet-tools-right">
+          <div class="range-wrap">
+            ${ddHTML("range", { value: PL.range.preset, options: RANGE_OPTS, triggerIcon: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>', align: "right" })}
+            ${PL.range.preset === "custom" ? `<span class="range-custom"><input type="date" id="pl-from" value="${esc(PL.range.from)}" aria-label="From date" max="${esc(PL.range.to || "")}"/><span>to</span><input type="date" id="pl-to" value="${esc(PL.range.to)}" aria-label="To date" min="${esc(PL.range.from || "")}"/></span>` : ""}
+          </div>
           <div class="cols-wrap">
             <button type="button" class="btn-mini" data-pop="cols" aria-haspopup="dialog" aria-expanded="${PL.pop === "cols"}">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M9.5 4v16M15 4v16"/></svg>Columns<span class="cols-n">${cols.length}</span>
@@ -2572,7 +2629,9 @@ function renderSheet() {
         </div>
       </div>
 
-      ${c.empty || !rows.length
+      ${!c.empty && allRows.length && !rows.length
+        ? `<div class="range-empty">${emptyBlock("No candidates in this date range", `Nobody was submitted to ${c.name} ${rangeLabel(rb).toLowerCase().startsWith("from") || rangeLabel(rb).toLowerCase().startsWith("until") ? rangeLabel(rb).toLowerCase() : "between " + rangeLabel(rb)}.`)}<button type="button" class="btn btn-ghost" data-range-clear>Show all dates</button></div>`
+        : c.empty || !rows.length
         ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
         : `<div class="pl-table-wrap"><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, cols.length * 92)}px">
             <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
@@ -2795,7 +2854,7 @@ async function downloadWorkbook(btn) {
 
       ws.mergeCells(`A1:${xcols.length > 1 ? lastCol : "B"}1`);
       const t = ws.getCell("A1");
-      t.value = `${c.name}${loc ? ` (${loc})` : ""}${hrs ? ` ${hrs}` : ""}`;
+      t.value = `${c.name}${loc ? ` (${loc})` : ""}${hrs ? ` ${hrs}` : ""}${rangeBounds() ? `  ·  Submitted ${rangeLabel()}` : ""}`;
       t.font = { bold: true, size: 16, name: "Arial" }; t.fill = fill("FFF2CC");
       ws.getRow(1).height = 26;
 
@@ -2804,7 +2863,7 @@ async function downloadWorkbook(btn) {
       head.height = 32;
 
       let r = 3;
-      for (const row of (c.candidates || []).slice().sort((a, b) => (a.submitted || "").localeCompare(b.submitted || ""))) {
+      for (const row of (c.candidates || []).filter((r) => inRange(r)).sort((a, b) => (a.submitted || "").localeCompare(b.submitted || ""))) {
         const xr = ws.getRow(r++);
         xcols.forEach((col, i) => {
           const k = col.key;
@@ -2852,7 +2911,8 @@ async function downloadWorkbook(btn) {
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const d = new Date();
-    const fname = `Weekly Hiring Update - ${am.name} - ${d.getMonth() + 1}-${d.getDate()}-${d.getFullYear()}.xlsx`;
+    const rbx = rangeBounds();
+    const fname = `Weekly Hiring Update - ${am.name}${rbx ? ` - ${rangeLabel(rbx).replace(/,/g, "")}` : ""} - ${d.getMonth() + 1}-${d.getDate()}-${d.getFullYear()}.xlsx`.replace(/[\\/:*?"<>|]/g, "-");
     const url = URL.createObjectURL(blob);
     const a = Object.assign(document.createElement("a"), { href: url, download: fname });
     document.body.appendChild(a); a.click(); a.remove();
@@ -2868,9 +2928,9 @@ async function downloadWorkbook(btn) {
 function demoAms() {
   return [
     { name: "Jennifer Whittle", email: "jennifer.whittle@demo.local", clients: ["Northwind Plumbing", "Summit Heating & Air", "Harbor Drain & Sewer"] },
-    { name: "Jen Omohundro",    email: MEMBERS[0] || "employee@demo.local", clients: ["Bright Spark Electric", "Evergreen Climate", "Copperline Plumbing"] },
+    { name: "Jen Omohundro",    email: state.store?.demo ? (MEMBERS[0] || "employee@demo.local") : "jomohundro@hunterrecruitment.net", clients: ["Bright Spark Electric", "Evergreen Climate", "Copperline Plumbing"] },
     { name: "Katlin O’Steen",  email: "katlin.osteen@demo.local",    clients: ["Lakeside Home Builders", "Redwood Roofing"] },
-    { name: "Megan Whitmyer",   email: "megan.whitmyer@demo.local",   clients: ["Blue Ridge HVAC", "Keystone Electric"] }
+    { name: "Megan Whitmyer",   email: "mwhitmyer@hunterrecruitment.net", clients: ["Blue Ridge HVAC", "Keystone Electric"] }
   ];
 }
 
@@ -3160,7 +3220,7 @@ function renderInsights() {
         <p class="hero-sub">How every client, account manager and recruiter is performing. Pick a period and drill in.</p>
       </div>
       <div class="in-hero-actions">
-        <span class="sync-chip in-asof"><i></i><span>${PL.meta?.demo ? "Demo data" : "Data"} as of ${esc(ago(freshness() || new Date().toISOString()))}</span></span>
+        <span class="sync-chip in-asof"><i></i><span>${PL.meta?.test ? "Test data" : PL.meta?.demo ? "Demo data" : "Data"} as of ${esc(ago(freshness() || new Date().toISOString()))}</span></span>
         ${ddHTML("in-export", { value: "", align: "right", primary: true, triggerText: "Export to Excel", triggerIcon: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/></svg>', options: [
           { value: "view", label: "This view", sub: "The period and filters selected now" },
           { value: "archive", label: "Full archive", sub: "All time, every client, every candidate" }

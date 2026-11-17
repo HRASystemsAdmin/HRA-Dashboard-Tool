@@ -2879,6 +2879,23 @@ body.in-course .tp-nav { margin-right: 86px; }
 .tp-outline-list .tp-ol-mod { padding: 4px 0 10px; }
 @media (max-width: 760px) { .tp-simple .tp-title small { display: none; } }
 
+/* Client Pipeline: date range + test data */
+.range-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.range-wrap .dd-trigger { height: 38px; gap: 7px; }
+.range-wrap .dd-trigger svg:first-child { color: var(--orange); }
+.range-custom { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 6px; border-radius: 12px; background: #fff; border: 1px solid var(--line-strong); animation: chipIn .4s var(--ease-spring) both; }
+.range-custom input { height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: #F4F7FB; font: inherit; font-size: 13px; color: var(--ink); outline: none; }
+.range-custom input:focus { box-shadow: 0 0 0 3px rgba(0,55,127,.12); }
+.range-custom span { font-size: 12px; font-weight: 700; color: var(--muted); }
+.range-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; color: #A3400B; background: #FFF1E8; border: 1px solid #FBD3BC; animation: chipIn .45s var(--ease-spring) both; }
+.range-chip button { width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(163,64,11,.1); color: #A3400B; }
+.range-chip button:hover { background: #A3400B; color: #fff; }
+.range-empty { display: grid; justify-items: center; gap: 4px; padding-bottom: 26px; }
+.pl-testbar { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; margin-bottom: 18px; border-radius: 16px; background: linear-gradient(120deg, #EEF4FF, #F7F9FD); border: 1px solid #D6E4FF; color: #1E4FA8; font-size: 13.5px; animation: rise .5s var(--ease-out) both; }
+.pl-testbar-ico { display: grid; flex: none; margin-top: 1px; }
+.pl-testbar div { display: grid; gap: 2px; } .pl-testbar strong { color: var(--navy); }
+.pl-testbar code { background: rgba(0,55,127,.08); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }
