@@ -31,7 +31,8 @@ window.HRA_CONFIG = {
     "kcooney@hunterrecruitment.net"
   ],
   members: [
-    "jomohundro@hunterrecruitment.net"
+    "jomohundro@hunterrecruitment.net",
+    "mwhitmyer@hunterrecruitment.net"
   ],
 
   /* 3) Attachments. Files are saved inside Firestore, so the free Firebase plan works

@@ -18,7 +18,8 @@ service cloud.firestore {
     function memberEmails() {
       // Add employees here, one per line, in single quotes, separated by commas.
       return [
-        'jomohundro@hunterrecruitment.net'
+        'jomohundro@hunterrecruitment.net',
+        'mwhitmyer@hunterrecruitment.net'
       ];
     }
 
