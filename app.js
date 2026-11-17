@@ -1874,6 +1874,13 @@ function bind() {
     }
     if (t.closest("[data-ct-request]")) { setTool("requests"); setTimeout(() => openNew("general"), 250); return; }
     const ctCopy = t.closest("[data-ct-copy]"); if (ctCopy) { copyText(ctCopy.dataset.ctCopy).then((ok) => toast(ok ? `Copied ${ctCopy.dataset.ctCopy}` : "Couldn't copy the email", ok ? "var(--s-done)" : "#E2632B")); return; }
+    const rpP = t.closest("[data-range-preset]"); if (rpP) { PL.range = { preset: rpP.dataset.rangePreset, from: "", to: "" }; PL.pop = null; saveRange(); PL.animate = true; renderPipeline(); $('[data-pop="range"]')?.focus(); return; }
+    if (t.closest("[data-range-apply]")) {
+      let f = $("#rp-from")?.value || "", to = $("#rp-to")?.value || "";
+      if (!f && !to) { $("#rp-sum").textContent = "Pick a start and end date"; $("#rp-sum").classList.add("is-warn"); return; }
+      if (f && to && f > to) [f, to] = [to, f];
+      PL.range = { preset: "custom", from: f, to }; PL.pop = null; saveRange(); PL.animate = true; renderPipeline(); $('[data-pop="range"]')?.focus(); return;
+    }
     const popBtn = t.closest("[data-pop]"); if (popBtn) { PL.pop = PL.pop === popBtn.dataset.pop ? null : popBtn.dataset.pop; renderPipeline(); if (PL.pop === "am") $(".am-option.is-selected")?.focus(); return; }
     const colT = t.closest("[data-col-toggle]"); if (colT) { const c = PL.cols.find((x) => x.key === colT.dataset.colToggle); if (c) { c.on = !c.on; saveColPrefs(); renderSheet(); $(`[data-col-toggle="${c.key}"]`)?.focus(); } return; }
     if (t.closest("[data-cols-reset]")) { PL.cols = defaultCols(); saveColPrefs(); renderSheet(); toast("Columns reset to the spreadsheet layout", "var(--s-progress)"); return; }
@@ -2011,6 +2018,12 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
+    if (e.target.id === "rp-from" || e.target.id === "rp-to") {
+      const a = $("#rp-from").value, b = $("#rp-to").value, sum = $("#rp-sum"); $(".rp-custom")?.classList.add("is-on");
+      sum.classList.remove("is-warn");
+      sum.textContent = a && b ? `${dayCount(a <= b ? a : b, a <= b ? b : a)} days selected` : a ? `From ${shortRange({ s: a, e: "9999-12-31" }).replace("From ", "")} onward` : b ? `Up to ${shortRange({ s: "0000-01-01", e: b }).replace("Until ", "")}` : "Pick a start and end date";
+      return;
+    }
     if (e.target.id === "ac-title" || e.target.id === "ac-msg") { if (AL.draft) { AL.draft.title = $("#ac-title").value; AL.draft.message = $("#ac-msg").value; renderPreview(); $("#ac-error").textContent = ""; } return; }
     if (e.target.id === "tr-mynote") { const st = courseSteps(TRS.course)[TRS.idx]; queueNoteSave(TRS.course.id, st.id, e.target.value); return; }
     if (e.target.id === "ct-q") { CT.q = e.target.value; CT.open = null; renderContactList(); return; }
@@ -2049,6 +2062,7 @@ function bind() {
       opts[(i + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length]?.focus(); e.preventDefault(); return;
     }
     // Pipeline popovers: Escape closes; arrows move through the account manager list and columns
+    if (e.key === "Enter" && (e.target.id === "rp-from" || e.target.id === "rp-to")) { e.preventDefault(); $("[data-range-apply]")?.click(); return; }
     if (PL.pop && e.key === "Escape") { const which = PL.pop; PL.pop = null; renderPipeline(); $(`[data-pop="${which}"]`)?.focus(); e.stopPropagation(); return; }
     if (PL.pop === "am" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       const opts = $$(".am-option"); const i = opts.indexOf(document.activeElement);
@@ -2545,8 +2559,8 @@ const RANGE_OPTS = [
   { value: "month", label: "This month" }, { value: "lastmonth", label: "Last month" }, { value: "90", label: "Last 90 days" },
   { value: "year", label: "This year" }, { value: "custom", label: "Custom dates…" }
 ];
-function rangeBounds() {
-  const r = PL.range || {}, t = new Date(), iso = isoDay;
+function rangeBounds(r = PL.range || {}) {
+  const t = new Date(), iso = isoDay;
   const mk = (a, b) => ({ s: iso(a), e: iso(b) });
   switch (r.preset) {
     case "week": { const a = new Date(t); a.setDate(a.getDate() - ((a.getDay() + 6) % 7)); return mk(a, t); }
@@ -2567,6 +2581,40 @@ function rangeLabel(b = rangeBounds()) {
   return a && z ? `${a} – ${z}` : a ? `From ${a}` : `Until ${z}`;
 }
 function saveRange() { saveViewPrefs({ pipelineRange: PL.range }); }
+const shortRange = (b) => {
+  if (!b) return "";
+  const f = (d, y) => new Date(d + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric", ...(y ? { year: "numeric" } : {}) });
+  const sameYear = b.s.slice(0, 4) === b.e.slice(0, 4);
+  if (b.s.startsWith("0000")) return `Until ${f(b.e, true)}`;
+  if (b.e.startsWith("9999")) return `From ${f(b.s, true)}`;
+  return `${f(b.s, !sameYear)} – ${f(b.e, true)}`;
+};
+const dayCount = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400e3) + 1;
+function rangeButtonLabel() {
+  const r = PL.range || {};
+  if (r.preset === "custom") return shortRange(rangeBounds()) || "Custom dates";
+  return (RANGE_OPTS.find((o) => o.value === r.preset) || RANGE_OPTS[0]).label;
+}
+function rangePopHTML() {
+  const r = PL.range || {}, cur = rangeBounds();
+  const from = r.preset === "custom" ? r.from : cur?.s || "", to = r.preset === "custom" ? r.to : cur?.e || "";
+  const presets = RANGE_OPTS.filter((o) => o.value !== "custom");
+  return `<div class="range-pop pop" role="dialog" aria-label="Choose a date range">
+    <div class="rp-presets" role="listbox" aria-label="Quick ranges">
+      ${presets.map((o, i) => { const b = rangeBounds({ preset: o.value }); const on = r.preset === o.value;
+        return `<button type="button" role="option" aria-selected="${on}" class="rp-preset${on ? " is-on" : ""}" data-range-preset="${o.value}" style="--i:${i}">
+          <span><strong>${esc(o.label)}</strong>${b ? `<small>${esc(shortRange(b))}</small>` : `<small>Every candidate</small>`}</span>
+          <svg class="rp-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>`; }).join("")}
+    </div>
+    <div class="rp-custom${r.preset === "custom" ? " is-on" : ""}">
+      <div class="rp-custom-head"><strong>Custom range</strong><small>By the date each candidate was submitted</small></div>
+      <label class="rp-field"><span>From</span><input type="date" id="rp-from" value="${esc(from)}" /></label>
+      <label class="rp-field"><span>To</span><input type="date" id="rp-to" value="${esc(to)}" /></label>
+      <p class="rp-sum" id="rp-sum">${from && to ? `${dayCount(from <= to ? from : to, from <= to ? to : from)} days selected` : "Pick a start and end date"}</p>
+      <div class="rp-actions"><button type="button" class="btn btn-ghost btn-mini" data-range-preset="all">Clear</button><button type="button" class="btn btn-primary btn-mini" data-range-apply>Apply</button></div>
+    </div>
+  </div>`;
+}
 
 function renderSheet() {
   const el = $("#pl-sheet");
@@ -2612,8 +2660,8 @@ function renderSheet() {
         </div>
         <div class="sheet-tools-right">
           <div class="range-wrap">
-            ${ddHTML("range", { value: PL.range.preset, options: RANGE_OPTS, triggerIcon: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>', align: "right" })}
-            ${PL.range.preset === "custom" ? `<span class="range-custom"><input type="date" id="pl-from" value="${esc(PL.range.from)}" aria-label="From date" max="${esc(PL.range.to || "")}"/><span>to</span><input type="date" id="pl-to" value="${esc(PL.range.to)}" aria-label="To date" min="${esc(PL.range.from || "")}"/></span>` : ""}
+            <button type="button" class="range-btn${rb ? " is-active" : ""}" data-pop="range" aria-haspopup="dialog" aria-expanded="${PL.pop === "range"}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>${esc(rangeButtonLabel())}</span><svg class="range-chev" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+            ${PL.pop === "range" ? rangePopHTML() : ""}
           </div>
           <div class="cols-wrap">
             <button type="button" class="btn-mini" data-pop="cols" aria-haspopup="dialog" aria-expanded="${PL.pop === "cols"}">
