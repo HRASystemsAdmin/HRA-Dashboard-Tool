@@ -1641,6 +1641,7 @@ function renderDrawer() {
       <div class="detail"><dt>Requested by</dt><dd>${esc(t.createdBy?.name)}${state.isAdmin ? ` <span style="color:var(--muted)">${esc(t.createdBy?.email)}</span>` : ""}</dd></div>
       <div class="detail"><dt>Type</dt><dd>${esc(typeLabel(t.type))}</dd></div>
       ${rows}
+      ${(CFG.requestTypes[t.type]?.standardInfo || []).map((info) => `<div class="detail detail-std"><dt>${esc(info.label)}</dt><dd><ul class="std-lines">${(info.lines || []).map(([k, v]) => `<li><strong>${esc(k)}</strong><span>${esc(v)}</span></li>`).join("")}</ul></dd></div>`).join("")}
     </dl>
     ${emailHTML(t)}
     ${attachmentsHTML(t)}

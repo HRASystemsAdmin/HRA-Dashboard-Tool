@@ -89,9 +89,11 @@ window.HRA_CONFIG = {
         { name: "queueName",   label: "Phone queue name",             type: "text",     required: true,  placeholder: "e.g. HRA Recruiting" },
         { name: "members",     label: "Who should be added",          type: "text",     required: true,  placeholder: "Full name(s), separated by commas" },
         { name: "emails",      label: "Their work email(s)",          type: "text",     required: true,  placeholder: "name@yourcompany.com" },
-        { name: "permissions", label: "Permissions needed",           type: "checks",   required: true,
-          options: ["Access", "Download", "Delete", "Share"], locked: ["Access"] },
         { name: "notes",       label: "Anything else we should know", type: "textarea", required: false, placeholder: "Which queue, temporary access, etc." }
+      ],
+      // Shown on every ticket of this type (for whoever handles it). Edit the lines as needed.
+      standardInfo: [
+        { label: "Permissions", lines: [["Voicemail", "Access, Delete, Share"], ["Call Recording", "Access, Download"]] }
       ],
       title: (d) => `Add ${d.members || "member"} to ${d.queueName || "a phone queue"}`
     },
