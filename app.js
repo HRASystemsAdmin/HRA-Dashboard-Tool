@@ -789,7 +789,7 @@ function closeOverlay(el, instant) {
   if (el.hidden) return;
   el.classList.remove("is-open");
   const done = () => { el.hidden = true; if ($$(".overlay:not([hidden])").length === 0) document.body.style.overflow = ""; };
-  instant ? done() : setTimeout(done, 380);
+  instant ? done() : setTimeout(done, 240);
   if (el.id === "drawer") state.openId = null;
   if (el.id === "tr-drawer") TRS.drawerUid = null;
   if (!instant && lastFocus && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
@@ -1667,7 +1667,7 @@ async function setStatus(status, btn) {
     toast(status === "completed" ? `${ref(t.id)} completed` : status === "in_progress" ? `${ref(t.id)} is in progress` : `${ref(t.id)} moved back to submitted`, STATUS[status].color);
     flashIds.add(t.id);
     renderAll();
-    if (status === "completed") setTimeout(() => closeOverlay($("#drawer")), 650);
+    if (status === "completed") setTimeout(() => closeOverlay($("#drawer")), 420);
   } catch (e) {
     console.error(e);
     btn.classList.remove("is-loading");
@@ -1789,7 +1789,7 @@ function bind() {
     const hpReq = t.closest("[data-hp-request]"); if (hpReq) { toggleHelper(false); setTool("requests"); setTimeout(() => openNew(hpReq.dataset.hpRequest), 250); return; }
     const hpPer = t.closest("[data-hp-person]"); if (hpPer) {
       toggleHelper(false); setTool("contacts");
-      setTimeout(() => { const c = $(`.fc[data-person="${hpPer.dataset.hpPerson}"]`); if (c) { c.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" }); if (!c.classList.contains("is-flipped")) setTimeout(() => flipCard(c, true), 450); } }, 300);
+      setTimeout(() => { const c = $(`.fc[data-person="${hpPer.dataset.hpPerson}"]`); if (c) { c.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" }); if (!c.classList.contains("is-flipped")) setTimeout(() => flipCard(c, true), 280); } }, 200);
       return;
     }
     if (t.closest("[data-hp-contacts]")) { toggleHelper(false); setTool("contacts"); return; }
@@ -2168,7 +2168,7 @@ function applyRail(collapsed, animate) {
     btn?.classList.remove("is-pulse"); void btn?.offsetWidth; btn?.classList.add("is-pulse");
     glow?.classList.add("is-resizing");
     const t0 = performance.now();
-    const follow = (now) => { moveRailGlow(); if (now - t0 < 700) requestAnimationFrame(follow); else { glow?.classList.remove("is-resizing"); rail?.classList.remove("is-moving"); if (html.classList.contains("rail-collapsed")) html.classList.add("rail-settled"); window.dispatchEvent(new Event("resize")); } };
+    const follow = (now) => { moveRailGlow(); if (now - t0 < 450) requestAnimationFrame(follow); else { glow?.classList.remove("is-resizing"); rail?.classList.remove("is-moving"); if (html.classList.contains("rail-collapsed")) html.classList.add("rail-settled"); window.dispatchEvent(new Event("resize")); } };
     requestAnimationFrame(follow);
   } else {
     moveRailGlow();
@@ -2442,7 +2442,7 @@ function startPipeline() {
   renderPipelineLoading();
   if (PL.store === "demo") {
     const synced = new Date(Date.now() - 11 * 60e3).toISOString();
-    setTimeout(() => onPipelineData(demoClients().map((c) => ({ ...c, updatedAt: synced })), { ok: true, lastSync: synced, demo: true, test: PL.testData }), 450);
+    setTimeout(() => onPipelineData(demoClients().map((c) => ({ ...c, updatedAt: synced })), { ok: true, lastSync: synced, demo: true, test: PL.testData }), 160);
   } else {
     PL.unsub = state.store.watchPipeline(onPipelineData);
   }
@@ -2815,7 +2815,7 @@ function toggleCollapse(btn) {
   if (body) {
     body.classList.remove("is-settled");
     body.classList.toggle("is-closed", !open);
-    if (open) setTimeout(() => { if (!PL.collapsed.has(key)) body.classList.add("is-settled"); }, reduceMotion ? 0 : 480);
+    if (open) setTimeout(() => { if (!PL.collapsed.has(key)) body.classList.add("is-settled"); }, reduceMotion ? 0 : 300);
   }
   saveViewPrefs({ pipelineCollapsed: [...PL.collapsed] });
 }
@@ -3777,8 +3777,8 @@ function flipCard(card, on) {
   card.classList.toggle("is-flipped", on);
   card.classList.remove("is-flipping"); void card.offsetWidth; card.classList.add("is-flipping");
   setTimeout(() => card.classList.remove("is-flipping"), 800);
-  if (on) { front.setAttribute("inert", ""); back.removeAttribute("inert"); setTimeout(() => $(".how-btn, .fc-flipback", back)?.focus({ preventScroll: true }), 420); }
-  else { back.setAttribute("inert", ""); front.removeAttribute("inert"); setTimeout(() => front.focus({ preventScroll: true }), 420); }
+  if (on) { front.setAttribute("inert", ""); back.removeAttribute("inert"); setTimeout(() => $(".how-btn, .fc-flipback", back)?.focus({ preventScroll: true }), 260); }
+  else { back.setAttribute("inert", ""); front.removeAttribute("inert"); setTimeout(() => front.focus({ preventScroll: true }), 260); }
   CT.open = on ? Number(card.dataset.person) : (CT.open === Number(card.dataset.person) ? null : CT.open);
 }
 
@@ -3866,7 +3866,7 @@ function messengerPopup({ kind = "info", title, body, action, sticky }) {
     <span class="msgr-life" aria-hidden="true"></span>`;
   $(".msgr-text strong", el).textContent = title;
   $(".msgr-text span", el).textContent = body || "";
-  const close = () => { if (el.classList.contains("is-leaving")) return; el.classList.add("is-leaving"); setTimeout(() => el.remove(), 420); };
+  const close = () => { if (el.classList.contains("is-leaving")) return; el.classList.add("is-leaving"); setTimeout(() => el.remove(), 260); };
   $(".msgr-x", el).onclick = close;
   $(".msgr-body", el).onclick = () => { action?.(); close(); };
   const life = sticky ? 0 : kind === "alert" ? 14000 : 8000;
@@ -4101,7 +4101,7 @@ function renderBanner() {
   const a = AL.cur, on = alertActive(a) && state.user;
   let bar = $(".alert-banner", root);
   if (!on) {
-    if (bar) { bar.classList.add("is-leaving"); setTimeout(() => { bar.remove(); document.body.classList.remove("has-alert"); }, 450); }
+    if (bar) { bar.classList.add("is-leaving"); setTimeout(() => { bar.remove(); document.body.classList.remove("has-alert"); }, 280); }
     else document.body.classList.remove("has-alert");
     return;
   }
@@ -4159,7 +4159,7 @@ function ackTakeover() {
   if (el.classList.contains("lv-festive")) confettiBurst(true);
   if (el.dataset.alertId) { try { localStorage.setItem("hra_alert_ack_" + el.dataset.alertId, "1"); } catch {} }
   el.classList.add("is-closing");
-  setTimeout(() => el.remove(), 550);
+  setTimeout(() => el.remove(), 340);
   $(".alert-banner")?.classList.add("is-landing");
   setTimeout(() => $(".alert-banner")?.classList.remove("is-landing"), 1200);
 }
