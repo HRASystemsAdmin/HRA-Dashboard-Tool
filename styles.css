@@ -2957,6 +2957,55 @@ body.in-course .tp-nav { margin-right: 86px; }
 .tr-pct { font-family: var(--display); font-size: 15px; font-weight: 600; color: var(--ink); }
 @media (max-width: 760px) { .tr-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tr-stat:nth-child(3) { border-left: 0; } .tr-stat:nth-child(n+3) { border-top: 1px solid var(--line); } }
 
+/* ==========================================================================
+   Super admin (clean, minimal)
+   ========================================================================== */
+.workspace .tool-super { max-width: 980px; }
+.su { display: grid; gap: 16px; }
+.su-head { margin-bottom: 4px; }
+.su-head .hero-sub { margin-top: 2px; }
+.su-card { padding: 20px 22px; border-radius: 18px; background: #fff; border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0,30,70,.04); }
+.su-card-head { margin-bottom: 14px; }
+.su-card-head h2 { font-family: var(--display); font-weight: 600; font-size: 18px; margin: 0 0 3px; letter-spacing: -.01em; }
+.su-card-head p { margin: 0; font-size: 13.5px; color: var(--muted); }
+.su-tools { display: grid; }
+.su-tool { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.su-tool:first-child { border-top: 0; padding-top: 2px; }
+.su-tool-ico { width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center; color: var(--navy); background: #F2F5FA; }
+.su-tool-text { flex: 1; min-width: 0; display: grid; } .su-tool-text strong { font-size: 14.5px; } .su-tool-text small { font-size: 12.5px; color: var(--muted); }
+.su-seg { display: inline-flex; flex: none; padding: 3px; gap: 2px; border-radius: 11px; background: #F2F5FA; }
+.su-seg button { padding: 6px 11px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; transition: background .15s, color .15s, box-shadow .15s; }
+.su-seg button:hover { color: var(--ink); }
+.su-seg button.is-on { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(0,30,70,.08), 0 2px 8px -3px rgba(0,40,100,.2); }
+.su-seg button.is-on.m-all { color: #0B7A61; } .su-seg button.is-on.m-admins { color: #1E4FA8; }
+.su-seg button.is-on.m-off { color: #6B4E00; } .su-seg button.is-on.m-maint { color: #B4232A; }
+.su-people { display: grid; }
+.su-person { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.su-person:first-child { border-top: 0; padding-top: 2px; }
+.su-av { width: 34px; height: 34px; font-size: 12px; }
+.su-person-text { flex: 1; min-width: 0; display: grid; } .su-person-text strong { font-size: 14px; } .su-person-text small { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.su-hint { font-size: 11.5px; color: #9AA8BD; }
+.su-role { flex: none; font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+.su-role.is-super { background: #0A1E3F; color: #fff; } .su-role.is-admin { background: #EAF1FF; color: #1E4FA8; } .su-role.is-member { background: #F2F5FA; color: var(--muted); }
+.su-note { margin: 14px 0 0; padding-top: 12px; border-top: 1px dashed var(--line-strong); font-size: 12.5px; color: var(--muted); }
+.su-note code { background: #F2F5FA; padding: 1px 6px; border-radius: 5px; }
+.su-actions { display: flex; }
+.su-danger { background: #fff; color: #B4232A; border: 1px solid rgba(229,72,77,.4); }
+.su-danger:hover:not(:disabled) { background: #E5484D; color: #fff; border-color: #E5484D; }
+.su-danger:disabled { opacity: .45; }
+/* restricted tools: small dot on your sidebar */
+.rail-item.is-restricted .rail-icon::before { content: ""; position: absolute; right: -3px; bottom: -3px; width: 10px; height: 10px; border-radius: 50%; background: #E0A800; box-shadow: 0 0 0 2px #04224F; z-index: 2; }
+/* maintenance screen */
+[data-tool-panel].is-maint > :not(.maint-cover) { display: none !important; }
+.maint-cover { display: grid; justify-items: center; text-align: center; gap: 8px; max-width: 460px; margin: 12vh auto 0; padding: 32px 28px; border-radius: 24px; background: #fff; border: 1px solid var(--line); box-shadow: 0 30px 60px -40px rgba(0,40,100,.5); animation: rise .3s var(--ease-out) both; }
+.maint-ico { width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; color: #fff; background: linear-gradient(140deg, var(--navy), #2D6BFF); box-shadow: 0 14px 28px -14px rgba(0,55,127,.8); margin-bottom: 6px; }
+.maint-cover h2 { font-family: var(--display); font-weight: 600; font-size: 22px; letter-spacing: -.02em; margin: 0; }
+.maint-cover p { margin: 0; color: var(--muted); }
+@media (max-width: 760px) {
+  #rail [data-tool="super"] { display: none !important; }
+  .su-tool { flex-wrap: wrap; } .su-seg { width: 100%; overflow-x: auto; } .su-seg button { flex: 1; }
+}
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }

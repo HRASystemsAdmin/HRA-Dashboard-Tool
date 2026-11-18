@@ -9,6 +9,7 @@ const DEMO = !CFG.firebase || !CFG.firebase.apiKey;
 const lower = (s) => String(s || "").trim().toLowerCase();
 const ADMINS = (CFG.admins || []).map(lower);
 const MEMBERS = (CFG.members || []).map(lower);
+const SUPERS = (CFG.superAdmins || []).map(lower);
 
 const STATUS = {
   open:        { label: "Submitted",   n: 0, color: "var(--s-open)" },
@@ -71,7 +72,7 @@ function toast(msg, color, action) {
 /* --------------------------------------------------------------------------
    Data stores
    -------------------------------------------------------------------------- */
-const bcListeners = new Set(), logListeners = new Set(), trListeners = new Set(), profListeners = new Set();
+const bcListeners = new Set(), logListeners = new Set(), trListeners = new Set(), profListeners = new Set(), setListeners = new Set();
 function createDemoStore() {
   const KEY = "hra_demo_tickets_v3", UKEY = "hra_demo_user_v2", FKEY = "hra_demo_files_v1";
   const loadFiles = () => { try { return JSON.parse(localStorage.getItem(FKEY)) || {}; } catch { return {}; } };
@@ -146,6 +147,18 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Settings (demo)
+    watchSettings(cb) {
+      const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_settings")) || {}; } catch { return {}; } };
+      const fn = (e) => { if (!e || e.key === "hra_demo_settings") cb(read()); };
+      addEventListener("storage", fn); setListeners.add(fn); setTimeout(() => fn(), 0);
+      return () => { removeEventListener("storage", fn); setListeners.delete(fn); };
+    },
+    async saveSettings(data) {
+      const cur = JSON.parse(localStorage.getItem("hra_demo_settings") || "{}");
+      localStorage.setItem("hra_demo_settings", JSON.stringify({ ...cur, ...data, tools: { ...(cur.tools || {}), ...(data.tools || {}) } }));
+      setListeners.forEach((fn) => fn());
+    },
     // Profiles (demo)
     watchProfiles(cb) {
       const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_profiles")) || {}; } catch { return {}; } };
@@ -328,6 +341,10 @@ async function createFirebaseStore() {
       return fsMod.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => trDbError(e, "questions"));
     },
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
+    watchSettings(cb) {
+      return fsMod.onSnapshot(fsMod.doc(db, "settings", "tools"), (s) => cb(s.exists() ? s.data() : {}), (e) => console.warn("Settings unavailable", e));
+    },
+    saveSettings(data) { return fsMod.setDoc(fsMod.doc(db, "settings", "tools"), data, { merge: true }); },
     watchProfiles(cb) {
       return fsMod.onSnapshot(fsMod.collection(db, "profiles"), (s) => cb(s.docs.map((d) => ({ uid: d.id, ...d.data() }))), (e) => console.warn("Profiles unavailable", e));
     },
@@ -427,6 +444,7 @@ function handleUser(u) {
   state.tickets = []; state.loaded = false; state.known.clear();
 
   if (!u) {
+    stopSettings();
     stopProfiles();
     stopTraining();
     stopHelper();
@@ -451,6 +469,7 @@ function handleUser(u) {
 
   state.user = { uid: u.uid, email, name: u.name || nameFromEmail(email) };
   state.isAdmin = isAdmin;
+  state.isSuper = isAdmin && SUPERS.includes(email);
   state.tab = "mine";
 
   state.user.baseName = state.user.name;
@@ -465,6 +484,8 @@ function handleUser(u) {
   showView("view-app");
   $('[data-tool="insights"]').hidden = !isAdmin;
   $("#alert-btn").hidden = !isAdmin;
+  $("#user-role").textContent = state.isSuper ? "Super admin" : isAdmin ? "Admin" : "Team member";
+  startSettings();
   startAlerts();
   startHelper();
   startTraining();
@@ -498,6 +519,7 @@ function onTickets(list) {
   state.known = new Map(list.map((t) => [t.id, t.status]));
   state.tickets = list;
   setTimeout(refreshBell, 0);
+  if (currentTool === "super") setTimeout(renderSuper, 0);
   state.loaded = true;
   if (first) {
     const m = location.hash.match(/^#r-([A-Za-z0-9]+)$/);
@@ -1765,6 +1787,8 @@ function bind() {
     const trT = t.closest("[data-tr-trainee]"); if (trT) { renderTraineeDrawer(trT.dataset.trTrainee); openOverlay($("#tr-drawer")); return; }
     const trdS = t.closest("[data-trd-send]"); if (trdS) { sendManagerNote(trdS.dataset.trdSend); return; }
     if (t.closest("[data-rail-toggle]")) { toggleRail(); return; }
+    const suM = t.closest("[data-su-mode]"); if (suM) { const [id, mode] = suM.dataset.suMode.split(":"); if (toolMode(id) !== mode) setToolMode(id, mode, suM); return; }
+    const suE = t.closest("[data-su-erase]"); if (suE) { eraseArchived(suE); return; }
     if (t.closest("[data-range-clear]")) { PL.range = { preset: "all", from: "", to: "" }; saveRange(); PL.animate = true; renderPipeline(); return; }
     if (t.closest("[data-profile]")) { openProfile(); return; }
     if (t.closest("[data-prof-pick]")) { $("#prof-file")?.click(); return; }
@@ -2183,6 +2207,138 @@ function toggleRail() {
 }
 try { if (localStorage.getItem("hra_rail_collapsed") === "1") document.documentElement.classList.add("rail-collapsed", "rail-settled"); } catch {}
 
+/* ---------- Super admin: tool switches ---------- */
+const TOOLS = [
+  { id: "requests", label: "Request Center", desc: "Tickets and requests", modes: ["all", "admins", "off", "maint"] },
+  { id: "pipeline", label: "Client Pipeline", desc: "Candidates per client, from Workable", modes: ["all", "admins", "off", "maint"] },
+  { id: "insights", label: "Insights", desc: "Performance numbers (admins only)", modes: ["admins", "off", "maint"], base: "admins" },
+  { id: "training", label: "Training", desc: "Courses and team progress", modes: ["all", "admins", "off", "maint"] },
+  { id: "contacts", label: "Who to contact", desc: "The contact directory", modes: ["all", "admins", "off", "maint"] },
+  { id: "sharepoint", label: "SharePoint link", desc: "Link to the team site", modes: ["all", "admins", "off"] },
+  { id: "helper", label: "HRA Helper", desc: "The chat bubble", modes: ["all", "admins", "off"] }
+];
+const MODE_LABEL = { all: "Everyone", admins: "Admins only", off: "Only me", maint: "Maintenance" };
+const MODE_EFFECT = { all: "Visible to everyone", admins: "Hidden from members", off: "Hidden from everyone except you", maint: "Others see a maintenance screen" };
+const SET = { tools: {}, unsub: null };
+const toolMode = (id) => { const t = TOOLS.find((x) => x.id === id); const m = SET.tools[id]; return t && t.modes.includes(m) ? m : (t?.base || "all"); };
+function toolAccess(id) {
+  const t = TOOLS.find((x) => x.id === id); if (!t) return "on";
+  if (id === "insights" && !state.isAdmin) return "hidden";
+  const m = toolMode(id);
+  if (state.isSuper) return "on";
+  if (m === "all") return "on";
+  if (m === "admins") return state.isAdmin ? "on" : "hidden";
+  if (m === "maint") return "maint";
+  return "hidden";
+}
+function firstOpenTool() {
+  for (const t of ["requests", "pipeline", "training", "contacts", "insights"]) if (toolAccess(t) !== "hidden") return t;
+  return "requests";
+}
+function applyAccess() {
+  if (!state.user) return;
+  for (const t of TOOLS) {
+    const acc = toolAccess(t.id), m = toolMode(t.id);
+    const item = t.id === "sharepoint" ? $("#rail-sharepoint") : t.id === "helper" ? null : $(`#rail [data-tool="${t.id}"]`);
+    if (item) {
+      item.hidden = acc === "hidden" || (t.id === "sharepoint" && !CFG.links?.sharepoint);
+      item.classList.toggle("is-restricted", state.isSuper && m !== (t.base || "all"));
+      item.dataset.flag = state.isSuper && m !== (t.base || "all") ? MODE_LABEL[m] : "";
+      if (item.dataset.flag) item.title = `${t.label}: ${MODE_LABEL[m]} (only you see it this way)`; else item.removeAttribute("title");
+    }
+    if (t.id === "helper") { const h = $("#helper"); if (h) h.hidden = acc !== "on"; if (acc !== "on" && HP.open) toggleHelper(false); }
+    const panel = $(`[data-tool-panel="${t.id}"]`);
+    if (panel) {
+      const maint = acc === "maint";
+      panel.classList.toggle("is-maint", maint);
+      let cover = $(":scope > .maint-cover", panel);
+      if (maint && !cover) panel.insertAdjacentHTML("afterbegin", `<div class="maint-cover"><span class="maint-ico"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5a4 4 0 0 0 5 5L13 18l-3 3-4-4 3-3 6.5-6.5a4 4 0 0 0-1-1z"/></svg></span><h2>${esc(t.label)} is under maintenance</h2><p>We're making some improvements. Please check back soon.</p></div>`);
+      if (!maint) cover?.remove();
+    }
+  }
+  const su = $('#rail [data-tool="super"]'); if (su) su.hidden = !state.isSuper;
+  if (currentTool && currentTool !== "super" && toolAccess(currentTool) === "hidden") setTool(firstOpenTool(), true);
+  moveRailGlow();
+}
+function startSettings() {
+  SET.unsub?.();
+  SET.unsub = state.store.watchSettings((d) => { SET.tools = d?.tools || {}; applyAccess(); if (currentTool === "super") renderSuper(); });
+}
+function stopSettings() { SET.unsub?.(); SET.unsub = null; SET.tools = {}; }
+
+const SUPER_ICONS = {
+  requests: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/>',
+  pipeline: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M9 9.5V20"/>',
+  insights: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  training: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
+  contacts: '<path d="M6 4h11a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2z"/><circle cx="12.5" cy="9" r="2"/><path d="M9.5 13.5a3 3 0 0 1 6 0"/>',
+  sharepoint: '<circle cx="11" cy="8" r="5"/><circle cx="16.5" cy="14" r="4"/><circle cx="10" cy="17" r="3"/>',
+  helper: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5z"/>'
+};
+function peopleList() {
+  const all = [...new Set([...SUPERS, ...ADMINS, ...MEMBERS])];
+  return all.map((e) => {
+    const p = PROF.byEmail.get(e);
+    return { email: e, name: p?.name || nameFromEmail(e), uid: p?.uid, role: SUPERS.includes(e) && ADMINS.includes(e) ? "super" : ADMINS.includes(e) ? "admin" : "member", hasProfile: Boolean(p) };
+  }).sort((a, b) => ({ super: 0, admin: 1, member: 2 }[a.role] - { super: 0, admin: 1, member: 2 }[b.role]) || a.name.localeCompare(b.name));
+}
+function renderSuper() {
+  const root = $("#super-root"); if (!root || !state.isSuper) return;
+  const people = peopleList();
+  const count = (r) => people.filter((p) => p.role === r).length;
+  const archived = state.tickets.filter((t) => t.archived);
+  const oldest = archived.map((t) => t.archivedAt || "").filter(Boolean).sort()[0];
+  const ROLE = { super: "Super admin", admin: "Admin", member: "Member" };
+  root.innerHTML = `
+    <div class="su">
+      <header class="su-head"><h1 class="hero-title">Super admin</h1><p class="hero-sub">Only you can see this page.</p></header>
+
+      <section class="su-card">
+        <div class="su-card-head"><h2>Tools</h2><p>Choose who can see each tool. Changes apply right away for everyone who's signed in.</p></div>
+        <div class="su-tools">${TOOLS.map((t) => { const m = toolMode(t.id); return `
+          <div class="su-tool">
+            <span class="su-tool-ico">${svgI(SUPER_ICONS[t.id] || "", 19)}</span>
+            <span class="su-tool-text"><strong>${esc(t.label)}</strong><small>${esc(MODE_EFFECT[m])}</small></span>
+            <div class="su-seg" role="radiogroup" aria-label="${esc(t.label)} visibility">${t.modes.map((x) => `<button type="button" role="radio" aria-checked="${x === m}" class="${x === m ? "is-on" : ""} m-${x}" data-su-mode="${t.id}:${x}">${esc(x === "admins" && t.id === "insights" ? "Admins" : MODE_LABEL[x])}</button>`).join("")}</div>
+          </div>`; }).join("")}</div>
+      </section>
+
+      <section class="su-card">
+        <div class="su-card-head"><h2>People</h2><p>${people.length} ${people.length === 1 ? "person has" : "people have"} access: ${count("super")} super admin, ${count("admin")} admin${count("admin") === 1 ? "" : "s"}, ${count("member")} member${count("member") === 1 ? "" : "s"}.</p></div>
+        <div class="su-people">${people.map((p) => `
+          <div class="su-person"><span class="ldr-avatar su-av">${avatarInner(p.name, p.uid, p.email)}</span>
+            <span class="su-person-text"><strong>${esc(p.name)}</strong><small>${esc(p.email)}</small></span>
+            ${p.hasProfile ? "" : `<span class="su-hint">No profile yet</span>`}
+            <span class="su-role is-${p.role}">${ROLE[p.role]}</span></div>`).join("")}</div>
+        <p class="su-note">To add someone or change an access type, update the lists in <code>config.js</code> and <code>firestore.rules</code> (then publish the rules), and add their login in Firebase → Authentication.</p>
+      </section>
+
+      <section class="su-card">
+        <div class="su-card-head"><h2>Archived requests</h2><p>${archived.length ? `${archived.length} archived request${archived.length === 1 ? "" : "s"}${oldest ? `, the oldest archived ${esc(ago(oldest))}` : ""}. Erasing deletes them and their attachments for good.` : "The archive is empty."}</p></div>
+        <div class="su-actions"><button type="button" class="btn su-danger" data-su-erase ${archived.length ? "" : "disabled"}><span class="btn-text">Erase ${archived.length || ""} archived request${archived.length === 1 ? "" : "s"}</span><span class="spinner" aria-hidden="true"></span></button></div>
+      </section>
+    </div>`;
+}
+async function setToolMode(id, mode, btn) {
+  const prev = SET.tools[id];
+  SET.tools = { ...SET.tools, [id]: mode };
+  applyAccess(); renderSuper();
+  try { await state.store.saveSettings({ tools: { [id]: mode }, updatedAt: new Date().toISOString(), updatedBy: state.user.name }); toast(`${TOOLS.find((t) => t.id === id).label}: ${MODE_LABEL[mode]}`, "var(--s-done)"); }
+  catch (e) { console.error(e); SET.tools = { ...SET.tools, [id]: prev }; applyAccess(); renderSuper(); toast(e?.code === "permission-denied" ? "Saving is blocked. Publish the latest firestore.rules." : "That didn't save. Check your connection.", "#E2632B"); }
+}
+async function eraseArchived(btn) {
+  const list = state.tickets.filter((t) => t.archived);
+  if (!list.length) return;
+  const yes = await confirmDialog({ title: `Erase ${list.length} archived request${list.length === 1 ? "" : "s"}?`, body: "They'll be deleted for good, including any attachments. This can't be undone.", confirm: "Erase", danger: true });
+  if (!yes) return;
+  closeOverlay($("#confirm"));
+  btn.classList.add("is-loading"); btn.disabled = true;
+  let ok = 0, failed = 0;
+  for (const t of list) { try { await state.store.remove(t); ok++; } catch (e) { console.error(e); failed++; } }
+  toast(failed ? `${ok} erased, ${failed} couldn't be deleted` : `${ok} archived request${ok === 1 ? "" : "s"} erased`, failed ? "#E2632B" : "var(--s-done)");
+  renderSuper();
+}
+
 /* ---------- Profiles: display name + photo ---------- */
 const PROF = { byUid: new Map(), byEmail: new Map(), unsub: null };
 function avatarInner(name, uid, email) {
@@ -2195,7 +2351,7 @@ function refreshUserUI() {
   const me = PROF.byUid.get(state.user.uid);
   state.user.name = me?.name || state.user.baseName || state.user.name;
   $("#user-name").textContent = state.user.name;
-  $("#user-role").textContent = state.isAdmin ? "Admin" : "Team member";
+  $("#user-role").textContent = state.isSuper ? "Super admin" : state.isAdmin ? "Admin" : "Team member";
   const av = $("#user-avatar"); av.innerHTML = avatarInner(state.user.name, state.user.uid, state.user.email); av.classList.toggle("has-photo", Boolean(me?.photo));
   const h = new Date().getHours();
   $("#greeting").textContent = `${h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"}, ${state.user.name.split(" ")[0]}`;
@@ -2284,6 +2440,8 @@ async function saveProfile(btn) {
 function setTool(id, silent) {
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
   if (id === "insights" && !state.isAdmin) id = "requests";
+  if (id === "super" && !state.isSuper) id = "requests";
+  if (id !== "super" && toolAccess(id) === "hidden") id = firstOpenTool();
   const changed = id !== currentTool;
   currentTool = id;
   try { localStorage.setItem(TOOL_KEY, id); } catch {}
@@ -2298,6 +2456,7 @@ function setTool(id, silent) {
   if (id === "pipeline") startPipeline();
   if (id === "insights") { IN.animate = true; startInsights(); }
   if (id === "training") { renderTraining(); } else { document.body.classList.remove("in-course"); stopTeamWatch(); }
+  if (id === "super") renderSuper();
   if (id === "contacts") { renderContacts(); if (!silent && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#ct-q")?.focus({ preventScroll: true }), 350); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
   if (!silent) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
@@ -4563,7 +4722,7 @@ function toggleHelper(force) {
 }
 function startHelper() {
   const h = $("#helper"); if (!h) return;
-  h.hidden = false;
+  h.hidden = toolAccess("helper") !== "on";
   try { HP.msgs = JSON.parse(sessionStorage.getItem("hra_helper_" + state.user.uid)) || []; } catch { HP.msgs = []; }
   let seen = false; try { seen = Boolean(localStorage.getItem("hra_helper_seen")); } catch {}
   $("#hp-bubble").classList.toggle("is-new", !seen);

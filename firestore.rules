@@ -1,12 +1,19 @@
 rules_version = '2';
 
-// RULES VERSION: 2026-11-18 (Training, admin clean-up tools, profile photos)
+// RULES VERSION: 2026-11-19 (Training, clean-up tools, profiles, super admin)
 // Paste this into Firebase console → Firestore Database → Rules → Publish.
 // These rules are the real lock on the data. Keep the two lists below in
 // sync with config.js (lowercase emails).
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Super admins (also listed in adminEmails): can change dashboard-wide settings.
+    function superAdminEmails() {
+      return [
+        'jrochin@hunterrecruitment.net'
+      ];
+    }
 
     function adminEmails() {
       return [
@@ -34,6 +41,7 @@ service cloud.firestore {
     function email()    { return request.auth.token.email.lower(); }
     function isAdmin()  { return signedIn() && email() in adminEmails(); }
     function isMember() { return signedIn() && (isAdmin() || email() in memberEmails()); }
+    function isSuperAdmin() { return isAdmin() && email() in superAdminEmails(); }
     function isTrainer() { return isAdmin() || (isMember() && email() in trainerEmails()); }
 
     function ticket(ticketId) {
@@ -112,6 +120,12 @@ service cloud.firestore {
     // Each person's own dashboard preferences (like their column layout).
     match /user_prefs/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Dashboard settings (which tools are on). Everyone reads them; only super admins change them.
+    match /settings/{docId} {
+      allow read: if isMember();
+      allow write: if isSuperAdmin();
     }
 
     // Profiles: name and a small photo. Everyone on the team can see them; people edit only their own.

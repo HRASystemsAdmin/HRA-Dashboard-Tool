@@ -30,6 +30,11 @@ window.HRA_CONFIG = {
     "jrochin@hunterrecruitment.net",
     "kcooney@hunterrecruitment.net"
   ],
+  // Super admins (must also be in admins): get the Super admin page to turn tools on/off,
+  // see everyone's access and erase archived requests. Keep in sync with firestore.rules → superAdminEmails().
+  superAdmins: [
+    "jrochin@hunterrecruitment.net"
+  ],
   members: [
     "jomohundro@hunterrecruitment.net",
     "mwhitmyer@hunterrecruitment.net"
