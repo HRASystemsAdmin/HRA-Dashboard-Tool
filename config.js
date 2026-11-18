@@ -224,7 +224,7 @@ window.HRA_CONFIG = {
     // Client names must match the client names the sync produces (see clientFrom).
     // TEST DATA: true shows made-up clients and candidates in the Client Pipeline and Insights,
     // so everyone can try things out. Nothing is written to Firebase. Set to false when Workable is connected.
-    testData: false,
+    testData: true,
 
     accountManagers: [
       { name: "Megan",  email: "megan@hunterrecruitment.net",  clients: ["Beyond Wow Plumbing", "Trust 1 Plumbing"] },
