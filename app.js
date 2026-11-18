@@ -5090,25 +5090,25 @@ function renderTeam() {
   const openQ = loading ? TRS.openQ : TRS.team.notes.filter((n) => n.status === "open" && n.from === "trainee");
   root.innerHTML = `
     <div class="tr-hero">
-      <div><h1 class="hero-title">Team progress</h1><p class="hero-sub">See how new team members are moving through training, and help when someone gets stuck.</p></div>
+      <div><h1 class="hero-title">Team progress</h1><p class="hero-sub">${esc(c.title)}</p></div>
       <div class="tr-hero-side"><div class="seg tr-seg"><button class="seg-btn" data-tr-view="home">My training</button><button class="seg-btn is-active" data-tr-view="team">Team progress${openQ.length ? `<span class="tab-count">${openQ.length}</span>` : ""}</button><span class="seg-indicator"></span></div>
-      ${avail.length > 1 ? ddHTML("tr-course", { label: "Course", value: c.id, options: avail.map((x) => ({ value: x.id, label: x.title })) }) : `<span class="tr-course-label">${esc(c.title)}</span>`}
-      ${state.isAdmin ? `<button type="button" class="btn btn-ghost tr-manage" data-tr-manage ${loading ? "disabled" : ""}>${svgI('<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>', 17)}Manage training data</button>` : ""}</div>
+      ${avail.length > 1 ? ddHTML("tr-course", { label: "Course", value: c.id, options: avail.map((x) => ({ value: x.id, label: x.title })) }) : ""}
+      ${state.isAdmin ? `<button type="button" class="tr-manage" data-tr-manage ${loading ? "disabled" : ""} title="Reset progress, delete questions or notes">${svgI('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>', 16)}Manage</button>` : ""}</div>
     </div>
-    <div class="kpis tr-kpis" style="--n:5;--half:3">
-      ${[["Team members", rows.length, "#00377F"], ["In progress", st("active"), "#2D6BFF"], ["Completed", st("done"), "#0E9F7E"], ["Need a nudge", st("stuck"), "#E0A800"], ["Open questions", openQ.length, "#F26A26"]].map(([l, v, col], i) => `<div class="kpi" style="--accent:${col};--i:${i}"><div class="kpi-top"><span class="kpi-label">${l}</span></div><div class="kpi-row"><div class="kpi-value">${loading && i < 4 ? `<span class="sk" style="width:48px;height:30px;display:block"></span>` : v}</div></div></div>`).join("")}
+    <div class="tr-stats">
+      ${[["Team members", rows.length, "#00377F"], ["In progress", st("active") + st("stuck"), "#2D6BFF"], ["Completed", st("done"), "#0E9F7E"], ["Open questions", openQ.length, "#F26A26"]].map(([l, v, col], i) => `<div class="tr-stat" style="--accent:${col};--i:${i}"><b>${loading && i < 3 ? `<span class="sk" style="width:28px;height:22px;display:inline-block"></span>` : v}</b><span>${l}</span></div>`).join("")}
     </div>
     <div class="tr-team">
       <section class="in-card tr-roster">
-        <header class="in-card-head"><div><h2>${esc(c.title)}</h2><p>Select a person to see their details or send them a note</p></div></header>
+        <header class="in-card-head"><div><h2>People</h2><p>Select someone to see details or send a note</p></div></header>
         ${loading ? `<div class="tr-rows">${Array.from({ length: 4 }, () => `<div class="tr-row"><span class="sk" style="width:40px;height:40px;border-radius:50%"></span><span class="tr-row-main"><span class="sk" style="width:40%"></span><span class="sk" style="width:70%;height:8px;margin-top:6px"></span></span></div>`).join("")}<p class="tr-loading">Loading team progress…</p></div>` : rows.length ? `<div class="tr-rows">${rows.sort((a, b) => ({ stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(a)[0]] - { stuck: 0, active: 1, new: 2, done: 3 }[traineeStatus(b)[0]])).map((r, i) => {
           const [sk, sl] = traineeStatus(r), pct = pctFor(c, r.p), cur = steps[Math.min(r.p.current || 0, steps.length - 1)];
           const qs = quizzes.filter((q) => r.p.quiz?.[q.id]); const first = qs.filter((q) => r.p.quiz[q.id].firstTry).length;
           return `<button type="button" class="tr-row" ${r.uid ? `data-tr-trainee="${esc(r.uid)}"` : "disabled"} style="--i:${i}">
             <span class="ldr-avatar">${avatarInner(r.name, r.uid, r.email)}</span>
-            <span class="tr-row-main"><strong>${esc(r.name)}</strong><small>${r.p.completedAt ? `Finished ${esc(ago(r.p.completedAt))}` : r.p.startedAt ? `Now on: ${esc(cur?.title || "")}` : esc(r.email)}</small>
+            <span class="tr-row-main"><strong>${esc(displayName(r.name, r.uid, r.email))}</strong><small>${r.p.completedAt ? `Finished ${esc(ago(r.p.completedAt))}` : r.p.startedAt ? `${esc(cur?.title || "")} · active ${esc(ago(r.p.lastAt || r.lastAt))}` : "Hasn't started yet"}</small>
               <span class="tr-bar"><span style="--w:${pct}%"></span></span></span>
-            <span class="tr-row-side"><span class="tr-pill is-${sk}">${esc(sl)}</span><small>${pct}%${qs.length ? ` · quiz ${first}/${qs.length} first try` : ""}</small><small>${r.p.lastAt ? "Active " + esc(ago(r.p.lastAt)) : ""}</small></span>
+            <span class="tr-row-side"><span class="tr-pill is-${sk}">${esc(sl)}</span><b class="tr-pct">${pct}%</b></span>
           </button>`;
         }).join("")}</div>` : `<p class="in-empty">No team members yet. Add employees in config.js and Firebase.</p>`}
       </section>
@@ -5126,7 +5126,7 @@ function renderTraineeDrawer(uid) {
   const p = doc.courses?.[c.id] || {}, steps = courseSteps(c), [sk, sl] = traineeStatus({ p, lastAt: doc.lastAt });
   const notes = TRS.team.notes.filter((n) => n.traineeUid === uid);
   $("#tr-drawer-body").innerHTML = `
-    <div class="trd-head"><span class="ldr-avatar trd-av">${avatarInner(doc.name || "?", uid, doc.email)}</span><div><h2 id="trd-title">${esc(doc.name || "")}</h2><small>${esc(doc.email || "")}</small></div><span class="tr-pill is-${sk}">${esc(sl)}</span></div>
+    <div class="trd-head"><span class="ldr-avatar trd-av">${avatarInner(doc.name || "?", uid, doc.email)}</span><div><h2 id="trd-title">${esc(displayName(doc.name || "", uid, doc.email))}</h2><small>${esc(doc.email || "")}</small></div><span class="tr-pill is-${sk}">${esc(sl)}</span></div>
     <div class="trd-prog">${ring(pctFor(c, p), 72, 7)}<div><strong>${esc(c.title)}</strong><small>${p.startedAt ? `Started ${esc(ago(p.startedAt))}` : "Not started"}${p.lastAt ? ` · active ${esc(ago(p.lastAt))}` : ""}</small></div></div>
     <div class="trd-mods">${c.modules.map((m, mi) => `<div class="trd-mod"><strong>${esc(m.title)}</strong>${steps.filter((x) => x.mi === mi).map((x) => {
       const d = p.done?.[x.id], q = p.quiz?.[x.id];
