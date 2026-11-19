@@ -65,7 +65,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------- Workable API with polite throttling ----------
    Workable allows account tokens 10 requests per 10 seconds (HTTP 429 above that), and other
-   apps on the same Workable account (like Power BI) may share that limit.
+   apps on the same Workable account (whatever uses the other existing tokens) may share that limit.
+   Power BI is not one of them: it reads Workable's BI Data Link database, not the API.
    Gentle mode (default): 1 request every 3 seconds (about 30% of the limit), waits whenever
    Workable reports few requests left, and STOPS the run at the first "slow down" (429) instead
    of retrying, so it never competes with other apps. */

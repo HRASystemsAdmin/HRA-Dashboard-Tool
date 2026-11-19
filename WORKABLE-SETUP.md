@@ -7,8 +7,9 @@ The Client Pipeline shows every submitted candidate per client, in the same colu
 
 The sync is set up so testing can't affect Workable, Power BI or your costs:
 
-- **Read-only token.** Create a separate token named "HRA Dashboard" with only `r_jobs` and `r_candidates`. Workable blocks any change made with it. Never reuse Power BI's token.
-- **No credits.** Workable doesn't charge per API request. The only limit is speed (10 requests every 10 seconds), and that limit may be shared with Power BI.
+- **Power BI is not involved.** Power BI reads Workable's BI Data Link database (confirmed by Nick), not the API, so the sync cannot affect it.
+- **Read-only token.** Create a separate token named "HRA Dashboard" with only `r_jobs` and `r_candidates`. Workable blocks any change made with it. Never reuse or change the existing tokens: it isn't known yet who uses them.
+- **No credits.** Workable doesn't charge per API request. The only limit is speed (10 requests every 10 seconds), and it may be shared with whatever uses the existing tokens.
 - **Gentle mode (always on).** 1 request every 3 seconds (about 30% of the limit); the **first load** goes even slower, 1 every 5 seconds (about 20%). If Workable ever says "slow down", the run **stops immediately** instead of retrying, and the next run continues from there.
 - **First load once, then only changes.** The first sync reads the last 12 months once (it can be spread over several runs; progress is saved). After that, each run asks Workable only for candidates and jobs updated since the previous run, usually 15 to 40 requests and 1 to 2 minutes.
 - **Light on Firebase.** Clients that didn't change are not rewritten, so open dashboards don't re-read them. Big clients are split across records to stay under Firestore's 1 MB limit.
@@ -18,7 +19,7 @@ The sync is set up so testing can't affect Workable, Power BI or your costs:
 - **Public logs.** This repo is public, so run logs are too. Runs never print candidate names. Job and client names are hidden unless you tick "show names". Inspect does show job titles, departments and stage names (that's its purpose), so delete its log after reading it: Actions → the run → ⋯ → **Delete all logs**.
 
 **Step by step**
-1. Ask whoever manages Power BI when its Workable refresh runs, and test at a different time (for example, lunch or the evening).
+1. Test at a quiet time (for example, lunch or the evening), since it isn't known yet what uses the existing API tokens.
 2. In GitHub → Settings → Secrets and variables → Actions, add `WORKABLE_SUBDOMAIN` and `WORKABLE_TOKEN`. (`FIREBASE_SERVICE_ACCOUNT` is only needed for the final **sync** step.)
 3. Actions → **Workable sync** → **Run workflow** → mode **inspect**. About 1–2 minutes. Read the job, department and stage lists, then delete the log.
 4. Send the stage names and how jobs map to clients to whoever maintains `config.js` (`workable.stages`, `workable.clients`).
