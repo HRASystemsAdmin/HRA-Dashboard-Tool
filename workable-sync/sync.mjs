@@ -220,7 +220,7 @@ function buildRow(cand, job, acts) {
     id: String(cand.id),
     name: cand.name || [cand.firstname, cand.lastname].filter(Boolean).join(" "),
     role: job.title,
-    submitted: day(subAct?.created_at || cand.updated_at || cand.created_at),
+    submitted: day(subAct?.created_at || cand.created_at || cand.updated_at),   // no recorded move: use the application date (last-updated can be Workable housekeeping)
     interview,
     hired,
     roleHired: type === "hired" ? job.title : "",
@@ -305,7 +305,19 @@ async function listAllJobs() {
   const seen = new Set();
   return jobs.filter((j) => j.shortcode && !seen.has(j.shortcode) && seen.add(j.shortcode));
 }
-async function historyFor(id) { return all(`/candidates/${id}/activities?limit=100`, "activities", 10); }
+const unknownStages = new Map();   // stage names seen in histories that config.js doesn't map
+async function historyFor(id) {
+  const acts = await all(`/candidates/${id}/activities?limit=100`, "activities", 10);
+  for (const a of acts) if (a.stage_name && !stageType(a.stage_name)) unknownStages.set(a.stage_name, (unknownStages.get(a.stage_name) || 0) + 1);
+  return acts;
+}
+function reportUnknownStages() {
+  const ignore = new Set(["sourced", "applied", "initial contact made", "jeanie in screening", "ai opt out", "jeanie candidate not responsive", "jeanie candidate not interested", "phone screen scheduled", "candidate hold"]);
+  const list = [...unknownStages.entries()].filter(([n]) => !ignore.has(lower(n))).sort((a, b) => b[1] - a[1]);
+  if (!list.length) return;
+  console.log("\nStage names found in candidate histories that config.js doesn't map (check whether any mean 'submitted', 'interview', 'offer' or 'hired'):");
+  for (const [n, c] of list.slice(0, 40)) console.log(`  ${n}  (${c} moves)`);
+}
 
 async function saveJobCache(doc) {
   doc.cands = (doc.cands || []).filter(inWindow);
@@ -526,6 +538,7 @@ async function firstLoad(state) {
   state.mode = "incremental"; state.full = null;
   await rebuildClients("all", state);
   await saveState({ mode: "incremental", cursor: state.cursor, full: null, hashes: state.hashes, parts: state.parts, counts: state.counts, lastRebuildDay: state.lastRebuildDay });
+  reportUnknownStages();
   console.log(`\n✔ First load complete. From now on, runs only fetch what changed.`);
 }
 
@@ -619,6 +632,7 @@ async function suggestAccountManagers(sample) {
   console.log("accountManagers: [");
   for (const [who, clients] of byPerson) console.log(`  { name: ${JSON.stringify(who)}, email: "", clients: ${JSON.stringify(clients.map((c) => c.replace(/ \(\d+\/\d+\)$/, "")))} },`);
   console.log("],");
+  reportUnknownStages();
   console.log("\nThis log shows client and team names: delete it after copying (Actions → this run → ⋯ → Delete all logs).");
 }
 
