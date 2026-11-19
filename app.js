@@ -368,7 +368,7 @@ async function createFirebaseStore() {
     watchPipeline(cb) {
       let clients = [], meta = null;
       const u1 = fsMod.onSnapshot(fsMod.collection(db, "workable_clients"),
-        (snap) => { clients = snap.docs.map((d) => ({ id: d.id, ...d.data() })); cb(clients, meta); },
+        (snap) => { clients = mergeClientParts(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); cb(clients, meta); },
         (err) => { console.error(err); cb(clients, { error: err.code }); });
       const u2 = fsMod.onSnapshot(fsMod.doc(db, "workable_meta", "status"),
         (snap) => { meta = snap.exists() ? snap.data() : null; cb(clients, meta); }, () => {});
@@ -2639,6 +2639,16 @@ function freshness() {
   return times.length ? new Date(Math.max(...times)).toISOString() : null;
 }
 
+/* Large clients are saved in parts (<id>__p2, __p3…) to stay under Firestore's 1 MB record limit; join them back. */
+function mergeClientParts(list) {
+  const parts = new Map();
+  for (const d of list) if (d.partOf) { if (!parts.has(d.partOf)) parts.set(d.partOf, []); parts.get(d.partOf).push(d); }
+  return list.filter((d) => !d.partOf).map((d) => {
+    const extra = (parts.get(d.id) || []).sort((a, b) => (a.part || 0) - (b.part || 0));
+    return extra.length ? { ...d, candidates: [...(d.candidates || []), ...extra.flatMap((p) => p.candidates || [])] } : d;
+  });
+}
+
 function renderSync() {
   const el = $("#pl-sync"); if (!el) return;
   const m = PL.meta ? { ...PL.meta, lastSync: freshness() || PL.meta.lastSync } : null;
@@ -2649,6 +2659,7 @@ function renderSync() {
     return;
   }
   if (m?.error === "permission-denied") { el.classList.add("is-bad"); $("span", el).textContent = "No access to Workable data"; return; }
+  if (m?.mode === "first-load" && m.firstLoad?.total) { el.classList.add("is-wait"); $("span", el).textContent = `First load in progress: ${m.firstLoad.done} of ${m.firstLoad.total} jobs`; return; }
   if (!m || !m.lastSync) { el.classList.add("is-wait"); $("span", el).textContent = PL.store === "demo" ? "Demo data" : "Waiting for first sync"; return; }
   if (m.ok === false) { el.classList.add("is-bad"); $("span", el).textContent = `Last sync failed, showing ${ago(m.lastSync)} data`; el.title = m.message || ""; return; }
   const mins = (Date.now() - new Date(m.lastSync)) / 60e3;

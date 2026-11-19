@@ -253,10 +253,11 @@ window.HRA_CONFIG = {
     // Your Workable pipeline stage names (not case sensitive). A candidate shows in
     // the table once they reach any "submitted" stage or later.
     stages: {
-      screen:    ["Phone Screen", "Screening"],
-      submitted: ["Submitted to Client", "Submitted", "Client Review"],
-      interview: ["Interview", "Client Interview", "In-Person Interview"],
-      offer:     ["Offer"],
+      // From the Power BI funnel (HR Metrics). Inspect lists every stage name, so add any that are missing.
+      screen:    ["Submitted to AM", "Phone Screen", "Screening"],
+      submitted: ["Submitted to Hiring Manager", "Submitted to Client", "Submitted"],
+      interview: ["HM Interview Requested", "Hiring Mgr Interview Scheduled", "Interview Scheduled", "In-Person Interview Scheduled", "Interview"],
+      offer:     ["Offer", "Offer Made", "Offer Prep/Made", "Offer Accepted"],
       hired:     ["Hired"]
     },
 
@@ -264,6 +265,8 @@ window.HRA_CONFIG = {
     noShowWords:      ["no show", "no-show", "ncns", "no call"],
     fellThroughWords: ["declined offer", "offer declined", "quit", "fired", "rescinded", "no show to start", "didn't start"],
 
+    // Start dates from Workable offers cost one request per hire; HRA records almost no offers in Workable, so this is off.
+    startDatesFromOffers: false,
     lookbackDays: 365,                  // ignore candidates older than this
     syncEveryMinutes: 30,               // shown on the page; the schedule itself is in the workflow file
     sourcingWeeks: 8                    // weeks of sourcing numbers kept (the page lets people pick how many to show)

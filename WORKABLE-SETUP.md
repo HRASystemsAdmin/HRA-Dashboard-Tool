@@ -2,6 +2,33 @@
 
 The Client Pipeline shows every submitted candidate per client, in the same columns and colors as the Weekly Hiring Update spreadsheet. It reads from Workable automatically, so account managers no longer copy anything by hand. **Download spreadsheet** rebuilds the familiar workbook whenever someone needs a file.
 
+
+## Testing safely (start here)
+
+The sync is set up so testing can't affect Workable, Power BI or your costs:
+
+- **Read-only token.** Create a separate token named "HRA Dashboard" with only `r_jobs` and `r_candidates`. Workable blocks any change made with it. Never reuse Power BI's token.
+- **No credits.** Workable doesn't charge per API request. The only limit is speed (10 requests every 10 seconds), and that limit may be shared with Power BI.
+- **Gentle mode (always on).** 1 request every 3 seconds (about 30% of the limit); the **first load** goes even slower, 1 every 5 seconds (about 20%). If Workable ever says "slow down", the run **stops immediately** instead of retrying, and the next run continues from there.
+- **First load once, then only changes.** The first sync reads the last 12 months once (it can be spread over several runs; progress is saved). After that, each run asks Workable only for candidates and jobs updated since the previous run, usually 15 to 40 requests and 1 to 2 minutes.
+- **Light on Firebase.** Clients that didn't change are not rewritten, so open dashboards don't re-read them. Big clients are split across records to stay under Firestore's 1 MB limit.
+- **Safety cap.** Each run stops after 400 requests unless you change it.
+- **Manual only.** Nothing runs on a schedule until you turn it on in `.github/workflows/workable-sync.yml`.
+- **Safety report** at the end of every run: requests used, time, the lowest "requests left" Workable reported, and any slow-downs.
+- **Public logs.** This repo is public, so run logs are too. Runs never print candidate names. Job and client names are hidden unless you tick "show names". Inspect does show job titles, departments and stage names (that's its purpose), so delete its log after reading it: Actions → the run → ⋯ → **Delete all logs**.
+
+**Step by step**
+1. Ask whoever manages Power BI when its Workable refresh runs, and test at a different time (for example, lunch or the evening).
+2. In GitHub → Settings → Secrets and variables → Actions, add `WORKABLE_SUBDOMAIN` and `WORKABLE_TOKEN`. (`FIREBASE_SERVICE_ACCOUNT` is only needed for the final **sync** step.)
+3. Actions → **Workable sync** → **Run workflow** → mode **inspect**. About 1–2 minutes. Read the job, department and stage lists, then delete the log.
+4. Send the stage names and how jobs map to clients to whoever maintains `config.js` (`workable.stages`, `workable.clients`).
+5. Run mode **preview**: reads everything and saves nothing. Check the counts and the safety report.
+6. Add `FIREBASE_SERVICE_ACCOUNT`, then run mode **sync** with one **client** name to fill just that client in the dashboard.
+7. When you're happy: run mode **sync** with no client and **max_requests** `1500`, at a quiet time. That's the first load (about 2 hours at most). If it stops at the cap or because Workable asked to slow down, run it again: it continues where it stopped.
+8. Later, turn on the schedule. Each scheduled run then fetches only what changed.
+
+To stop everything instantly at any point, delete the dashboard's token in Workable. Power BI is not affected.
+
 ## How it works
 
 ```
