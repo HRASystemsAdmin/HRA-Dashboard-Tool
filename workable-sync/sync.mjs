@@ -288,7 +288,8 @@ function entryToRow(e, job) {
 
 /* ---------- Reading Workable efficiently ----------
    The first load is candidate-driven: the job list once, then candidates updated in the window (100 per request,
-   no history), then the full history ONLY for candidates the dashboard shows (reached "Submitted to Hiring
+   no history; only candidates who applied within the window, since Workable's background housekeeping marks
+   many old records as "updated"), then the full history ONLY for candidates the dashboard shows (reached "Submitted to Hiring
    Manager" or beyond) and for recently screened candidates (weekly sourcing numbers). Everyone else (for example
    Jeanie's screening conversations with candidates who were never submitted) costs no extra requests. */
 const sourcingSince = () => Date.now() - Math.min(Math.max(CFG.sourcingWeeks || 8, 1), 26) * 7 * 86400e3 - 7 * 86400e3;
@@ -479,7 +480,7 @@ async function firstLoad(state) {
       full.jobs = Object.fromEntries(jobs.map((j) => [j.shortcode, jobMetaCompact(j)]).filter(([, m]) => m.client));
       await saveJobsMeta(full.jobs);
       full.phase = "candidates";
-      full.next = `/candidates?updated_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
+      full.next = `/candidates?created_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
       await save();
       console.log(`  Jobs: ${jobs.length} in Workable, ${Object.keys(full.jobs).length} belong to clients.`);
     }
@@ -540,8 +541,10 @@ async function changesOnly(state) {
   for (const j of changedJobs) if (j.shortcode) metas[j.shortcode] = jobMetaCompact(j);
   const pending = makePending();
   let histories = 0;
+  let oldSkipped = 0;
   for (const c of changedCands) {
     const sc = c.job?.shortcode; if (!sc) continue;
+    if (new Date(c.created_at || 0).getTime() < since) { oldSkipped++; continue; }   // applied before the window: Workable housekeeping, not real work
     if (!metas[sc]) {
       const snap = await db.collection(CACHE).doc(sc).get();
       if (snap.exists) { const d = snap.data(); metas[sc] = { title: d.title, client: d.client, state: d.state, jobUpdated: d.jobUpdated }; }
@@ -559,7 +562,7 @@ async function changesOnly(state) {
   }
   const touched = await flushPending(pending, metas);
   for (const [k, m] of Object.entries(metas)) if (k.startsWith("__old_") && m.client) touched.add(m.client);
-  console.log(`  ${histories} candidates needed their history.`);
+  console.log(`  ${histories} candidates needed their history${oldSkipped ? `; ${oldSkipped} older records skipped (applied before the window)` : ""}.`);
   const today = runStart.slice(0, 10);
   const daily = state.lastRebuildDay !== today;   // once a day: refresh every client (weeks roll over, old entries age out)
   if (daily) console.log("  Daily refresh of all clients (no Workable requests needed).");
@@ -631,7 +634,7 @@ async function preview() {
     jobCount = jobs.length;
     clientJobs = Object.fromEntries(jobs.map((j) => [j.shortcode, clientForJob(j)]).filter(([, c]) => c && (!ONLY || lower(c) === lower(ONLY))));
     console.log(`Preview: ${jobs.length} jobs in Workable, ${Object.keys(clientJobs).length} belong to clients${ONLY ? " (this client)" : ""}.`);
-    let next = `/candidates?updated_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
+    let next = `/candidates?created_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
     while (next) {
       const data = await api(next);
       for (const c of data?.candidates || []) {
@@ -656,7 +659,7 @@ async function preview() {
     console.log(`So far ${queue} candidates would need their history. Raise the safety cap (for example 1500) to read the whole list and get an exact first-load size.`);
   } else {
     const total = jobPages + pages + queue;
-    console.log(`\nCandidates updated in the last ${CFG.lookbackDays || 365} days: ${cands} (${pages} pages).`);
+    console.log(`\nCandidates who applied in the last ${CFG.lookbackDays || 365} days, on client jobs: ${cands} (${pages} pages).`);
     console.log(`Candidates whose history is needed (submitted or recently screened): ${queue}.`);
     console.log(`A full first load would need about ${total} requests (about ${Math.round(total * FULL_PACE_MS / 60000)} minutes at 1 request every ${FULL_PACE_MS / 1000} s). It can be spread over several runs.`);
   }
