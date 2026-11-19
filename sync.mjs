@@ -285,37 +285,26 @@ function entryToRow(e, job) {
   return row;
 }
 
-/* Jobs that matter: everything published, plus jobs closed or archived within the lookback window. */
-async function listJobsInWindow() {
-  const after = encodeURIComponent(new Date(since).toISOString());
-  const jobs = [
-    ...await all("/jobs?state=published&limit=100", "jobs", 40),
-    ...await all(`/jobs?state=closed&updated_after=${after}&limit=100`, "jobs", 40),
-    ...await all(`/jobs?state=archived&updated_after=${after}&limit=100`, "jobs", 40)
-  ];
+/* ---------- Reading Workable efficiently ----------
+   The first load is candidate-driven: the job list once, then candidates updated in the window (100 per request,
+   no history), then the full history ONLY for candidates the dashboard shows (reached "Submitted to Hiring
+   Manager" or beyond) and for recently screened candidates (weekly sourcing numbers). Everyone else (for example
+   Jeanie's screening conversations with candidates who were never submitted) costs no extra requests. */
+const sourcingSince = () => Date.now() - Math.min(Math.max(CFG.sourcingWeeks || 8, 1), 26) * 7 * 86400e3 - 7 * 86400e3;
+function needsHistory(cand) {
+  const r = RANK[stageType(cand.stage || cand.stage_name || "")] || 0;
+  if (r >= RANK.submitted) return true;
+  return r >= RANK.screen && new Date(cand.updated_at || cand.created_at || 0).getTime() > sourcingSince();
+}
+const basicEntry = (cand) => compactCandidate(cand, []);
+async function listAllJobs() {
+  const jobs = [];
+  for (const st of ["published", "closed", "archived"]) jobs.push(...await all(`/jobs?state=${st}&limit=100`, "jobs", 200));
   const seen = new Set();
   return jobs.filter((j) => j.shortcode && !seen.has(j.shortcode) && seen.add(j.shortcode));
 }
-async function fetchJobEntries(sc, prevEntries = []) {
-  const prev = new Map(prevEntries.map((e) => [e.id, e]));
-  const cands = (await all(`/candidates?shortcode=${sc}&limit=100`, "candidates", 60)).filter((x) => new Date(x.updated_at || x.created_at || 0).getTime() > since);
-  const acts = await all(`/jobs/${sc}/activities?limit=100`, "activities", 80);
-  const byCand = new Map();
-  for (const a of acts) { const id = a.candidate?.id; if (!id) continue; if (!byCand.has(String(id))) byCand.set(String(id), []); byCand.get(String(id)).push(a); }
-  const entries = cands.map((c) => compactCandidate(c, byCand.get(String(c.id)) || [], prev.get(String(c.id))));
-  await addStartDates(entries);
-  return entries;
-}
-/* Start dates come from Workable offers. HRA's account has almost no offers recorded, so this is off unless
-   workable.startDatesFromOffers is true in config.js (it costs one request per hire). */
-async function addStartDates(entries) {
-  if (!CFG.startDatesFromOffers) return;
-  for (const e of entries.filter((x) => stageType(x.st) === "hired" && !x.sd)) {
-    const off = await api(`/candidates/${e.id}/offer`).catch(() => null);
-    const sd = off?.offer?.start_date || off?.start_date || "";
-    if (sd) e.sd = day(sd);
-  }
-}
+async function historyFor(id) { return all(`/candidates/${id}/activities?limit=100`, "activities", 10); }
+
 async function saveJobCache(doc) {
   doc.cands = (doc.cands || []).filter(inWindow);
   doc.syncedAt = new Date().toISOString();
@@ -326,6 +315,52 @@ async function saveJobCache(doc) {
   for (const e of byAge()) { if (size() < 900_000) break; if (maxRankOf(e) < RANK.submitted) doc.cands = doc.cands.filter((x) => x !== e); }
   await (await firestore()).collection(CACHE).doc(doc.shortcode).set(doc);
 }
+
+/* Pending changes, grouped per job and written in batches (keeps Firebase writes low). */
+function makePending() { return new Map(); }
+function addPending(pending, sc, entry) {
+  if (!pending.has(sc)) pending.set(sc, new Map());
+  const m = pending.get(sc); m.set(entry.id, { ...(m.get(entry.id) || {}), ...entry });
+}
+async function flushPending(pending, jobsMeta) {
+  if (!pending.size) return new Set();
+  const db = await firestore();
+  const touched = new Set();
+  for (const [sc, updates] of pending) {
+    const snap = await db.collection(CACHE).doc(sc).get();
+    const meta = jobsMeta[sc] || {};
+    const doc = snap.exists ? snap.data() : { shortcode: sc, title: meta.title || "", client: meta.client || "", state: meta.state || "", jobUpdated: meta.jobUpdated || "", cands: [] };
+    if (!doc.client && meta.client) Object.assign(doc, meta);
+    const list = new Map((doc.cands || []).map((e) => [e.id, e]));
+    for (const [id, upd] of updates) {
+      const old = list.get(id) || {};
+      const merged = { ...old, ...upd };
+      if (!upd.mv?.length && old.mv?.length) merged.mv = old.mv;      // a stage-only refresh keeps the known history
+      if (!upd.cm?.length && old.cm?.length) merged.cm = old.cm;
+      list.set(id, merged);
+    }
+    doc.cands = [...list.values()];
+    if (doc.client) { await saveJobCache(doc); touched.add(doc.client); }
+  }
+  pending.clear();
+  return touched;
+}
+/* The job list (title + client per job) lives in sync_cache_meta/jobs_0, jobs_1… (2,000 jobs each). */
+async function saveJobsMeta(map) {
+  const db = await firestore();
+  const entries = Object.entries(map);
+  let i = 0;
+  for (; i * 2000 < entries.length; i++) await db.collection("sync_cache_meta").doc(`jobs_${i}`).set({ jobs: Object.fromEntries(entries.slice(i * 2000, (i + 1) * 2000)) });
+  await saveState({ jobsChunks: i });
+}
+async function loadJobsMeta() {
+  const db = await firestore();
+  const st = await loadState();
+  const out = {};
+  for (let i = 0; i < (st.jobsChunks || 0); i++) { const s = await db.collection("sync_cache_meta").doc(`jobs_${i}`).get(); if (s.exists) Object.assign(out, s.data().jobs || {}); }
+  return out;
+}
+const jobMetaCompact = (j) => { const m = jobMeta(j); return { title: m.title, client: m.client, state: m.state, jobUpdated: m.jobUpdated }; };
 
 /* ---------- Build each client's page from the remembered jobs ---------- */
 function buildClient(name, jobDocs) {
@@ -425,35 +460,71 @@ async function rebuildClients(which, state) {
 async function firstLoad(state) {
   RUN_KIND = "first load (resumable)";
   PACE_MS = Math.max(PACE_MS, FULL_PACE_MS);
-  let full = !RESTART && state.full?.pending ? state.full : null;
+  let full = !RESTART && state.full?.phase ? state.full : null;
+  const save = async () => saveState({ full: { ...full, jobs: null } });   // the job list is kept in its own records
   if (!full) {
-    const startedAt = new Date().toISOString();
-    const jobs = await listJobsInWindow();
-    full = { startedAt, total: jobs.length, done: 0, pending: jobs.map((j) => j.shortcode), jobs: Object.fromEntries(jobs.map((j) => [j.shortcode, jobMeta(j)])) };
+    full = { phase: "jobs", startedAt: new Date().toISOString(), next: null, queue: [], qDone: 0, qTotal: 0, cands: 0, pages: 0, jobs: {} };
     Object.assign(state, { mode: "full", full, cursor: null, hashes: RESTART ? {} : state.hashes || {} });
-    await saveState({ mode: "full", full, cursor: null });
-    console.log(`First load started: ${jobs.length} jobs to read (published, plus closed or archived in the last ${CFG.lookbackDays || 365} days).`);
-  } else console.log(`Resuming the first load: ${full.done} of ${full.total} jobs already done.`);
+    await saveState({ mode: "full", full: { ...full, jobs: null }, cursor: null });
+    console.log(`First load started (last ${CFG.lookbackDays || 365} days).`);
+  } else {
+    full.jobs = await loadJobsMeta();
+    console.log(`Resuming the first load at "${full.phase}" (${full.cands} candidates read, history ${full.qDone} of ${full.qTotal}).`);
+  }
+  const pending = makePending();
   try {
-    while (full.pending.length) {
-      const sc = full.pending[0];
-      const meta = full.jobs[sc] || { shortcode: sc };
-      if (meta.client) await saveJobCache({ ...meta, cands: await fetchJobEntries(sc) });
-      else console.log(`  skip ${nm(meta.title, "job")} (no client match)`);
-      full.pending.shift(); full.done++;
-      if (full.done % 5 === 0) await saveState({ full });
-      console.log(`  ✓ ${full.done}/${full.total} ${nm(meta.title, "job")} → ${nm(meta.client || "-", "client")}`);
+    if (full.phase === "jobs") {
+      const jobs = await listAllJobs();
+      full.jobs = Object.fromEntries(jobs.map((j) => [j.shortcode, jobMetaCompact(j)]).filter(([, m]) => m.client));
+      await saveJobsMeta(full.jobs);
+      full.phase = "candidates";
+      full.next = `/candidates?updated_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
+      await save();
+      console.log(`  Jobs: ${jobs.length} in Workable, ${Object.keys(full.jobs).length} belong to clients.`);
+    }
+    if (full.phase === "candidates") {
+      while (full.next) {
+        const data = await api(full.next);
+        for (const c of data?.candidates || []) {
+          const sc = c.job?.shortcode;
+          if (!sc || !full.jobs[sc]) continue;
+          full.cands++;
+          addPending(pending, sc, basicEntry(c));
+          if (needsHistory(c)) full.queue.push([String(c.id), sc]);
+        }
+        full.next = data?.paging?.next || null; full.pages++;
+        if (full.pages % 40 === 0) { await flushPending(pending, full.jobs); await save(); console.log(`  … ${full.cands} candidates read, ${full.queue.length} need their history`); }
+      }
+      await flushPending(pending, full.jobs);
+      full.phase = "history"; full.qTotal = full.queue.length; full.qDone = 0;
+      await save();
+      console.log(`  Candidates: ${full.cands} in the window; ${full.qTotal} need their history (submitted or recently screened).`);
+    }
+    if (full.phase === "history") {
+      while (full.queue.length) {
+        const [id, sc] = full.queue[0];
+        const acts = await historyFor(id);
+        const e = compactCandidate({ id, stage: "" }, acts);
+        addPending(pending, sc, { id, mv: e.mv, cm: e.cm });
+        full.queue.shift(); full.qDone++;
+        if (full.qDone % 150 === 0) { await flushPending(pending, full.jobs); await save(); console.log(`  … history ${full.qDone} of ${full.qTotal}`); }
+      }
+      await flushPending(pending, full.jobs);
     }
   } finally {
-    await saveState({ full });   // keep progress even if the run stops early
-    await setStatus({ running: false, mode: "first-load", firstLoad: { done: full.done, total: full.total }, lastRunAt: new Date().toISOString(), apiCalls: calls });
+    // Save the last batch, then record progress. If saving fails, progress is NOT recorded,
+    // so the next run re-reads that batch instead of skipping it.
+    let saved = true;
+    try { await flushPending(pending, full.jobs); } catch (e) { saved = false; console.error("Could not save the last batch (it will be read again next run):", e.message); }
+    if (saved) await saveState({ full: { ...full, jobs: null } });
+    await setStatus({ running: false, mode: "first-load", firstLoad: { phase: full.phase, candidates: full.cands, done: full.qDone, total: full.qTotal || full.queue.length }, lastRunAt: new Date().toISOString(), apiCalls: calls });
   }
-  // finished: switch to change-only runs, starting from when the first load began (10 minutes overlap for safety)
+  // finished: change-only runs from now on, starting from when the first load began (10 minutes overlap)
   state.cursor = new Date(new Date(full.startedAt).getTime() - 10 * 60e3).toISOString();
   state.mode = "incremental"; state.full = null;
   await rebuildClients("all", state);
   await saveState({ mode: "incremental", cursor: state.cursor, full: null, hashes: state.hashes, parts: state.parts, counts: state.counts, lastRebuildDay: state.lastRebuildDay });
-  console.log(`\n✔ First load complete: ${full.total} jobs. From now on, runs only fetch what changed.`);
+  console.log(`\n✔ First load complete. From now on, runs only fetch what changed.`);
 }
 
 async function changesOnly(state) {
@@ -462,31 +533,32 @@ async function changesOnly(state) {
   const after = encodeURIComponent(new Date(new Date(state.cursor).getTime() - 10 * 60e3).toISOString());
   const changedCands = await all(`/candidates?updated_after=${after}&limit=100`, "candidates", 50);
   const changedJobs = await all(`/jobs?updated_after=${after}&limit=100`, "jobs", 10);
-  const byJob = new Map();
-  for (const c of changedCands) { const sc = c.job?.shortcode; if (!sc) continue; if (!byJob.has(sc)) byJob.set(sc, []); byJob.get(sc).push(c); }
-  const jobUpd = new Map(changedJobs.filter((j) => j.shortcode).map((j) => [j.shortcode, j]));
   console.log(`Changes since last run: ${changedCands.length} candidates, ${changedJobs.length} jobs.`);
   const db = await firestore();
-  const touched = new Set();
-  for (const sc of new Set([...byJob.keys(), ...jobUpd.keys()])) {
-    const snap = await db.collection(CACHE).doc(sc).get();
-    let doc = snap.exists ? snap.data() : null;
-    let jobObj = jobUpd.get(sc);
-    if (!doc && !jobObj) jobObj = await api(`/jobs/${sc}`);
-    if (!doc && !jobObj) continue;
-    const before = doc?.client || "";
-    doc = { ...(doc || { cands: [] }), ...(jobObj ? jobMeta(jobObj) : {}) };
-    if (!doc.client) { if (before) touched.add(before); continue; }
-    const list = new Map((doc.cands || []).map((e) => [e.id, e]));
-    for (const cand of byJob.get(sc) || []) {
-      const acts = await all(`/candidates/${cand.id}/activities?limit=100`, "activities", 10);
-      list.set(String(cand.id), compactCandidate(cand, acts, list.get(String(cand.id))));
+  const metas = {};
+  for (const j of changedJobs) if (j.shortcode) metas[j.shortcode] = jobMetaCompact(j);
+  const pending = makePending();
+  let histories = 0;
+  for (const c of changedCands) {
+    const sc = c.job?.shortcode; if (!sc) continue;
+    if (!metas[sc]) {
+      const snap = await db.collection(CACHE).doc(sc).get();
+      if (snap.exists) { const d = snap.data(); metas[sc] = { title: d.title, client: d.client, state: d.state, jobUpdated: d.jobUpdated }; }
+      else { const j = await api(`/jobs/${sc}`); metas[sc] = j ? jobMetaCompact(j) : { client: "" }; }
     }
-    doc.cands = [...list.values()];
-    await addStartDates(doc.cands);
-    await saveJobCache(doc);
-    touched.add(doc.client); if (before && before !== doc.client) touched.add(before);
+    if (!metas[sc].client) continue;
+    const entry = basicEntry(c);
+    if (needsHistory(c)) { const e = compactCandidate(c, await historyFor(c.id)); entry.mv = e.mv; entry.cm = e.cm; histories++; }
+    addPending(pending, sc, entry);
   }
+  // job renames / department changes
+  for (const [sc, m] of Object.entries(metas)) if (!pending.has(sc) && changedJobs.some((j) => j.shortcode === sc)) {
+    const snap = await db.collection(CACHE).doc(sc).get();
+    if (snap.exists) { const d = snap.data(); const before = d.client; Object.assign(d, m); if (d.client) await saveJobCache(d); pending.set(sc, new Map()); if (before && before !== d.client) metas["__old_" + sc] = { client: before }; }
+  }
+  const touched = await flushPending(pending, metas);
+  for (const [k, m] of Object.entries(metas)) if (k.startsWith("__old_") && m.client) touched.add(m.client);
+  console.log(`  ${histories} candidates needed their history.`);
   const today = runStart.slice(0, 10);
   const daily = state.lastRebuildDay !== today;   // once a day: refresh every client (weeks roll over, old entries age out)
   if (daily) console.log("  Daily refresh of all clients (no Workable requests needed).");
@@ -497,13 +569,19 @@ async function changesOnly(state) {
 }
 
 async function oneClient(state) {
-  RUN_KIND = `one client`;
-  const jobs = (await listJobsInWindow()).filter((j) => lower(clientForJob(j)) === lower(ONLY));
-  console.log(`Refreshing only ${nm(`"${ONLY}"`, "client")} (${jobs.length} matching jobs), requested by ${REQUESTED_BY}`);
-  const db = await firestore();
+  RUN_KIND = "one client";
+  const jobs = (await listAllJobs()).filter((j) => lower(clientForJob(j)) === lower(ONLY));
+  console.log(`Refreshing only ${nm(`"${ONLY}"`, "client")} (${jobs.length} jobs), requested by ${REQUESTED_BY}`);
+  const metas = Object.fromEntries(jobs.map((j) => [j.shortcode, jobMetaCompact(j)]));
+  const pending = makePending();
   for (const j of jobs) {
-    const prev = await db.collection(CACHE).doc(j.shortcode).get();
-    await saveJobCache({ ...jobMeta(j), cands: await fetchJobEntries(j.shortcode, prev.exists ? prev.data().cands : []) });
+    const cands = (await all(`/candidates?shortcode=${j.shortcode}&limit=100`, "candidates", 60)).filter((x) => new Date(x.updated_at || x.created_at || 0).getTime() > since);
+    for (const c of cands) {
+      const entry = basicEntry(c);
+      if (needsHistory(c)) { const e = compactCandidate(c, await historyFor(c.id)); entry.mv = e.mv; entry.cm = e.cm; }
+      addPending(pending, j.shortcode, entry);
+    }
+    await flushPending(pending, metas);
   }
   const name = jobs[0] ? clientForJob(jobs[0]) : ONLY;
   await rebuildClients(new Set([name]), state);
@@ -511,30 +589,42 @@ async function oneClient(state) {
   return name;
 }
 
-/* Preview: reads like a real sync, keeps everything in memory, writes nothing. Stops cleanly at the safety cap. */
+/* Preview: reads the job list and the candidate list (no histories), saves nothing, and reports exactly how big
+   the first load will be. Stops cleanly at the safety cap. */
 async function preview() {
   RUN_KIND = "preview (nothing saved)";
-  const jobs = (await listJobsInWindow()).filter((j) => !ONLY || lower(clientForJob(j)) === lower(ONLY));
-  console.log(`Preview: ${jobs.length} jobs in the window${ONLY ? " for this client" : ""}.`);
-  const byClient = new Map();
-  let read = 0, stopped = "";
+  let stopped = "", pages = 0, cands = 0, queue = 0, jobCount = 0, clientJobs = {};
+  const perClient = new Map();
   try {
-    for (const j of jobs) {
-      const meta = jobMeta(j);
-      if (!meta.client) continue;
-      const cands = await fetchJobEntries(j.shortcode);
-      if (!byClient.has(meta.client)) byClient.set(meta.client, []);
-      byClient.get(meta.client).push({ ...meta, cands });
-      read++;
+    const jobs = await listAllJobs();
+    jobCount = jobs.length;
+    clientJobs = Object.fromEntries(jobs.map((j) => [j.shortcode, clientForJob(j)]).filter(([, c]) => c && (!ONLY || lower(c) === lower(ONLY))));
+    console.log(`Preview: ${jobs.length} jobs in Workable, ${Object.keys(clientJobs).length} belong to clients${ONLY ? " (this client)" : ""}.`);
+    let next = `/candidates?updated_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
+    while (next) {
+      const data = await api(next);
+      for (const c of data?.candidates || []) {
+        const client = clientJobs[c.job?.shortcode]; if (!client) continue;
+        cands++;
+        if (needsHistory(c)) queue++;
+        const r = RANK[stageType(c.stage || "")] || 0;
+        if (r >= RANK.submitted) { const p = perClient.get(client) || { submitted: 0, interview: 0, offer: 0, hired: 0 }; p.submitted++; if (r >= RANK.interview) p.interview++; if (r >= RANK.offer) p.offer++; if (r >= RANK.hired) p.hired++; perClient.set(client, p); }
+      }
+      next = data?.paging?.next || null; pages++;
     }
   } catch (e) { if (e instanceof SafeStop) stopped = e.message; else throw e; }
-  for (const [name, docs] of byClient) {
-    const c = buildClient(name, docs);
-    const counts = c.candidates.reduce((m, r) => (m[r.status] = (m[r.status] || 0) + 1, m), {});
-    console.log(`  ${nm(name, "client")}: ${c.candidates.length} submitted`, JSON.stringify(counts));
+  for (const [name, p] of [...perClient.entries()].sort((a, b) => b[1].submitted - a[1].submitted)) console.log(`  ${nm(name, "client")}: ${p.submitted} submitted, ${p.interview} interviewed, ${p.offer} offers, ${p.hired} hired (by current stage)`);
+  const jobPages = Math.ceil(jobCount / 100) + 3;
+  if (stopped) {
+    console.log(`\n■ Partial preview: read ${pages} pages (${cands} candidates) before the safety cap. ${stopped}`);
+    console.log(`So far ${queue} candidates would need their history. Raise the safety cap (for example 1500) to read the whole list and get an exact first-load size.`);
+  } else {
+    const total = jobPages + pages + queue;
+    console.log(`\nCandidates updated in the last ${CFG.lookbackDays || 365} days: ${cands} (${pages} pages).`);
+    console.log(`Candidates whose history is needed (submitted or recently screened): ${queue}.`);
+    console.log(`A full first load would need about ${total} requests (about ${Math.round(total * FULL_PACE_MS / 60000)} minutes at 1 request every ${FULL_PACE_MS / 1000} s). It can be spread over several runs.`);
   }
-  if (stopped) console.log(`\n■ Partial preview: read ${read} of ${jobs.length} jobs before stopping. ${stopped}`);
-  console.log(`\nPreview finished: ${calls} API calls, nothing written. A full first load would need roughly ${Math.round(calls / Math.max(read, 1) * jobs.length)} requests (about ${Math.round(calls / Math.max(read, 1) * jobs.length * FULL_PACE_MS / 60000)} minutes at the first-load pace).`);
+  console.log(`\nPreview finished: ${calls} API calls, nothing written.`);
 }
 
 async function sync() {
