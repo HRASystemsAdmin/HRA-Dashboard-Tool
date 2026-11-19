@@ -1,0 +1,68 @@
+# Copies Workable data into Firestore for the Client Pipeline tool. Setup: see WORKABLE-SETUP.md.
+#
+# TESTING MODE: this workflow only runs when you click "Run workflow" (Actions → Workable sync).
+# Nothing runs automatically. When you're happy with the results, turn on the schedule by
+# removing the "#" in front of the two schedule lines below (times are UTC, Monday to Friday).
+name: Workable sync
+
+on:
+  # schedule:
+  #   - cron: "*/30 11-23 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "inspect = list jobs and stage names only · preview = read, save nothing · sync = first load (resumes if stopped), then only changes · restart-full-load = start the first load over"
+        type: choice
+        options: [inspect, preview, sync, restart-full-load]
+        default: inspect
+      client:
+        description: "Only this client (exact name). Leave empty for all clients"
+        type: string
+        default: ""
+      max_requests:
+        description: "Safety cap per run. 400 for tests; up to 1500 for the first load (it resumes next run if it stops)"
+        type: string
+        default: "400"
+      show_names:
+        description: "Show job and client names in the log (the log is public in a public repo)"
+        type: boolean
+        default: false
+      requested_by:
+        description: "Who asked for this run (optional)"
+        type: string
+        default: ""
+
+# One run at a time. A new request while one is running waits instead of piling up.
+concurrency:
+  group: workable-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150   # the first load runs at 1 request every 5 seconds; 1500 requests take about 2 hours
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm install --prefix workable-sync --no-audit --no-fund --omit=dev --prefer-offline
+      - name: Run (gentle mode)
+        env:
+          WORKABLE_SUBDOMAIN: ${{ secrets.WORKABLE_SUBDOMAIN }}
+          WORKABLE_TOKEN: ${{ secrets.WORKABLE_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          WORKABLE_GENTLE: "1"
+          WORKABLE_MAX_REQUESTS: ${{ github.event.inputs.max_requests || '400' }}
+          SHOW_NAMES: ${{ github.event.inputs.show_names == 'true' && '1' || '0' }}
+          SYNC_CLIENT: ${{ github.event.inputs.client }}
+          SYNC_REQUESTED_BY: ${{ github.event.inputs.requested_by }}
+        run: >
+          node workable-sync/sync.mjs
+          ${{ github.event.inputs.mode == 'inspect' && '--inspect' || '' }}
+          ${{ github.event.inputs.mode == 'preview' && '--dry-run' || '' }}
+          ${{ github.event.inputs.mode == 'restart-full-load' && '--restart-full-load' || '' }}
