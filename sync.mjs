@@ -643,6 +643,7 @@ async function preview() {
         if (r >= RANK.submitted) { const p = perClient.get(client) || { submitted: 0, interview: 0, offer: 0, hired: 0 }; p.submitted++; if (r >= RANK.interview) p.interview++; if (r >= RANK.offer) p.offer++; if (r >= RANK.hired) p.hired++; perClient.set(client, p); }
       }
       next = data?.paging?.next || null; pages++;
+      if (pages % 50 === 0) console.log(`  … ${pages} pages read (${cands} candidates so far, ${Math.round((Date.now() - runStarted) / 60000)} min)`);
     }
   } catch (e) { if (e instanceof SafeStop) stopped = e.message; else throw e; }
   if (SUGGEST && !stopped) {
