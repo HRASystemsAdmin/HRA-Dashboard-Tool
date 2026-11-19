@@ -66,4 +66,4 @@ jobs:
           ${{ github.event.inputs.mode == 'inspect' && '--inspect' || '' }}
           ${{ github.event.inputs.mode == 'preview' && '--dry-run' || '' }}
           ${{ github.event.inputs.mode == 'restart-full-load' && '--restart-full-load' || '' }}
-          ${{ github.event.inputs.mode ==
+          ${{ github.event.inputs.mode == 'suggest-account-managers' && '--suggest-ams' || '' }}
