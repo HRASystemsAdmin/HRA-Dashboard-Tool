@@ -28,14 +28,15 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INSPECT = process.argv.includes("--inspect");
-const RESTART = process.argv.includes("--restart-full-load");   // forget progress and start the first load over
-const DRY = process.argv.includes("--dry-run");   // build everything, print a summary, write nothing
+const RESTART = process.argv.includes("--restart-full-load");
+const SUGGEST = process.argv.includes("--suggest-ams");          // preview + suggested account manager per client   // forget progress and start the first load over
+const DRY = process.argv.includes("--dry-run") || process.argv.includes("--suggest-ams");   // build everything, print a summary, write nothing
 const ONLY = (process.env.SYNC_CLIENT || "").trim();          // refresh a single client (from the Refresh button)
 const REQUESTED_BY = (process.env.SYNC_REQUESTED_BY || "").trim() || "schedule";
 // Safety settings (see WORKABLE-SETUP.md → "Testing safely")
 const GENTLE = (process.env.WORKABLE_GENTLE ?? "1") !== "0";          // 1 request every 3 seconds, stop on any slow-down
 const MAX_CALLS = Number(process.env.WORKABLE_MAX_REQUESTS || (GENTLE ? 400 : 0)) || 0;  // hard cap per run (0 = none)
-const SHOW_NAMES = process.env.SHOW_NAMES === "1" || process.argv.includes("--inspect"); // public logs: hide job/client names unless asked
+const SHOW_NAMES = process.env.SHOW_NAMES === "1" || process.argv.includes("--inspect") || process.argv.includes("--suggest-ams"); // public logs: hide job/client names unless asked
 
 /* ---------- config (shared with the web page) ---------- */
 const sandbox = { window: {} };
@@ -589,12 +590,42 @@ async function oneClient(state) {
   return name;
 }
 
+/* Suggested account managers: for each client, the people who moved its most recent submitted candidates
+   to "Submitted to Hiring Manager". Usually that's the account manager; it's a suggestion to confirm. */
+async function suggestAccountManagers(sample) {
+  const per = Number(process.env.SUGGEST_SAMPLE) || 3;
+  const byPerson = new Map(), unclear = [];
+  console.log(`\nChecking who submits candidates (${per} most recent per client)…`);
+  for (const [client, list] of [...sample.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const recent = list.sort((a, b) => String(b.u).localeCompare(String(a.u))).slice(0, per);
+    const tally = new Map();
+    for (const c of recent) {
+      const acts = await historyFor(c.id);
+      const mv = acts.filter((a) => a.stage_name && stageType(a.stage_name) === "submitted").sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+      const who = mv?.member?.name; if (who) tally.set(who, (tally.get(who) || 0) + 1);
+    }
+    const ranked = [...tally.entries()].sort((a, b) => b[1] - a[1]);
+    const seen = ranked.reduce((t, [, n]) => t + n, 0);
+    if (ranked.length && ranked[0][1] / seen >= 0.6) { const [who, n] = ranked[0]; if (!byPerson.has(who)) byPerson.set(who, []); byPerson.get(who).push(`${client} (${n}/${seen})`); }
+    else unclear.push(`${client}${ranked.length ? ": " + ranked.map(([w, n]) => `${w} ${n}`).join(", ") : ": no submitter found"}`);
+  }
+  console.log("\nSuggested account managers (who moved recent candidates to a 'submitted' stage):");
+  for (const [who, clients] of [...byPerson.entries()].sort((a, b) => b[1].length - a[1].length)) console.log(`  ${who}: ${clients.join(", ")}`);
+  if (unclear.length) { console.log("  Not clear, please decide:"); unclear.forEach((u) => console.log(`    ${u}`)); }
+  console.log("\nReady for config.js → workable.accountManagers (add each email, then check the lists):");
+  console.log("accountManagers: [");
+  for (const [who, clients] of byPerson) console.log(`  { name: ${JSON.stringify(who)}, email: "", clients: ${JSON.stringify(clients.map((c) => c.replace(/ \(\d+\/\d+\)$/, "")))} },`);
+  console.log("],");
+  console.log("\nThis log shows client and team names: delete it after copying (Actions → this run → ⋯ → Delete all logs).");
+}
+
 /* Preview: reads the job list and the candidate list (no histories), saves nothing, and reports exactly how big
    the first load will be. Stops cleanly at the safety cap. */
 async function preview() {
   RUN_KIND = "preview (nothing saved)";
   let stopped = "", pages = 0, cands = 0, queue = 0, jobCount = 0, clientJobs = {};
-  const perClient = new Map();
+  const perClient = new Map(), sample = new Map();
+  if (SUGGEST) RUN_KIND = "suggest account managers (nothing saved)";
   try {
     const jobs = await listAllJobs();
     jobCount = jobs.length;
@@ -608,11 +639,15 @@ async function preview() {
         cands++;
         if (needsHistory(c)) queue++;
         const r = RANK[stageType(c.stage || "")] || 0;
+        if (SUGGEST && r >= RANK.submitted) { const list = sample.get(client) || []; list.push({ id: String(c.id), u: c.updated_at || c.created_at || "" }); sample.set(client, list); }
         if (r >= RANK.submitted) { const p = perClient.get(client) || { submitted: 0, interview: 0, offer: 0, hired: 0 }; p.submitted++; if (r >= RANK.interview) p.interview++; if (r >= RANK.offer) p.offer++; if (r >= RANK.hired) p.hired++; perClient.set(client, p); }
       }
       next = data?.paging?.next || null; pages++;
     }
   } catch (e) { if (e instanceof SafeStop) stopped = e.message; else throw e; }
+  if (SUGGEST && !stopped) {
+    try { await suggestAccountManagers(sample); } catch (e) { if (e instanceof SafeStop) stopped = e.message; else throw e; }
+  }
   for (const [name, p] of [...perClient.entries()].sort((a, b) => b[1].submitted - a[1].submitted)) console.log(`  ${nm(name, "client")}: ${p.submitted} submitted, ${p.interview} interviewed, ${p.offer} offers, ${p.hired} hired (by current stage)`);
   const jobPages = Math.ceil(jobCount / 100) + 3;
   if (stopped) {
