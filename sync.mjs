@@ -72,7 +72,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
    of retrying, so it never competes with other apps. */
 let PACE_MS = Number(process.env.WORKABLE_PACE_MS) || (GENTLE ? 3000 : 1100);   // override only for local testing
 const FULL_PACE_MS = Number(process.env.WORKABLE_FULL_PACE_MS || 5000);   // first load: even gentler (about 20% of Workable's limit)
-let last = 0, calls = 0, minRemaining = Infinity, slowDowns = 0;
+let last = 0, calls = 0, minRemaining = Infinity, slowDowns = 0, rateLimit = 0;
 const runStarted = Date.now();
 class SafeStop extends Error {}
 async function api(urlOrPath) {
@@ -86,6 +86,8 @@ async function api(urlOrPath) {
     const remaining = Number(res.headers?.get?.("x-rate-limit-remaining"));
     const reset = Number(res.headers?.get?.("x-rate-limit-reset"));
     if (Number.isFinite(remaining)) minRemaining = Math.min(minRemaining, remaining);
+    const lim = Number(res.headers?.get?.("x-rate-limit-limit"));
+    if (Number.isFinite(lim) && lim > 0) rateLimit = lim;
     if (Number.isFinite(remaining) && remaining <= (GENTLE ? 4 : 0) && reset) {
       const resetMs = reset > 1e12 ? reset : reset * 1000;   // header may be seconds or milliseconds
       const until = resetMs - Date.now();
@@ -111,7 +113,7 @@ function safetyReport() {
   console.log(`Mode: ${GENTLE ? `gentle (1 request every ${PACE_MS / 1000} s, stops on any slow-down)` : "normal"}${RUN_KIND ? ` · ${RUN_KIND}` : ""}`);
   console.log(`Workable requests used: ${calls}${MAX_CALLS ? ` (cap ${MAX_CALLS})` : ""}`);
   console.log(`Time taken: ${Math.floor(secs / 60)} min ${secs % 60} s`);
-  console.log(`Lowest "requests left" Workable reported: ${Number.isFinite(minRemaining) ? `${minRemaining} of 10` : "not reported"}`);
+  console.log(`Lowest "requests left" Workable reported: ${Number.isFinite(minRemaining) ? `${minRemaining}${rateLimit ? ` of ${rateLimit} (per 10 seconds)` : ""}` : "not reported"}`);
   console.log(`Slow-down responses from Workable: ${slowDowns}`);
   console.log("Changes made in Workable: none (the token is read-only)");
   console.log("───────────────────────────────\n");
@@ -142,6 +144,8 @@ const hasWord = (text, words) => { const t = lower(text); return (words || []).s
 const deptOf = (job) => typeof job.department === "string" ? job.department : (job.department?.name || (Array.isArray(job.department_hierarchy) ? job.department_hierarchy.at(-1)?.name : "") || "");
 
 function clientForJob(job) {
+  // Departments to leave out of the Client Pipeline entirely (for example HRA's own internal hiring).
+  if ((CFG.ignoreDepartments || []).some((d) => lower(d) === lower(deptOf(job)))) return null;
   const overrides = CFG.clients || {};
   for (const [name, c] of Object.entries(overrides)) {
     if (c.shortcodes?.includes(job.shortcode)) return name;

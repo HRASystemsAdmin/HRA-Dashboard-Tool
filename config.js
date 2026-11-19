@@ -242,6 +242,8 @@ window.HRA_CONFIG = {
     //   "department"  the job's Department in Workable is the client name (default)
     //   "title"       the client name is in the job title, e.g. "Plumber - Beyond Wow Plumbing"
     clientFrom: "department",
+    // Workable departments that are not clients (internal HRA hiring). Their jobs are skipped.
+    ignoreDepartments: ["Hunter Recruitment Advisors"],
 
     // Optional extra details shown in each client's title bar, and manual overrides
     // when a client's jobs don't follow the rule above.
@@ -253,11 +255,14 @@ window.HRA_CONFIG = {
     // Your Workable pipeline stage names (not case sensitive). A candidate shows in
     // the table once they reach any "submitted" stage or later.
     stages: {
-      // From the Power BI funnel (HR Metrics). Inspect lists every stage name, so add any that are missing.
-      screen:    ["Submitted to AM", "Phone Screen", "Screening"],
+      // Your real Workable pipeline (confirmed by Inspect, Nov 2026), plus older names from the Power BI funnel
+      // so past history is still recognized. Stages not listed (Sourced, Applied, Jeanie In Screening,
+      // Candidate Hold, AI Opt Out...) don't move a candidate forward on their own.
+      screen:    ["Phone Screen Completed", "Jeanie Phone Screen Completed", "Submitted to AM", "Phone Screen", "Screening"],
       submitted: ["Submitted to Hiring Manager", "Submitted to Client", "Submitted"],
-      interview: ["HM Interview Requested", "Hiring Mgr Interview Scheduled", "Interview Scheduled", "In-Person Interview Scheduled", "Interview"],
-      offer:     ["Offer", "Offer Made", "Offer Prep/Made", "Offer Accepted"],
+      interview: ["HM Interview Requested", "Hiring Mgr Interview Scheduled", "Post Interview Follow-Up", "Assessment",
+                  "Interview Scheduled", "In-Person Interview Scheduled", "Interview"],
+      offer:     ["Offer Prep/Made", "Offer Accepted", "Offer", "Offer Made"],
       hired:     ["Hired"]
     },
 

@@ -45,10 +45,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150   # the first load runs at 1 request every 5 seconds; 1500 requests take about 2 hours
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
       - name: Install
         run: npm install --prefix workable-sync --no-audit --no-fund --omit=dev --prefer-offline
       - name: Run (gentle mode)
