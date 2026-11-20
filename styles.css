@@ -3023,6 +3023,15 @@ body.in-course .tp-nav { margin-right: 86px; }
 .pl-top:hover { background: var(--navy); color: #fff; }
 @media (max-width: 760px) { .pl-scroll-box .pl-table-wrap.pl-scroll { max-height: 70vh; } .pl-top { right: 14px; bottom: 12px; } }
 
+/* Insights: Sync now */
+.in-syncnow { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; font: inherit; font-size: 13px; font-weight: 700; color: var(--navy); transition: border-color .15s, background .15s, color .15s, transform .25s var(--ease-spring); }
+.in-syncnow:hover { border-color: var(--navy); background: var(--navy); color: #fff; }
+.in-syncnow:active { transform: scale(.96); }
+.in-syncnow svg { transition: transform .45s var(--ease-out); }
+.in-syncnow:hover svg { transform: rotate(180deg); }
+.in-syncnow.is-loading { pointer-events: none; opacity: .8; }
+.in-syncnow.is-loading svg { animation: rot .8s linear infinite; }
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }

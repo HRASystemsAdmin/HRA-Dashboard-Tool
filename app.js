@@ -277,7 +277,11 @@ async function createFirebaseStore() {
   ]);
   const app = appMod.initializeApp(CFG.firebase);
   const auth = authMod.getAuth(app);
-  const db = fsMod.getFirestore(app);
+  // Offline persistence: the browser keeps a local copy, so reloads/returns within 30 minutes only pay for
+  // documents that changed (Firestore billing). Shared across tabs. Falls back to normal mode if unavailable.
+  let db;
+  try { db = fsMod.initializeFirestore(app, { localCache: fsMod.persistentLocalCache({ tabManager: fsMod.persistentMultipleTabManager() }) }); }
+  catch (e) { console.warn("Offline persistence unavailable, using normal mode", e); db = fsMod.getFirestore(app); }
   const col = fsMod.collection(db, "tickets");
 
   return {
@@ -286,7 +290,12 @@ async function createFirebaseStore() {
       authMod.onAuthStateChanged(auth, (u) => cb(u ? { uid: u.uid, email: lower(u.email), name: u.displayName || nameFromEmail(u.email) } : null));
     },
     signIn: (email, pw) => authMod.signInWithEmailAndPassword(auth, email, pw),
-    signOut: () => authMod.signOut(auth),
+    // Sign out also erases the local copy of the data from this browser (it contains candidate information).
+    signOut: async () => {
+      await authMod.signOut(auth);
+      try { await fsMod.terminate(db); await fsMod.clearIndexedDbPersistence(db); } catch (e) { console.warn("Local cache not cleared (another tab may be open)", e); }
+      location.reload();
+    },
     reset: (email) => authMod.sendPasswordResetEmail(auth, email),
     async create(t) {
       const r = await fsMod.addDoc(col, { ...t, createdAt: fsMod.serverTimestamp(), updatedAt: fsMod.serverTimestamp() });
@@ -364,6 +373,10 @@ async function createFirebaseStore() {
     },
     setPrefs(uid, data) {
       return fsMod.setDoc(fsMod.doc(db, "user_prefs", uid), data, { merge: true });
+    },
+    async getPipelineOnce() {
+      const [cs, ms] = await Promise.all([fsMod.getDocs(fsMod.collection(db, "workable_clients")), fsMod.getDoc(fsMod.doc(db, "workable_meta", "status"))]);
+      return { clients: mergeClientParts(cs.docs.map((d) => ({ id: d.id, ...d.data() }))), meta: ms.exists() ? ms.data() : null };
     },
     watchPipeline(cb) {
       let clients = [], meta = null;
@@ -1787,6 +1800,7 @@ function bind() {
     const trT = t.closest("[data-tr-trainee]"); if (trT) { renderTraineeDrawer(trT.dataset.trTrainee); openOverlay($("#tr-drawer")); return; }
     const trdS = t.closest("[data-trd-send]"); if (trdS) { sendManagerNote(trdS.dataset.trdSend); return; }
     if (t.closest("[data-rail-toggle]")) { toggleRail(); return; }
+    const inSync = t.closest("[data-in-sync]"); if (inSync) { if (!IN.loading) loadInsightsData(inSync); return; }
     if (t.closest("[data-pl-top]")) { t.closest(".pl-scroll-box")?.querySelector("[data-pl-scroll]")?.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" }); return; }
     const suM = t.closest("[data-su-mode]"); if (suM) { const [id, mode] = suM.dataset.suMode.split(":"); if (toolMode(id) !== mode) setToolMode(id, mode, suM); return; }
     const suE = t.closest("[data-su-erase]"); if (suE) { eraseArchived(suE); return; }
@@ -2454,6 +2468,7 @@ function setTool(id, silent) {
   });
   $(".topbar").classList.toggle("is-tool-pipeline", id !== "requests");
   moveRailGlow();
+  if (id !== "pipeline" && PL.unsub) pausePipeline();
   if (id === "pipeline") startPipeline();
   if (id === "insights") { IN.animate = true; startInsights(); }
   if (id === "training") { renderTraining(); } else { document.body.classList.remove("in-course"); stopTeamWatch(); }
@@ -2611,8 +2626,15 @@ function startPipeline() {
   PL.timer = setInterval(renderSync, 30e3);
 }
 
+/* Leaving Client Pipeline: drop the live connection (data stays on screen for Insights/helper).
+   Coming back within 30 minutes only costs the documents that changed, thanks to offline persistence. */
+function pausePipeline() {
+  PL.unsub?.(); PL.unsub = null; PL.started = false;
+  clearInterval(PL.timer);
+}
+
 function stopPipeline() {
-  Object.assign(IN, { am: "", client: "", recruiter: "", showAll: false, animate: true, data: null, pop: null, removed: defaultRemoved() });
+  Object.assign(IN, { am: "", client: "", recruiter: "", showAll: false, animate: true, data: null, pop: null, removed: defaultRemoved(), loadedAt: null, loading: false });
   insightsLayoutLoaded = false;
   PL.unsub?.(); PL.unsub = null; clearInterval(PL.timer);
   Object.assign(PL, { pop: null, cols: null, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "" });
@@ -3349,7 +3371,31 @@ function seriesFor(rows, buckets) {
 const fmtMetric = (v, fmt) => v == null ? "–" : fmt === "pct" ? `${Math.round(v * 100)}%` : fmt === "days" ? `${Math.round(v)}` : String(Math.round(v));
 
 let insightsLayoutLoaded = false;
-function startInsights() { startPipeline(); if (!insightsLayoutLoaded) { insightsLayoutLoaded = true; loadInsightsLayout(); } renderInsights(); }
+function startInsights() {
+  // Insights reads the pipeline data once (no live connection) unless Client Pipeline is already live in this session.
+  if (!PL.started && !IN.loadedAt) loadInsightsData();
+  if (!insightsLayoutLoaded) { insightsLayoutLoaded = true; loadInsightsLayout(); }
+  renderInsights();
+}
+async function loadInsightsData(btn) {
+  const demo = state.store.demo || Boolean(WK.testData);
+  if (PL.started || demo) {                       // live or demo data is already current: just recalculate
+    if (!PL.started) startPipeline();
+    IN.loadedAt = new Date().toISOString(); IN.animate = true;
+    if (btn) { await new Promise((r) => setTimeout(r, 450)); toast("Insights is up to date", "var(--s-done)"); }
+    renderInsights(); return;
+  }
+  IN.loading = true; btn?.classList.add("is-loading"); renderInsights();
+  try {
+    const { clients, meta } = await state.store.getPipelineOnce();
+    PL.store = "firebase";
+    IN.loadedAt = new Date().toISOString(); IN.animate = true;
+    onPipelineData(clients, meta);
+    if (btn) toast("Insights updated with the latest data", "var(--s-done)");
+  } catch (e) {
+    console.error(e); toast("Couldn't load the latest data. Check your connection and try again.", "#E2632B");
+  } finally { IN.loading = false; btn?.classList.remove("is-loading"); renderInsights(); }
+}
 
 function onInsightsSelect(key, value) {
   if (key === "export") { exportInsights(value); return; }
@@ -3458,6 +3504,7 @@ function renderInsights() {
       </div>
       <div class="in-hero-actions">
         <span class="sync-chip in-asof"><i></i><span>${PL.meta?.test ? "Test data" : PL.meta?.demo ? "Demo data" : "Data"} as of ${esc(ago(freshness() || new Date().toISOString()))}</span></span>
+        <button type="button" class="in-syncnow${IN.loading ? " is-loading" : ""}" data-in-sync title="Load the latest Client Pipeline data into Insights"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-13.7 5.7M4 12a8 8 0 0 1 13.7-5.7"/><path d="M18 3v4h-4M6 21v-4h4"/></svg><span>${IN.loading ? "Syncing…" : "Sync now"}</span></button>
         ${ddHTML("in-export", { value: "", align: "right", primary: true, triggerText: "Export to Excel", triggerIcon: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/></svg>', options: [
           { value: "view", label: "This view", sub: "The period and filters selected now" },
           { value: "archive", label: "Full archive", sub: "All time, every client, every candidate" }
