@@ -1787,6 +1787,7 @@ function bind() {
     const trT = t.closest("[data-tr-trainee]"); if (trT) { renderTraineeDrawer(trT.dataset.trTrainee); openOverlay($("#tr-drawer")); return; }
     const trdS = t.closest("[data-trd-send]"); if (trdS) { sendManagerNote(trdS.dataset.trdSend); return; }
     if (t.closest("[data-rail-toggle]")) { toggleRail(); return; }
+    if (t.closest("[data-pl-top]")) { t.closest(".pl-scroll-box")?.querySelector("[data-pl-scroll]")?.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" }); return; }
     const suM = t.closest("[data-su-mode]"); if (suM) { const [id, mode] = suM.dataset.suMode.split(":"); if (toolMode(id) !== mode) setToolMode(id, mode, suM); return; }
     const suE = t.closest("[data-su-erase]"); if (suE) { eraseArchived(suE); return; }
     if (t.closest("[data-range-clear]")) { PL.range = { preset: "all", from: "", to: "" }; saveRange(); PL.animate = true; renderPipeline(); return; }
@@ -2622,7 +2623,11 @@ function onPipelineData(clients, meta) {
   PL.clients = clients || [];
   PL.meta = meta || null;
   PL.ams = buildAms();
-  if (!PL.am || !PL.ams.some((a) => a.name === PL.am)) PL.am = (PL.ams.find((a) => a.isMe) || PL.ams[0])?.name || null;
+  if (!PL.am || !PL.ams.some((a) => a.name === PL.am)) {
+    // open on: me → an account manager with synced clients (or "Unassigned" if that's where the data is) → the first one
+    const hasData = (a) => (a.clients || []).some((n) => PL.clients.some((c) => sameName(c.name, n) && (c.candidates || []).length));
+    PL.am = (PL.ams.find((a) => a.isMe && hasData(a)) || PL.ams.find(hasData) || PL.ams.find((a) => a.isMe) || PL.ams[0])?.name || null;
+  }
   renderPipeline();
   if (currentTool === "insights") renderInsights();
 }
@@ -2635,7 +2640,7 @@ function amClients() {
 
 const clientDoc = (name) => PL.clients.find((c) => sameName(c.name, name));
 function freshness() {
-  const times = [PL.meta?.lastSync, clientDoc(PL.client)?.updatedAt].filter(Boolean).map((t) => new Date(t).getTime());
+  const times = [PL.meta?.lastSync, PL.meta?.lastClientSync?.at, clientDoc(PL.client)?.updatedAt].filter(Boolean).map((t) => new Date(t).getTime());
   return times.length ? new Date(Math.max(...times)).toISOString() : null;
 }
 
@@ -2660,7 +2665,10 @@ function renderSync() {
   }
   if (m?.error === "permission-denied") { el.classList.add("is-bad"); $("span", el).textContent = "No access to Workable data"; return; }
   if (m?.mode === "first-load" && m.firstLoad?.total) { el.classList.add("is-wait"); $("span", el).textContent = `First load in progress: ${m.firstLoad.done} of ${m.firstLoad.total} jobs`; return; }
-  if (!m || !m.lastSync) { el.classList.add("is-wait"); $("span", el).textContent = PL.store === "demo" ? "Demo data" : "Waiting for first sync"; return; }
+  if (!m || !m.lastSync) {
+    if (m && PL.clients.length) { $("span", el).textContent = `${PL.clients.length} client${PL.clients.length === 1 ? "" : "s"} loaded, full sync pending`; el.title = "Some clients were refreshed one at a time; the first full load hasn't run yet."; return; }
+    el.classList.add("is-wait"); $("span", el).textContent = PL.store === "demo" ? "Demo data" : "Waiting for first sync"; return;
+  }
   if (m.ok === false) { el.classList.add("is-bad"); $("span", el).textContent = `Last sync failed, showing ${ago(m.lastSync)} data`; el.title = m.message || ""; return; }
   const mins = (Date.now() - new Date(m.lastSync)) / 60e3;
   if (mins > (WK.syncEveryMinutes || 30) * 6) el.classList.add("is-wait");
@@ -2723,6 +2731,16 @@ function renderPipeline() {
   $("#pl-download").disabled = !list.length;
   renderSheet();
 }
+
+/* ---------- Candidate table inner scroll: fades + back-to-top ---------- */
+function plScrollState(el) {
+  const box = el?.closest(".pl-scroll-box"); if (!box) return;
+  const up = el.scrollTop > 4, down = el.scrollTop + el.clientHeight < el.scrollHeight - 4;
+  box.classList.toggle("can-up", up); box.classList.toggle("can-down", down); box.classList.toggle("show-top", el.scrollTop > 320);
+}
+document.addEventListener("scroll", (e) => { if (e.target?.matches?.("[data-pl-scroll]")) plScrollState(e.target); }, true);
+new MutationObserver(() => $$("[data-pl-scroll]").forEach(plScrollState)).observe(document.documentElement, { childList: true, subtree: true });
+window.addEventListener("resize", () => $$("[data-pl-scroll]").forEach(plScrollState));
 
 /* ---------- Date range ---------- */
 const RANGE_OPTS = [
@@ -2852,14 +2870,14 @@ function renderSheet() {
         ? `<div class="range-empty">${emptyBlock("No candidates in this date range", `Nobody was submitted to ${c.name} ${rangeLabel(rb).toLowerCase().startsWith("from") || rangeLabel(rb).toLowerCase().startsWith("until") ? rangeLabel(rb).toLowerCase() : "between " + rangeLabel(rb)}.`)}<button type="button" class="btn btn-ghost" data-range-clear>Show all dates</button></div>`
         : c.empty || !rows.length
         ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
-        : `<div class="pl-table-wrap"><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, cols.length * 92)}px">
+        : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, cols.length * 92)}px">
             <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
             <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col">${esc(col.label)}</th>`).join("")}</tr></thead>
             <tbody>${shown.length ? shown.map((r, i) => `
               <tr class="pl-row" data-status="${r.status}" style="--sw:#${PSTATUS[r.status]?.fill || "FFFFFF"};--bar:${PSTATUS[r.status]?.bar || "#A3B1C6"};--i:${Math.min(i, 18)}" title="${esc(PSTATUS[r.status]?.label || "")}">
                 ${cols.map((col, ci) => cellHTML(r, col, ci === 0)).join("")}
               </tr>`).join("") : `<tr><td colspan="${cols.length}" class="pl-none">No candidates match. Clear the filters or search.</td></tr>`}
-            </tbody></table></div>`}
+            </tbody></table></div><button type="button" class="pl-top" data-pl-top aria-label="Back to the top of the list" title="Back to top"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>`}
       </div></div>
     </div>
 

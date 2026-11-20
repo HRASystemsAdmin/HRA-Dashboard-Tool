@@ -3006,6 +3006,23 @@ body.in-course .tp-nav { margin-right: 86px; }
   .su-tool { flex-wrap: wrap; } .su-seg { width: 100%; overflow-x: auto; } .su-seg button { flex: 1; }
 }
 
+/* Client Pipeline: candidate table scrolls inside its own box */
+.pl-scroll-box { position: relative; border-top: 1px solid var(--line); border-radius: 0 0 22px 22px; overflow: hidden; }
+.pl-scroll-box .pl-table-wrap.pl-scroll { border-top: 0; border-radius: 0; max-height: min(600px, 62vh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(0,55,127,.35) transparent; }
+.pl-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.pl-scroll::-webkit-scrollbar-track { background: transparent; }
+.pl-scroll::-webkit-scrollbar-thumb { border-radius: 999px; border: 3px solid transparent; background: linear-gradient(180deg, rgba(0,55,127,.45), rgba(45,107,255,.45)) padding-box; }
+.pl-scroll::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, var(--navy), #2D6BFF) padding-box; }
+.pl-scroll::-webkit-scrollbar-corner { background: transparent; }
+.pl-scroll-box::before, .pl-scroll-box::after { content: ""; position: absolute; left: 0; right: 10px; height: 34px; pointer-events: none; z-index: 4; opacity: 0; transition: opacity .2s; }
+.pl-scroll-box::before { top: 39px; background: linear-gradient(180deg, rgba(10,30,63,.10), transparent); }
+.pl-scroll-box::after { bottom: 0; background: linear-gradient(0deg, #fff 8%, rgba(255,255,255,0)); border-radius: 0 0 22px 22px; }
+.pl-scroll-box.can-up::before, .pl-scroll-box.can-down::after { opacity: 1; }
+.pl-top { position: absolute; right: 22px; bottom: 16px; z-index: 5; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line-strong); background: #fff; color: var(--navy); display: grid; place-items: center; box-shadow: 0 12px 26px -12px rgba(0,30,80,.55); opacity: 0; transform: translateY(10px) scale(.9); pointer-events: none; transition: opacity .2s, transform .3s var(--ease-spring), background .15s, color .15s; }
+.pl-scroll-box.show-top .pl-top { opacity: 1; transform: none; pointer-events: auto; }
+.pl-top:hover { background: var(--navy); color: #fff; }
+@media (max-width: 760px) { .pl-scroll-box .pl-table-wrap.pl-scroll { max-height: 70vh; } .pl-top { right: 14px; bottom: 12px; } }
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }
