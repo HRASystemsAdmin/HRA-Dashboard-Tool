@@ -32,7 +32,7 @@ const RESTART = process.argv.includes("--restart-full-load");
 const SUGGEST = process.argv.includes("--suggest-ams");          // preview + suggested account manager per client   // forget progress and start the first load over
 const DRY = process.argv.includes("--dry-run") || process.argv.includes("--suggest-ams");   // build everything, print a summary, write nothing
 const ONLY = (process.env.SYNC_CLIENT || "").trim();          // refresh a single client (from the Refresh button)
-const REQUESTED_BY = (process.env.SYNC_REQUESTED_BY || "").trim() || "schedule";
+const REQUESTED_BY = (process.env.SYNC_REQUESTED_BY || "").trim() || (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" ? "manual run" : "schedule");
 // Safety settings (see WORKABLE-SETUP.md → "Testing safely")
 const GENTLE = (process.env.WORKABLE_GENTLE ?? "1") !== "0";          // 1 request every 3 seconds, stop on any slow-down
 const MAX_CALLS = Number(process.env.WORKABLE_MAX_REQUESTS || (GENTLE ? 400 : 0)) || 0;  // hard cap per run (0 = none)
@@ -588,21 +588,33 @@ async function changesOnly(state) {
 async function oneClient(state) {
   RUN_KIND = "one client";
   const jobs = (await listAllJobs()).filter((j) => lower(clientForJob(j)) === lower(ONLY));
-  console.log(`Refreshing only ${nm(`"${ONLY}"`, "client")} (${jobs.length} jobs), requested by ${REQUESTED_BY}`);
+  console.log(`Refreshing only ${nm(`"${ONLY}"`, "client")} (${jobs.length} jobs), ${["manual run", "schedule"].includes(REQUESTED_BY) ? REQUESTED_BY : `requested by ${REQUESTED_BY}`}`);
+  if (!jobs.length) { console.log("No jobs found for that client. Check the name matches the Workable department exactly."); return ONLY; }
   const metas = Object.fromEntries(jobs.map((j) => [j.shortcode, jobMetaCompact(j)]));
+  const name = clientForJob(jobs[0]);
   const pending = makePending();
-  for (const j of jobs) {
-    const cands = (await all(`/candidates?shortcode=${j.shortcode}&limit=100`, "candidates", 60)).filter((x) => new Date(x.updated_at || x.created_at || 0).getTime() > since);
-    for (const c of cands) {
-      const entry = basicEntry(c);
-      if (needsHistory(c)) { const e = compactCandidate(c, await historyFor(c.id)); entry.mv = e.mv; entry.cm = e.cm; }
-      addPending(pending, j.shortcode, entry);
+  const after = encodeURIComponent(new Date(since).toISOString());
+  let done = 0, cands = 0, hist = 0;
+  try {
+    for (const j of jobs) {
+      // only candidates who applied within the window (old applicants on archived jobs cost nothing)
+      const list = await all(`/candidates?shortcode=${j.shortcode}&created_after=${after}&limit=100`, "candidates", 60);
+      for (const c of list) {
+        const entry = basicEntry(c); cands++;
+        if (needsHistory(c)) { const e = compactCandidate(c, await historyFor(c.id)); entry.mv = e.mv; entry.cm = e.cm; hist++; }
+        addPending(pending, j.shortcode, entry);
+      }
+      await flushPending(pending, metas);
+      done++;
     }
-    await flushPending(pending, metas);
+  } finally {
+    // Show whatever was read, even if the run stopped early.
+    try { await flushPending(pending, metas); } catch {}
+    console.log(`  ${done} of ${jobs.length} jobs read: ${cands} candidates, ${hist} histories.`);
+    await rebuildClients(new Set([name]), state);
+    await saveState({ hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {} });
+    if (done < jobs.length) console.log("  This client is only partly loaded. Run the same client again with a higher safety cap to finish it.");
   }
-  const name = jobs[0] ? clientForJob(jobs[0]) : ONLY;
-  await rebuildClients(new Set([name]), state);
-  await saveState({ hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {} });
   return name;
 }
 
@@ -703,7 +715,7 @@ async function sync() {
 (INSPECT ? inspect() : sync()).catch(async (e) => {
   if (e instanceof SafeStop) {
     console.log("\n■ " + e.message);
-    if (!INSPECT && !DRY) console.log("Progress is saved. The next run continues where this one stopped.");
+    if (!INSPECT && !DRY && !ONLY) console.log("Progress is saved. The next run continues where this one stopped.");
     try { if (!INSPECT && !DRY) await setStatus({ running: false, ok: true, message: "" }); } catch {}
     process.exitCode = 0; return;
   }
