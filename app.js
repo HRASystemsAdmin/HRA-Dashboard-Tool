@@ -5633,7 +5633,7 @@ async function runManage(kind, btn) {
 /* ==========================================================================
    Org chart (admins only). Imported from the employee list (Excel) into Firestore org/chart.
    ========================================================================== */
-const ORG = { data: null, unsub: null, started: false, collapsed: new Set(), sel: null, q: "", filter: "", zoom: 1, x: 0, y: 0, fitted: false };
+const ORG = { unassignedOpen: false, data: null, unsub: null, started: false, collapsed: new Set(), sel: null, q: "", zoom: 1, x: 0, y: 0, fitted: false, unOpen: (() => { try { return localStorage.getItem("hra_org_unassigned_open") === "1"; } catch { return false; } })() };
 const ORG_STATUS = {
   "FT EE": { label: "Full-time employee", color: "#00377F" },
   "USC": { label: "USC", color: "#0E9F7E" },
@@ -5713,7 +5713,7 @@ function orgAvatar(p, size = "") {
 function orgCard(n, T) {
   const team = T.teamSize(n), direct = n.kids.length;
   const open = !ORG.collapsed.has(n.id);
-  const hit = (p) => (!ORG.q || orgNorm(p.name).includes(orgNorm(ORG.q)) || orgNorm(p.title).includes(orgNorm(ORG.q))) && (!ORG.filter || p.status === ORG.filter);
+  const hit = (p) => !ORG.q || orgNorm(p.name).includes(orgNorm(ORG.q)) || orgNorm(p.title).includes(orgNorm(ORG.q));
   if (n.group) {
     const any = n.leads.some(hit);
     return `<div class="oc-card oc-group${any ? "" : " is-dim"}${n.leads.some((l) => ORG.sel === l.id) ? " is-sel" : ""}" data-oc-id="${n.id}">
@@ -5744,18 +5744,18 @@ function renderOrg() {
   const root = $("#org-root"); if (!root || !state.isAdmin) return;
   const d = ORG.data;
   const head = (sub) => `<div class="hero oc-hero"><div><h1 class="hero-title">Org chart</h1><p class="hero-sub">${sub}</p></div>
-    <div class="oc-actions"><button type="button" class="btn btn-ghost" data-oc-import>${svgI('<path d="M12 16V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>', 16)}${d ? "Update from Excel" : "Import Excel"}</button><input type="file" id="oc-file" accept=".xlsx" hidden /></div></div>`;
+    <div class="oc-actions">${state.isSuper ? `<button type="button" class="btn btn-ghost" data-oc-import>${svgI('<path d="M12 16V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>', 16)}${d ? "Update from Excel" : "Import Excel"}</button><input type="file" id="oc-file" accept=".xlsx" hidden />` : ""}</div></div>`;
   if (!d?.people?.length) {
     root.innerHTML = `${head("Admins only. Build it from the employee list in Excel.")}
       <div class="oc-empty"><span class="oc-empty-ico">${svgI(SUPER_ICONS.org, 34)}</span><h2>No org chart yet</h2>
-      <p>Import the employee list (an Excel file with <strong>Name</strong>, <strong>Employee Status</strong>, <strong>Title</strong> and <strong>Manager</strong> columns). It's read in your browser and saved privately in Firebase for admins only, never on GitHub.</p>
-      <button type="button" class="btn btn-primary" data-oc-import>Import Excel</button>${ORG.error ? `<p class="form-error">Couldn't load the org chart (${esc(ORG.error)}). Make sure the latest firestore.rules is published.</p>` : ""}</div>`;
+      ${state.isSuper ? `<p>Import the employee list (an Excel file with <strong>Name</strong>, <strong>Employee Status</strong>, <strong>Title</strong> and <strong>Manager</strong> columns). It's read in your browser and saved privately in Firebase for admins only, never on GitHub.</p>
+      <button type="button" class="btn btn-primary" data-oc-import>Import Excel</button>` : `<p>The org chart hasn't been set up yet. The super admin imports it from the employee list.</p>`}${ORG.error ? `<p class="form-error">Couldn't load the org chart (${esc(ORG.error)}). Make sure the latest firestore.rules is published.</p>` : ""}</div>`;
     return;
   }
   const T = buildOrg(d.people);
   const byStatus = d.people.reduce((m, p) => (m[p.status || "—"] = (m[p.status || "—"] || 0) + 1, m), {});
   const managers = T.people.filter((p) => p.kids.length).length + T.groups.length;
-  root.innerHTML = `${head(`${esc(d.fileName || "Employee list")} · updated ${esc(ago(d.importedAt))}${d.importedBy ? " by " + esc(d.importedBy) : ""}`)}
+  root.innerHTML = `${head(state.isSuper ? `${esc(d.fileName || "Employee list")} · updated ${esc(ago(d.importedAt))}${d.importedBy ? " by " + esc(d.importedBy) : ""}` : `Updated ${esc(ago(d.importedAt))}`)}
     <div class="oc-stats">
       <div><b>${d.people.length}</b><span>People</span></div>
       <div><b>${byStatus["FT EE"] || 0}</b><span>Full-time employees</span></div>
@@ -5765,12 +5765,15 @@ function renderOrg() {
     </div>
     <div class="oc-toolbar">
       <label class="search oc-search">${svgI('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', 16)}<input id="oc-q" type="search" placeholder="Find a person or title" value="${esc(ORG.q)}" autocomplete="off"/></label>
-      <div class="oc-legend">${Object.entries(byStatus).sort((a, b) => b[1] - a[1]).map(([st, n]) => `<button type="button" class="oc-chip${ORG.filter === st ? " is-on" : ""}" data-oc-filter="${esc(st)}" style="--sc:${orgColor(st)}"><i></i>${esc(st)}<b>${n}</b></button>`).join("")}</div>
+      <span class="oc-spacer"></span>
       <div class="oc-zoom"><button type="button" data-oc-zoom="-" aria-label="Zoom out">−</button><button type="button" data-oc-zoom="fit" title="Fit to screen">${svgI('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>', 15)}</button><button type="button" data-oc-zoom="+" aria-label="Zoom in">+</button><button type="button" data-oc-expand title="Expand or collapse all">${ORG.collapsed.size ? "Expand all" : "Collapse all"}</button></div>
     </div>
     <div class="oc-canvas" id="oc-canvas"><div class="oc-world" id="oc-world" style="transform:translate(${ORG.x}px,${ORG.y}px) scale(${ORG.zoom})"><ul class="oc-ul oc-top">${T.roots.map((r) => orgBranch(r, T)).join("")}</ul></div></div>
-    ${T.unassigned.length ? `<section class="oc-unassigned"><h3>No manager listed <span>${T.unassigned.length}</span></h3><p>Add their manager in the spreadsheet, then use “Update from Excel”.</p><div class="oc-ugrid">${T.unassigned.map((p) => orgCard(p, T)).join("")}</div></section>` : ""}
-    ${T.notes.length ? `<details class="oc-notes"><summary>How the list was read (${T.notes.length})</summary><ul>${T.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}
+    ${T.unassigned.length ? `<section class="oc-unassigned${ORG.unOpen ? " is-open" : ""}">
+      <button type="button" class="oc-un-head" data-oc-unassigned aria-expanded="${Boolean(ORG.unOpen)}"><h3>No manager listed <span>${T.unassigned.length}</span></h3><small>${state.isSuper ? "Add their manager in the spreadsheet, then use “Update from Excel”." : "Their manager isn't on the employee list yet."}</small><span class="oc-un-chev">${CHEV}</span></button>
+      <div class="oc-un-body"><div><div class="oc-ugrid">${T.unassigned.map((p) => orgCard(p, T)).join("")}</div></div></div>
+    </section>` : ""}
+    ${T.notes.length && state.isSuper ? `<details class="oc-notes"><summary>How the list was read (${T.notes.length})</summary><ul>${T.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}
     <aside class="oc-panel${ORG.sel ? " is-open" : ""}" id="oc-panel">${orgPanelHTML(T)}</aside>`;
   bindOrgCanvas();
   if (!ORG.fitted) { ORG.fitted = true; requestAnimationFrame(() => orgFit()); }
@@ -5821,6 +5824,7 @@ function orgFocus(id) {
 
 /* Import: read the Excel file in the browser (ExcelJS), check it, preview, save to Firestore */
 async function importOrgFile(file) {
+  if (!state.isSuper) return;
   try {
     const Excel = await loadExcel();
     const wb = new Excel.Workbook(); await wb.xlsx.load(await file.arrayBuffer());
@@ -5861,16 +5865,16 @@ async function saveOrgImport(btn) {
 }
 document.addEventListener("click", (e) => {
   const t = e.target; if (!(t instanceof Element) || !t.closest("#org-root, #modal")) return;
-  if (t.closest("[data-oc-import]")) { $("#oc-file")?.click(); return; }
+  if (t.closest("[data-oc-import]")) { if (state.isSuper) $("#oc-file")?.click(); return; }
+  if (t.closest("[data-oc-unassigned]")) { ORG.unOpen = !ORG.unOpen; try { localStorage.setItem("hra_org_unassigned_open", ORG.unOpen ? "1" : "0"); } catch {} const sec = t.closest(".oc-unassigned"); sec.classList.toggle("is-open", ORG.unOpen); t.closest("[data-oc-unassigned]").setAttribute("aria-expanded", String(ORG.unOpen)); return; }
   if (t.closest("[data-oc-save]")) { saveOrgImport(t.closest("[data-oc-save]")); return; }
   const tg = t.closest("[data-oc-toggle]"); if (tg) { const id = tg.dataset.ocToggle; ORG.collapsed.has(id) ? ORG.collapsed.delete(id) : ORG.collapsed.add(id); renderOrg(); return; }
   const sel = t.closest("[data-oc-sel]"); if (sel) { ORG.sel = ORG.sel === sel.dataset.ocSel && !sel.closest(".oc-panel") ? null : sel.dataset.ocSel; renderOrg(); if (ORG.sel) setTimeout(() => orgFocus(ORG.sel), 30); return; }
   if (t.closest("[data-oc-close]")) { ORG.sel = null; renderOrg(); return; }
-  const f = t.closest("[data-oc-filter]"); if (f) { ORG.filter = ORG.filter === f.dataset.ocFilter ? "" : f.dataset.ocFilter; renderOrg(); return; }
   const z = t.closest("[data-oc-zoom]"); if (z) { const c = $("#oc-canvas"); const v = z.dataset.ocZoom; if (v === "fit") orgFit(); else orgZoomAt(v === "+" ? 1.15 : 0.87, c.clientWidth / 2, c.clientHeight / 2); return; }
   if (t.closest("[data-oc-expand]")) { if (ORG.collapsed.size) ORG.collapsed.clear(); else { const T = buildOrg(ORG.data.people); T.roots.forEach((r) => r.kids.forEach((k) => { if (k.kids.length) ORG.collapsed.add(k.id); })); } ORG.fitted = false; renderOrg(); return; }
 });
-document.addEventListener("change", (e) => { if (e.target.id === "oc-file" && e.target.files?.[0]) { importOrgFile(e.target.files[0]); e.target.value = ""; } });
+document.addEventListener("change", (e) => { if (e.target.id === "oc-file" && e.target.files?.[0] && state.isSuper) { importOrgFile(e.target.files[0]); e.target.value = ""; } });
 document.addEventListener("input", (e) => {
   if (e.target.id !== "oc-q") return;
   ORG.q = e.target.value; const pos = e.target.selectionStart;

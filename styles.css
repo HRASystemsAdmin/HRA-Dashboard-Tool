@@ -3108,10 +3108,18 @@ body.in-course .tp-nav { margin-right: 86px; }
 .oc-lead span { display: grid; } .oc-lead strong { font-size: 13.5px; } .oc-lead small { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: var(--muted); }
 .oc-lead small i { width: 7px; height: 7px; border-radius: 50%; }
 /* unassigned + notes */
-.oc-unassigned { margin-top: 16px; padding: 18px 20px; border-radius: 20px; background: #FFF9F2; border: 1px solid #FBD3BC; }
-.oc-unassigned h3 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
-.oc-unassigned h3 span { font-size: 12px; font-weight: 800; color: #A3400B; background: #FFE8D9; padding: 1px 8px; border-radius: 999px; }
-.oc-unassigned p { margin: 3px 0 12px; font-size: 13px; color: var(--muted); }
+.oc-spacer { flex: 1; }
+.oc-unassigned { margin-top: 16px; border-radius: 20px; background: #FFF9F2; border: 1px solid #FBD3BC; overflow: hidden; }
+.oc-un-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 20px; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.oc-un-head h3 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.oc-un-head h3 span { font-size: 12px; font-weight: 800; color: #A3400B; background: #FFE8D9; padding: 1px 8px; border-radius: 999px; }
+.oc-un-head small { font-size: 13px; color: var(--muted); flex: 1; }
+.oc-un-chev { display: grid; color: #A3400B; transition: transform .3s var(--ease-out); }
+.oc-unassigned.is-open .oc-un-chev { transform: rotate(180deg); }
+.oc-un-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease-out); }
+.oc-unassigned.is-open .oc-un-body { grid-template-rows: 1fr; }
+.oc-un-body > div { overflow: hidden; min-height: 0; }
+.oc-un-body .oc-ugrid { padding: 0 20px 18px; }
 .oc-ugrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 10px; }
 .oc-ugrid .oc-card { width: auto; }
 .oc-notes { margin-top: 12px; font-size: 13px; color: var(--muted); }
