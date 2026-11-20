@@ -233,9 +233,13 @@ window.HRA_CONFIG = {
     // so everyone can try things out. Nothing is written to Firebase. Set to false when Workable is connected.
     testData: false,
 
+    // Client names must match Workable's job Department exactly. Clients not listed here appear under "Unassigned".
+    // Starting lists from who submitted candidates for each client (Nov 2026); add or move clients as needed.
     accountManagers: [
-      { name: "Megan",  email: "megan@hunterrecruitment.net",  clients: ["Beyond Wow Plumbing", "Trust 1 Plumbing"] },
-      { name: "Holly",  email: "holly@hunterrecruitment.net",  clients: ["Metro Electric"] }
+      { name: "Jen Omohundro",  email: "jomohundro@hunterrecruitment.net",
+        clients: ["A-Zone Environmental Services", "Bee Right There Heating & Air", "Caccia Home Services", "Miller EG Design", "TBM Hardwoods", "Ted's Air, Plumbing & Electric"] },
+      { name: "Megan Whitmyer", email: "mwhitmyer@hunterrecruitment.net",
+        clients: ["Bio Plumbing", "Busby's Heating & Air Conditioning", "Trust 1 Services", "Zenner & Ritter"] }
     ],
 
     // How a Workable job is matched to a client:
@@ -248,8 +252,7 @@ window.HRA_CONFIG = {
     // Optional extra details shown in each client's title bar, and manual overrides
     // when a client's jobs don't follow the rule above.
     clients: {
-      "Beyond Wow Plumbing": { location: "Austin, TX", hours: "15 hours/wk" }
-      // "Trust 1 Plumbing": { location: "Quincy, MA", hours: "20 hours/wk", shortcodes: ["ABC123"] }
+      // "Ted's Air, Plumbing & Electric": { location: "City, ST", hours: "20 hours/wk" }
     },
 
     // Your Workable pipeline stage names (not case sensitive). A candidate shows in
