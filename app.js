@@ -1932,13 +1932,17 @@ function bind() {
       if (f && to && f > to) [f, to] = [to, f];
       PL.range = { preset: "custom", from: f, to }; PL.pop = null; saveRange(); PL.animate = true; renderPipeline(); $('[data-pop="range"]')?.focus(); return;
     }
+    const clP = t.closest("[data-cl-pick]"); if (clP) { PL.pop = null; PL.clQ = ""; PL.animate = true; PL.client = clP.dataset.clPick; PL.filter.clear(); PL.search = ""; PL.colFilters = {}; renderPipeline(); return; }
+    const clH = t.closest("[data-cl-hide]"); if (clH) { const name = clH.dataset.clHide; toggleHiddenClient(name); if (sameName(name, PL.client) && PL.hidden.has(name)) PL.client = null; renderPipeline(); return; }
+    if (t.closest("[data-cl-hidden]")) { PL.clShowHidden = !PL.clShowHidden; renderClientList(amClients()); return; }
     const popBtn = t.closest("[data-pop]"); if (popBtn) { PL.pop = PL.pop === popBtn.dataset.pop ? null : popBtn.dataset.pop; renderPipeline(); if (PL.pop === "am") $(".am-option.is-selected")?.focus(); return; }
     const colT = t.closest("[data-col-toggle]"); if (colT) { const c = PL.cols.find((x) => x.key === colT.dataset.colToggle); if (c) { c.on = !c.on; saveColPrefs(); renderSheet(); $(`[data-col-toggle="${c.key}"]`)?.focus(); } return; }
     if (t.closest("[data-cols-reset]")) { PL.cols = defaultCols(); saveColPrefs(); renderSheet(); toast("Columns reset to the spreadsheet layout", "var(--s-progress)"); return; }
-    const amb = t.closest("[data-am]"); if (amb) { PL.pop = null; PL.animate = true; PL.am = amb.dataset.am; PL.client = null; PL.filter.clear(); PL.search = ""; renderPipeline(); $('[data-pop="am"]')?.focus(); return; }
+    const amb = t.closest("[data-am]"); if (amb) { PL.pop = null; PL.animate = true; PL.am = amb.dataset.am; PL.client = null; PL.filter.clear(); PL.search = ""; PL.colFilters = {}; renderPipeline(); $('[data-pop="am"]')?.focus(); return; }
     if (t.closest(".pop")) return;
     if (PL.pop) { PL.pop = null; renderPipeline(); }
-    const ct = t.closest("[data-client]"); if (ct) { PL.animate = true; PL.client = ct.dataset.client; PL.filter.clear(); PL.search = ""; renderPipeline(); return; }
+    const ct = t.closest("[data-client]"); if (ct) { PL.animate = true; PL.client = ct.dataset.client; PL.filter.clear(); PL.search = ""; PL.colFilters = {}; renderPipeline(); return; }
+    if (t.closest("[data-colf-clear]")) { PL.colFilters = {}; renderSheet(); return; }
     const sf = t.closest("[data-status-filter]"); if (sf) { const k = sf.dataset.statusFilter; PL.filter.has(k) ? PL.filter.delete(k) : PL.filter.add(k); renderSheet(); return; }
     if (t.closest("[data-sort-toggle]")) { PL.newest = !PL.newest; renderSheet(); return; }
     const dlw = t.closest("[data-pl-download]"); if (dlw) { downloadWorkbook(dlw); return; }
@@ -2069,6 +2073,14 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
+    if (e.target.id === "cl-q") { PL.clQ = e.target.value; renderClientList(amClients()); return; }
+    if (e.target.matches?.("[data-col-filter]")) {
+      const key = e.target.dataset.colFilter, pos = e.target.selectionStart;
+      if (e.target.value) PL.colFilters[key] = e.target.value; else delete PL.colFilters[key];
+      renderSheet();
+      const again = $(`[data-col-filter="${key}"]`); again?.focus(); try { again?.setSelectionRange(pos, pos); } catch {}
+      return;
+    }
     if (e.target.id === "rp-from" || e.target.id === "rp-to") {
       const a = $("#rp-from").value, b = $("#rp-to").value, sum = $("#rp-sum"); $(".rp-custom")?.classList.add("is-on");
       sum.classList.remove("is-warn");
@@ -2588,6 +2600,7 @@ async function loadColPrefs() {
     const v = JSON.parse(localStorage.getItem("hra_view_" + state.user.uid)) || {};
     if (Array.isArray(v.pipelineWeekSel) && v.pipelineWeekSel.length) PL.weekSel = v.pipelineWeekSel.map(Number);
     if (Array.isArray(v.pipelineCollapsed)) PL.collapsed = new Set(v.pipelineCollapsed);
+    if (Array.isArray(v.pipelineHidden)) PL.hidden = new Set(v.pipelineHidden);
     if (v.pipelineRange?.preset) PL.range = { preset: v.pipelineRange.preset, from: v.pipelineRange.from || "", to: v.pipelineRange.to || "" };
   } catch {}
   if (!PL.cols) PL.cols = defaultCols();
@@ -2608,7 +2621,7 @@ function saveColPrefs() {
   clearTimeout(colSaveTimer);
   colSaveTimer = setTimeout(() => state.store.setPrefs(state.user.uid, { pipelineColumns: PL.cols }).catch((e) => console.warn(e)), 600);
 }
-const PL = { range: { preset: "all", from: "", to: "" }, weekSel: [0, 1], weeksAll: false, collapsed: new Set(), pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
+const PL = { colFilters: {}, hidden: new Set(), clQ: "", clShowHidden: false, range: { preset: "all", from: "", to: "" }, weekSel: [0, 1], weeksAll: false, collapsed: new Set(), pop: null, cols: null, animate: true, started: false, clients: [], meta: null, ams: [], am: null, client: null, filter: new Set(), search: "", newest: false, unsub: null, timer: null };
 
 const fmtDay = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number); return y ? `${m}/${d}/${y}` : String(iso); };
 const sameName = (a, b) => lower(a) === lower(b);
@@ -2754,18 +2767,66 @@ function renderPipeline() {
     </div>`;
 
   const list = amClients();
-  if (!PL.client || !list.some((c) => sameName(c.name, PL.client))) PL.client = list[0]?.name || null;
-  $("#pl-clients").innerHTML = list.map((c) => {
-    const inR = (c.candidates || []).filter((r) => inRange(r));
-    const n = inR.length;
-    const live = inR.filter((r) => r.status === "in_process").length;
-    return `<button type="button" role="tab" class="sheet-tab${sameName(c.name, PL.client) ? " is-active" : ""}" data-client="${esc(c.name)}" aria-selected="${sameName(c.name, PL.client)}">
-      <span class="sheet-tab-name">${esc(c.name)}</span>
-      <span class="sheet-tab-count" title="${live} in process of ${n} submitted">${live ? `<i></i>${live}` : n}</span>
-    </button>`;
-  }).join("");
+  const visible = list.filter((c) => !PL.hidden.has(c.name));
+  if (!PL.client || !list.some((c) => sameName(c.name, PL.client)) || (PL.hidden.has(PL.client) && visible.length)) PL.client = (visible[0] || list[0])?.name || null;
+  renderClientPicker(list);
   $("#pl-download").disabled = !list.length;
   renderSheet();
+}
+
+/* ---------- One client selector (replaces the row of tabs) ---------- */
+function clientStats(c) {
+  const inR = (c.candidates || []).filter((r) => inRange(r));
+  const last = (c.candidates || []).map((r) => r.submitted || "").filter(Boolean).sort().pop() || "";
+  const days = last ? Math.floor((Date.now() - new Date(last + "T12:00:00")) / 86400e3) : null;
+  return { n: inR.length, live: inR.filter((r) => r.status === "in_process").length, last, days, inactive: days == null || days > 60 };
+}
+function clientRowHTML(c, isHidden) {
+  const st = clientStats(c), cur = sameName(c.name, PL.client);
+  const when = st.last ? (st.days === 0 ? "today" : st.days === 1 ? "yesterday" : st.days < 60 ? `${st.days} days ago` : new Date(st.last + "T12:00:00").toLocaleDateString([], { month: "short", year: "numeric" })) : "no submissions";
+  return `<div class="cl-row${cur ? " is-current" : ""}${isHidden ? " is-hidden" : ""}">
+    <button type="button" class="cl-pick" data-cl-pick="${esc(c.name)}" role="option" aria-selected="${cur}">
+      <span class="cl-name">${esc(c.name)}${st.inactive && !isHidden ? `<em class="cl-inactive">Inactive</em>` : ""}</span>
+      <span class="cl-meta">${st.live ? `<b><i></i>${st.live} in process</b> · ` : ""}${st.n} submitted · last ${esc(when)}</span>
+    </button>
+    <button type="button" class="cl-hide" data-cl-hide="${esc(c.name)}" title="${isHidden ? "Show this client again" : "Hide this client (only for you)"}" aria-label="${isHidden ? "Show" : "Hide"} ${esc(c.name)}">${isHidden ? `<span>Show</span>` : `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a17 17 0 0 1-3.2 3.8M6.4 7.6C4.2 9.2 3 12 3 12s4 6 9 6a8.6 8.6 0 0 0 3.4-.7"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>`}</button>
+  </div>`;
+}
+function renderClientList(list) {
+  const box = $("#cl-list"); if (!box) return;
+  const q = lower(PL.clQ.trim());
+  const match = (c) => !q || lower(c.name).includes(q);
+  const shown = list.filter((c) => !PL.hidden.has(c.name) && match(c));
+  const hidden = list.filter((c) => PL.hidden.has(c.name) && match(c));
+  box.innerHTML = (shown.length ? shown.map((c) => clientRowHTML(c, false)).join("") : `<p class="cl-empty">${q ? "No clients match." : "All clients are hidden."}</p>`)
+    + (hidden.length ? `<button type="button" class="cl-hidden-head${PL.clShowHidden || q ? " is-open" : ""}" data-cl-hidden>Hidden clients <b>${hidden.length}</b><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+      ${PL.clShowHidden || q ? hidden.map((c) => clientRowHTML(c, true)).join("") : ""}` : "");
+}
+function renderClientPicker(list) {
+  const el = $("#pl-clients"); if (!el) return;
+  const c = list.find((x) => sameName(x.name, PL.client));
+  const open = PL.pop === "client";
+  const st = c ? clientStats(c) : null;
+  const hiddenN = list.filter((x) => PL.hidden.has(x.name)).length;
+  el.innerHTML = list.length ? `<div class="cl-select${open ? " is-open" : ""}">
+      <button type="button" class="cl-trigger" data-pop="client" aria-haspopup="listbox" aria-expanded="${open}">
+        <span class="cl-trigger-label">Client <em>${list.length - hiddenN} of ${list.length}</em></span>
+        <span class="cl-trigger-name">${esc(c?.name || "Choose a client")}</span>
+        ${st?.live ? `<span class="cl-live"><i></i>${st.live}</span>` : ""}
+        <svg class="cl-chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="cl-menu pop" ${open ? "" : "hidden"}>
+        <label class="search cl-search"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg><input id="cl-q" type="search" placeholder="Find a client" value="${esc(PL.clQ)}" autocomplete="off"/></label>
+        <div class="cl-list" id="cl-list" role="listbox" aria-label="Clients"></div>
+        <p class="cl-foot">Hiding a client only changes your own view.</p>
+      </div>
+    </div>` : "";
+  if (open) { renderClientList(list); setTimeout(() => { const q = $("#cl-q"); if (q && document.activeElement !== q) q.focus(); $(".cl-row.is-current")?.scrollIntoView({ block: "nearest" }); }, 30); }
+}
+function toggleHiddenClient(name) {
+  PL.hidden.has(name) ? PL.hidden.delete(name) : PL.hidden.add(name);
+  saveViewPrefs({ pipelineHidden: [...PL.hidden] });
+  toast(PL.hidden.has(name) ? `${name} hidden. Find it under “Hidden clients”.` : `${name} is visible again`, "var(--s-progress)");
 }
 
 /* ---------- Candidate table inner scroll: fades + back-to-top ---------- */
@@ -2852,6 +2913,12 @@ function renderSheet() {
   const counts = Object.fromEntries(Object.keys(PSTATUS).map((k) => [k, rows.filter((r) => r.status === k).length]));
   const s = lower(PL.search);
   let shown = rows.filter((r) => (!PL.filter.size || PL.filter.has(r.status)) && (!s || lower([r.name, r.role, r.recruiter, r.notes, r.interview, r.hired].join(" ")).includes(s)));
+  // column filters: match what the cell shows (so dates work as displayed, e.g. "11/2026")
+  const cf = Object.entries(PL.colFilters).filter(([, v]) => v && v.trim());
+  if (cf.length) {
+    const colsAll = PL.cols.filter((x) => x.on);
+    shown = shown.filter((r) => cf.every(([k, v]) => { const col = colsAll.find((x) => x.key === k); if (!col) return true; return lower(cellHTML(r, col, false).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'").replace(/\s+/g, " ")).includes(lower(v.trim())); }));
+  }
   shown = shown.slice().sort((a, b) => (a.submitted || "").localeCompare(b.submitted || "") * (PL.newest ? -1 : 1));
   const interviewed = rows.filter((r) => /^y/i.test(r.interview || "")).length;
   const loc = c.location || extra.location, hrs = c.hours || extra.hours;
@@ -2875,6 +2942,7 @@ function renderSheet() {
       </header>
 
       ${collapseHead("candidates", "Submitted candidates", `${shown.length === rows.length ? rows.length : `${shown.length} of ${rows.length}`}`)}
+      ${Object.keys(PL.colFilters).length ? `<div class="colf-bar"><span>Filtered by ${Object.keys(PL.colFilters).length} column${Object.keys(PL.colFilters).length === 1 ? "" : "s"}</span><button type="button" class="btn btn-ghost btn-mini" data-colf-clear>Clear filters</button></div>` : ""}
       <div class="collapse${PL.collapsed.has("candidates") ? " is-closed" : " is-settled"}" data-collapse-body="candidates"><div class="collapse-inner">
       <div class="sheet-tools">
         <div class="legend" role="group" aria-label="Filter by status">
@@ -2908,7 +2976,7 @@ function renderSheet() {
         ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
         : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, cols.length * 92)}px">
             <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
-            <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col">${esc(col.label)}</th>`).join("")}</tr></thead>
+            <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col"><span class="th-label">${esc(col.label)}</span><label class="colf${PL.colFilters[col.key] ? " is-on" : ""}"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg><input type="text" data-col-filter="${col.key}" value="${esc(PL.colFilters[col.key] || "")}" placeholder="Filter" aria-label="Filter ${esc(col.label)}" autocomplete="off"/></label></th>`).join("")}</tr></thead>
             <tbody>${shown.length ? shown.map((r, i) => `
               <tr class="pl-row" data-status="${r.status}" style="--sw:#${PSTATUS[r.status]?.fill || "FFFFFF"};--bar:${PSTATUS[r.status]?.bar || "#A3B1C6"};--i:${Math.min(i, 18)}" title="${esc(PSTATUS[r.status]?.label || "")}">
                 ${cols.map((col, ci) => cellHTML(r, col, ci === 0)).join("")}
