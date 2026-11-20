@@ -147,6 +147,13 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Org chart (demo)
+    watchOrg(cb) {
+      const fn = (e) => { if (!e || e.key === "hra_demo_org") { try { cb(JSON.parse(localStorage.getItem("hra_demo_org")) || null); } catch { cb(null); } } };
+      addEventListener("storage", fn); setTimeout(() => fn(), 0);
+      return () => removeEventListener("storage", fn);
+    },
+    async saveOrg(data) { localStorage.setItem("hra_demo_org", JSON.stringify(data)); dispatchEvent(new StorageEvent("storage", { key: "hra_demo_org" })); },
     // Settings (demo)
     watchSettings(cb) {
       const read = () => { try { return JSON.parse(localStorage.getItem("hra_demo_settings")) || {}; } catch { return {}; } };
@@ -350,6 +357,8 @@ async function createFirebaseStore() {
       return fsMod.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => trDbError(e, "questions"));
     },
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
+    watchOrg(cb) { return fsMod.onSnapshot(fsMod.doc(db, "org", "chart"), (d) => cb(d.exists() ? d.data() : null), (e) => { console.warn("Org chart unavailable", e); cb(null, e); }); },
+    saveOrg(data) { return fsMod.setDoc(fsMod.doc(db, "org", "chart"), data); },
     watchSettings(cb) {
       return fsMod.onSnapshot(fsMod.doc(db, "settings", "tools"), (s) => cb(s.exists() ? s.data() : {}), (e) => console.warn("Settings unavailable", e));
     },
@@ -457,6 +466,7 @@ function handleUser(u) {
   state.tickets = []; state.loaded = false; state.known.clear();
 
   if (!u) {
+    ORG.unsub?.(); Object.assign(ORG, { unsub: null, data: null, started: false });
     stopSettings();
     stopProfiles();
     stopTraining();
@@ -496,6 +506,7 @@ function handleUser(u) {
   renderAll();
   showView("view-app");
   $('[data-tool="insights"]').hidden = !isAdmin;
+  $('[data-tool="org"]').hidden = !isAdmin;
   $("#alert-btn").hidden = !isAdmin;
   $("#user-role").textContent = state.isSuper ? "Super admin" : isAdmin ? "Admin" : "Team member";
   startSettings();
@@ -2227,6 +2238,7 @@ const TOOLS = [
   { id: "requests", label: "Request Center", desc: "Tickets and requests", modes: ["all", "admins", "off", "maint"] },
   { id: "pipeline", label: "Client Pipeline", desc: "Candidates per client, from Workable", modes: ["all", "admins", "off", "maint"] },
   { id: "insights", label: "Insights", desc: "Performance numbers (admins only)", modes: ["admins", "off", "maint"], base: "admins" },
+  { id: "org", label: "Org chart", desc: "Who reports to whom (admins only)", modes: ["admins", "off", "maint"], base: "admins" },
   { id: "training", label: "Training", desc: "Courses and team progress", modes: ["all", "admins", "off", "maint"] },
   { id: "contacts", label: "Who to contact", desc: "The contact directory", modes: ["all", "admins", "off", "maint"] },
   { id: "sharepoint", label: "SharePoint link", desc: "Link to the team site", modes: ["all", "admins", "off"] },
@@ -2238,7 +2250,7 @@ const SET = { tools: {}, unsub: null };
 const toolMode = (id) => { const t = TOOLS.find((x) => x.id === id); const m = SET.tools[id]; return t && t.modes.includes(m) ? m : (t?.base || "all"); };
 function toolAccess(id) {
   const t = TOOLS.find((x) => x.id === id); if (!t) return "on";
-  if (id === "insights" && !state.isAdmin) return "hidden";
+  if ((id === "insights" || id === "org") && !state.isAdmin) return "hidden";
   const m = toolMode(id);
   if (state.isSuper) return "on";
   if (m === "all") return "on";
@@ -2285,6 +2297,7 @@ const SUPER_ICONS = {
   requests: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/>',
   pipeline: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M9 9.5V20"/>',
   insights: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  org: '<rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/>',
   training: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
   contacts: '<path d="M6 4h11a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2z"/><circle cx="12.5" cy="9" r="2"/><path d="M9.5 13.5a3 3 0 0 1 6 0"/>',
   sharepoint: '<circle cx="11" cy="8" r="5"/><circle cx="16.5" cy="14" r="4"/><circle cx="10" cy="17" r="3"/>',
@@ -2454,7 +2467,7 @@ async function saveProfile(btn) {
 
 function setTool(id, silent) {
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
-  if (id === "insights" && !state.isAdmin) id = "requests";
+  if ((id === "insights" || id === "org") && !state.isAdmin) id = "requests";
   if (id === "super" && !state.isSuper) id = "requests";
   if (id !== "super" && toolAccess(id) === "hidden") id = firstOpenTool();
   const changed = id !== currentTool;
@@ -2473,6 +2486,7 @@ function setTool(id, silent) {
   if (id === "insights") { IN.animate = true; startInsights(); }
   if (id === "training") { renderTraining(); } else { document.body.classList.remove("in-course"); stopTeamWatch(); }
   if (id === "super") renderSuper();
+  if (id === "org") startOrg();
   if (id === "contacts") { renderContacts(); if (!silent && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#ct-q")?.focus({ preventScroll: true }), 350); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
   if (!silent) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
@@ -5615,3 +5629,252 @@ async function runManage(kind, btn) {
     toast(failed ? "Some items couldn't be changed" : what, failed ? "#E2632B" : "var(--s-done)");
   } finally { btn.classList.remove("is-loading"); btn.disabled = false; }
 }
+
+/* ==========================================================================
+   Org chart (admins only). Imported from the employee list (Excel) into Firestore org/chart.
+   ========================================================================== */
+const ORG = { data: null, unsub: null, started: false, collapsed: new Set(), sel: null, q: "", filter: "", zoom: 1, x: 0, y: 0, fitted: false };
+const ORG_STATUS = {
+  "FT EE": { label: "Full-time employee", color: "#00377F" },
+  "USC": { label: "USC", color: "#0E9F7E" },
+  "RadarHire": { label: "RadarHire", color: "#7C3AED" },
+  "Altezza": { label: "Altezza", color: "#E0A800" },
+  "OSC": { label: "OSC", color: "#F26A26" },
+  "Comrise": { label: "Comrise", color: "#DB2777" }
+};
+const orgColor = (st) => ORG_STATUS[st]?.color || "#62789A";
+const orgNorm = (x) => String(x ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z' ]/g, " ").replace(/\s+/g, " ").trim();
+
+function startOrg() {
+  if (!ORG.started) {
+    ORG.started = true;
+    ORG.unsub = state.store.watchOrg((d, err) => { ORG.data = d; ORG.error = err ? (err.code || "error") : ""; ORG.fitted = false; if (currentTool === "org") renderOrg(); });
+  }
+  renderOrg();
+}
+
+/* Turn the spreadsheet rows into a tree. Handles short names ("Aaron"), nicknames ("Jen" → Jennifer),
+   a title instead of a name ("Director"), self-reporting (the CEO) and missing managers. */
+function buildOrg(people) {
+  const P = people.map((p, i) => ({ ...p, id: "p" + i, name: String(p.name || "").trim(), title: String(p.title || "").trim(), status: String(p.status || "").trim(), manager: String(p.manager || "").trim(), kids: [] }));
+  const notes = [];
+  const findPerson = (m) => {
+    const n = orgNorm(m); if (!n) return null;
+    const exact = P.filter((p) => orgNorm(p.name) === n); if (exact.length === 1) return { list: exact };
+    const parts = n.split(" "), first = parts[0], last = parts.slice(1).join(" ");
+    if (last) {
+      const nick = P.filter((p) => { const q = orgNorm(p.name).split(" "); return q.slice(1).join(" ") === last && (q[0].startsWith(first) || first.startsWith(q[0])); });
+      if (nick.length === 1) return { list: nick };
+    } else {
+      const byFirst = P.filter((p) => orgNorm(p.name).split(" ")[0] === first); if (byFirst.length === 1) return { list: byFirst };
+      const byTitle = P.filter((p) => orgNorm(p.title).split(" ").includes(first)); if (byTitle.length) return { list: byTitle, byTitle: true };
+    }
+    return null;
+  };
+  const roots = [], unassigned = [], groups = new Map();
+  for (const p of P) {
+    if (!p.manager) { unassigned.push(p); continue; }
+    const hit = findPerson(p.manager);
+    if (!hit) { unassigned.push(p); notes.push(`${p.name}: manager "${p.manager}" isn't on the list`); continue; }
+    if (hit.list.length === 1) {
+      const m = hit.list[0];
+      if (m === p) { roots.push(p); continue; }
+      p.parent = m; m.kids.push(p);
+    } else {
+      // several people match a title ("Director"): one shared card for them
+      const key = hit.list.map((x) => x.id).join("+");
+      if (!groups.has(key)) groups.set(key, { id: "g" + groups.size, group: true, leads: hit.list, label: p.manager, kids: [] });
+      const g = groups.get(key); p.parent = g; g.kids.push(p);
+    }
+  }
+  for (const g of groups.values()) {
+    // the group sits where its leads sit (under their shared manager); the leads move into the group card
+    const mgr = g.leads[0].parent;
+    const sameMgr = g.leads.every((l) => l.parent === mgr);
+    const host = sameMgr && mgr ? mgr : null;
+    for (const l of g.leads) { if (l.parent) l.parent.kids = l.parent.kids.filter((k) => k !== l); else { const i = roots.indexOf(l); if (i >= 0) roots.splice(i, 1); } l.inGroup = g; }
+    for (const l of g.leads) for (const k of l.kids) { k.parent = g; g.kids.push(k); } // anyone reporting to a lead by name joins the group too
+    // "Director of Recruitment Operations" → "Directors of Recruitment Operations" (plural on the first word)
+    g.title = g.leads.every((l) => l.title === g.leads[0].title) ? (g.leads.length > 1 ? g.leads[0].title.replace(/^(\S+?)(s?)(\s|$)/, (m, w, s2, sp) => w + "s" + sp) : g.leads[0].title) : g.label;
+    if (host) { g.parent = host; host.kids.push(g); } else roots.push(g);
+    notes.push(`"${g.label}" matches ${g.leads.length} people (${g.leads.map((l) => l.name).join(", ")}): shown as one shared card`);
+  }
+  if (!roots.length && P.length) roots.push(P[0]);
+  const sortKids = (n) => { n.kids.sort((a, b) => (b.kids.length > 0) - (a.kids.length > 0) || String(a.name || a.title).localeCompare(String(b.name || b.title))); n.kids.forEach(sortKids); };
+  roots.forEach(sortKids);
+  const teamSize = (n) => n.kids.reduce((t, k) => t + 1 + teamSize(k) + (k.group ? k.leads.length - 1 : 0), 0);
+  return { people: P, roots, unassigned, notes, teamSize, groups: [...groups.values()] };
+}
+
+function orgAvatar(p, size = "") {
+  const prof = [...PROF.byUid.values()].find((x) => x.name && orgNorm(x.name) === orgNorm(p.name));
+  return `<span class="oc-av${size}" style="--sc:${orgColor(p.status)}">${prof?.photo ? `<img src="${esc(prof.photo)}" alt=""/>` : esc(initials(p.name))}</span>`;
+}
+function orgCard(n, T) {
+  const team = T.teamSize(n), direct = n.kids.length;
+  const open = !ORG.collapsed.has(n.id);
+  const hit = (p) => (!ORG.q || orgNorm(p.name).includes(orgNorm(ORG.q)) || orgNorm(p.title).includes(orgNorm(ORG.q))) && (!ORG.filter || p.status === ORG.filter);
+  if (n.group) {
+    const any = n.leads.some(hit);
+    return `<div class="oc-card oc-group${any ? "" : " is-dim"}${n.leads.some((l) => ORG.sel === l.id) ? " is-sel" : ""}" data-oc-id="${n.id}">
+      <span class="oc-group-label">${esc(n.title)}</span>
+      <div class="oc-leads">${n.leads.map((l) => `<button type="button" class="oc-lead${hit(l) ? "" : " is-dim"}${ORG.sel === l.id ? " is-sel" : ""}" data-oc-sel="${l.id}">${orgAvatar(l, " sm")}<span><strong>${esc(l.name)}</strong><small><i style="background:${orgColor(l.status)}"></i>${esc(l.status)}</small></span></button>`).join("")}</div>
+      ${direct ? `<button type="button" class="oc-toggle${open ? "" : " is-closed"}" data-oc-toggle="${n.id}" title="${open ? "Hide" : "Show"} team">${team}</button>` : ""}
+    </div>`;
+  }
+  return `<div class="oc-card${hit(n) ? "" : " is-dim"}${ORG.sel === n.id ? " is-sel" : ""}" data-oc-sel="${n.id}" data-oc-id="${n.id}" style="--sc:${orgColor(n.status)}" tabindex="0">
+    ${orgAvatar(n)}
+    <span class="oc-text"><strong>${esc(n.name)}</strong><small>${esc(n.title)}</small><em><i></i>${esc(n.status || "—")}</em></span>
+    ${direct ? `<button type="button" class="oc-toggle${open ? "" : " is-closed"}" data-oc-toggle="${n.id}" title="${open ? "Hide" : "Show"} team (${direct} direct, ${team} total)">${team}</button>` : ""}
+  </div>`;
+}
+/* Leaves (people with no reports) under the same manager are stacked in a compact column instead of a wide row. */
+function orgBranch(n, T) {
+  const open = !ORG.collapsed.has(n.id);
+  const leaves = n.kids.filter((k) => !k.kids.length && !k.group), branches = n.kids.filter((k) => k.kids.length || k.group);
+  const cols = leaves.length > 4 ? 2 : 1;
+  const items = [
+    ...(leaves.length ? [`<li class="oc-li oc-leafbox"><div class="oc-stack" style="--cols:${cols}">${leaves.map((k) => orgCard(k, T)).join("")}</div></li>`] : []),
+    ...branches.map((k) => orgBranch(k, T))
+  ];
+  return `<li class="oc-li">${orgCard(n, T)}${n.kids.length && open ? `<ul class="oc-ul${items.length === 1 ? " is-single" : ""}">${items.join("")}</ul>` : ""}</li>`;
+}
+
+function renderOrg() {
+  const root = $("#org-root"); if (!root || !state.isAdmin) return;
+  const d = ORG.data;
+  const head = (sub) => `<div class="hero oc-hero"><div><h1 class="hero-title">Org chart</h1><p class="hero-sub">${sub}</p></div>
+    <div class="oc-actions"><button type="button" class="btn btn-ghost" data-oc-import>${svgI('<path d="M12 16V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>', 16)}${d ? "Update from Excel" : "Import Excel"}</button><input type="file" id="oc-file" accept=".xlsx" hidden /></div></div>`;
+  if (!d?.people?.length) {
+    root.innerHTML = `${head("Admins only. Build it from the employee list in Excel.")}
+      <div class="oc-empty"><span class="oc-empty-ico">${svgI(SUPER_ICONS.org, 34)}</span><h2>No org chart yet</h2>
+      <p>Import the employee list (an Excel file with <strong>Name</strong>, <strong>Employee Status</strong>, <strong>Title</strong> and <strong>Manager</strong> columns). It's read in your browser and saved privately in Firebase for admins only, never on GitHub.</p>
+      <button type="button" class="btn btn-primary" data-oc-import>Import Excel</button>${ORG.error ? `<p class="form-error">Couldn't load the org chart (${esc(ORG.error)}). Make sure the latest firestore.rules is published.</p>` : ""}</div>`;
+    return;
+  }
+  const T = buildOrg(d.people);
+  const byStatus = d.people.reduce((m, p) => (m[p.status || "—"] = (m[p.status || "—"] || 0) + 1, m), {});
+  const managers = T.people.filter((p) => p.kids.length).length + T.groups.length;
+  root.innerHTML = `${head(`${esc(d.fileName || "Employee list")} · updated ${esc(ago(d.importedAt))}${d.importedBy ? " by " + esc(d.importedBy) : ""}`)}
+    <div class="oc-stats">
+      <div><b>${d.people.length}</b><span>People</span></div>
+      <div><b>${byStatus["FT EE"] || 0}</b><span>Full-time employees</span></div>
+      <div><b>${d.people.length - (byStatus["FT EE"] || 0)}</b><span>Other status</span></div>
+      <div><b>${managers}</b><span>Managers</span></div>
+      ${T.unassigned.length ? `<div class="is-warn"><b>${T.unassigned.length}</b><span>No manager listed</span></div>` : ""}
+    </div>
+    <div class="oc-toolbar">
+      <label class="search oc-search">${svgI('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', 16)}<input id="oc-q" type="search" placeholder="Find a person or title" value="${esc(ORG.q)}" autocomplete="off"/></label>
+      <div class="oc-legend">${Object.entries(byStatus).sort((a, b) => b[1] - a[1]).map(([st, n]) => `<button type="button" class="oc-chip${ORG.filter === st ? " is-on" : ""}" data-oc-filter="${esc(st)}" style="--sc:${orgColor(st)}"><i></i>${esc(st)}<b>${n}</b></button>`).join("")}</div>
+      <div class="oc-zoom"><button type="button" data-oc-zoom="-" aria-label="Zoom out">−</button><button type="button" data-oc-zoom="fit" title="Fit to screen">${svgI('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>', 15)}</button><button type="button" data-oc-zoom="+" aria-label="Zoom in">+</button><button type="button" data-oc-expand title="Expand or collapse all">${ORG.collapsed.size ? "Expand all" : "Collapse all"}</button></div>
+    </div>
+    <div class="oc-canvas" id="oc-canvas"><div class="oc-world" id="oc-world" style="transform:translate(${ORG.x}px,${ORG.y}px) scale(${ORG.zoom})"><ul class="oc-ul oc-top">${T.roots.map((r) => orgBranch(r, T)).join("")}</ul></div></div>
+    ${T.unassigned.length ? `<section class="oc-unassigned"><h3>No manager listed <span>${T.unassigned.length}</span></h3><p>Add their manager in the spreadsheet, then use “Update from Excel”.</p><div class="oc-ugrid">${T.unassigned.map((p) => orgCard(p, T)).join("")}</div></section>` : ""}
+    ${T.notes.length ? `<details class="oc-notes"><summary>How the list was read (${T.notes.length})</summary><ul>${T.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}
+    <aside class="oc-panel${ORG.sel ? " is-open" : ""}" id="oc-panel">${orgPanelHTML(T)}</aside>`;
+  bindOrgCanvas();
+  if (!ORG.fitted) { ORG.fitted = true; requestAnimationFrame(() => orgFit()); }
+}
+function orgPanelHTML(T) {
+  const p = T.people.find((x) => x.id === ORG.sel); if (!p) return "";
+  const boss = p.inGroup ? p.inGroup.parent : p.parent;
+  const bossName = boss ? (boss.group ? boss.leads.map((l) => l.name).join(" & ") : boss.name) : "";
+  const reports = p.inGroup ? p.inGroup.kids : p.kids;
+  return `<button type="button" class="icon-btn oc-panel-x" data-oc-close aria-label="Close"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="oc-panel-head">${orgAvatar(p, " lg")}<h2>${esc(p.name)}</h2><p>${esc(p.title)}</p><span class="oc-chip is-on" style="--sc:${orgColor(p.status)}"><i></i>${esc(ORG_STATUS[p.status]?.label || p.status || "No status")}</span></div>
+    <dl class="oc-dl"><div><dt>Reports to</dt><dd>${bossName ? esc(bossName) : (p.manager ? esc(p.manager) : "No manager listed")}</dd></div>
+      ${p.inGroup ? `<div><dt>Shares the team with</dt><dd>${esc(p.inGroup.leads.filter((l) => l !== p).map((l) => l.name).join(", "))}</dd></div>` : ""}
+      <div><dt>Direct reports</dt><dd>${reports.length}</dd></div><div><dt>Whole team</dt><dd>${T.teamSize(p.inGroup || p)}</dd></div></dl>
+    ${reports.length ? `<h3 class="oc-panel-h">Direct reports</h3><div class="oc-plist">${reports.map((k) => k.group ? k.leads.map((l) => `<button type="button" data-oc-sel="${l.id}">${orgAvatar(l, " sm")}<span><strong>${esc(l.name)}</strong><small>${esc(l.title)}</small></span></button>`).join("") : `<button type="button" data-oc-sel="${k.id}">${orgAvatar(k, " sm")}<span><strong>${esc(k.name)}</strong><small>${esc(k.title)}</small></span></button>`).join("")}</div>` : ""}`;
+}
+
+/* Pan (drag) and zoom (buttons, Ctrl + wheel, pinch on trackpads) */
+function orgApply() { const w = $("#oc-world"); if (w) w.style.transform = `translate(${ORG.x}px,${ORG.y}px) scale(${ORG.zoom})`; }
+function orgFit() {
+  const c = $("#oc-canvas"), w = $("#oc-world"); if (!c || !w) return;
+  const prev = w.style.transform; w.style.transform = "none";
+  const cw = c.clientWidth, wr = w.scrollWidth, hr = w.scrollHeight; w.style.transform = prev;
+  ORG.zoom = Math.max(0.35, Math.min(1, (cw - 40) / wr));
+  ORG.x = Math.max(20, (cw - wr * ORG.zoom) / 2); ORG.y = 24;
+  c.style.height = Math.min(Math.max(hr * ORG.zoom + 60, 360), window.innerHeight * 0.78) + "px";
+  w.classList.add("is-anim"); orgApply(); setTimeout(() => w.classList.remove("is-anim"), 350);
+}
+function orgZoomAt(f, cx, cy) {
+  const z = Math.max(0.3, Math.min(1.8, ORG.zoom * f));
+  ORG.x = cx - (cx - ORG.x) * (z / ORG.zoom); ORG.y = cy - (cy - ORG.y) * (z / ORG.zoom); ORG.zoom = z; orgApply();
+}
+function bindOrgCanvas() {
+  const c = $("#oc-canvas"); if (!c || c.dataset.bound) return; c.dataset.bound = "1";
+  let drag = null;
+  c.addEventListener("pointerdown", (e) => { if (e.target.closest("button, .oc-card, input")) return; drag = { x: e.clientX - ORG.x, y: e.clientY - ORG.y }; c.setPointerCapture(e.pointerId); c.classList.add("is-drag"); });
+  c.addEventListener("pointermove", (e) => { if (!drag) return; ORG.x = e.clientX - drag.x; ORG.y = e.clientY - drag.y; orgApply(); });
+  const end = () => { drag = null; c.classList.remove("is-drag"); };
+  c.addEventListener("pointerup", end); c.addEventListener("pointercancel", end);
+  c.addEventListener("wheel", (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); const r = c.getBoundingClientRect(); orgZoomAt(e.deltaY < 0 ? 1.1 : 0.9, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+}
+function orgFocus(id) {
+  const c = $("#oc-canvas"), el = $(`[data-oc-id="${id}"], [data-oc-sel="${id}"]`, c); if (!c || !el) return;
+  const cr = c.getBoundingClientRect(), er = el.getBoundingClientRect();
+  ORG.x += cr.left + cr.width / 2 - (er.left + er.width / 2); ORG.y += cr.top + cr.height / 3 - (er.top + er.height / 2);
+  const w = $("#oc-world"); w.classList.add("is-anim"); orgApply(); setTimeout(() => w.classList.remove("is-anim"), 350);
+}
+
+/* Import: read the Excel file in the browser (ExcelJS), check it, preview, save to Firestore */
+async function importOrgFile(file) {
+  try {
+    const Excel = await loadExcel();
+    const wb = new Excel.Workbook(); await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.worksheets[0]; if (!ws) throw new Error("The file has no sheets.");
+    const txt = (v) => (v && typeof v === "object" ? (v.text ?? v.result ?? (v.richText ? v.richText.map((r) => r.text).join("") : "")) : v ?? "").toString().trim();
+    let headerRow = 0, cols = {};
+    ws.eachRow((row, r) => {
+      if (headerRow) return;
+      const vals = Array.from(row.values, (v) => orgNorm(txt(v)));   // row.values has empty slots: fill them
+      const find = (...names) => vals.findIndex((v) => names.some((n) => v === n || v.startsWith(n)));
+      const name = find("name", "full name", "employee"), title = find("title", "job title", "position"), manager = find("manager", "reports to", "supervisor"), status = find("employee status", "status", "type");
+      if (name > 0 && manager > 0) { headerRow = r; cols = { name, title, manager, status }; }
+    });
+    if (!headerRow) throw new Error("Couldn't find the Name and Manager columns in the first sheet.");
+    const people = [];
+    ws.eachRow((row, r) => {
+      if (r <= headerRow) return;
+      const g = (i) => (i > 0 ? txt(row.values[i]) : "");
+      const p = { name: g(cols.name), title: g(cols.title), manager: g(cols.manager), status: g(cols.status) };
+      if (p.name) people.push(p);
+    });
+    if (!people.length) throw new Error("No people found under the header row.");
+    const T = buildOrg(people);
+    const data = { people, fileName: file.name, importedAt: new Date().toISOString(), importedBy: state.user.name };
+    swapModal(`<div class="oc-import"><div class="modal-head"><span class="type-icon">${svgI(SUPER_ICONS.org, 22)}</span><div><h2 id="modal-title">Import ${esc(file.name)}</h2><p>Check the summary, then save. It replaces the current org chart for all admins.</p></div></div>
+      <div class="oc-imp-stats"><div><b>${people.length}</b><span>people</span></div><div><b>${T.roots.length}</b><span>at the top</span></div><div><b>${T.unassigned.length}</b><span>no manager</span></div></div>
+      ${T.notes.length ? `<ul class="oc-imp-notes">${T.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : `<p class="oc-imp-ok">Every manager was matched.</p>`}
+      <p class="oc-imp-private">Saved privately in Firebase for admins only. Nothing is uploaded to GitHub.</p>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="button" class="btn btn-primary" data-oc-save><span class="btn-text">Save org chart</span><span class="spinner" aria-hidden="true"></span></button></div></div>`);
+    ORG.pending = data;
+  } catch (e) { console.error(e); toast(e.message || "That file couldn't be read.", "#E2632B"); }
+}
+async function saveOrgImport(btn) {
+  if (!ORG.pending) return;
+  btn.classList.add("is-loading"); btn.disabled = true;
+  try { await state.store.saveOrg(ORG.pending); ORG.pending = null; ORG.fitted = false; ORG.collapsed.clear(); ORG.sel = null; closeOverlay($("#modal")); toast("Org chart saved", "var(--s-done)"); }
+  catch (e) { console.error(e); btn.classList.remove("is-loading"); btn.disabled = false; toast(e?.code === "permission-denied" ? "Saving is blocked. Publish the latest firestore.rules." : "Couldn't save. Check your connection.", "#E2632B"); }
+}
+document.addEventListener("click", (e) => {
+  const t = e.target; if (!(t instanceof Element) || !t.closest("#org-root, #modal")) return;
+  if (t.closest("[data-oc-import]")) { $("#oc-file")?.click(); return; }
+  if (t.closest("[data-oc-save]")) { saveOrgImport(t.closest("[data-oc-save]")); return; }
+  const tg = t.closest("[data-oc-toggle]"); if (tg) { const id = tg.dataset.ocToggle; ORG.collapsed.has(id) ? ORG.collapsed.delete(id) : ORG.collapsed.add(id); renderOrg(); return; }
+  const sel = t.closest("[data-oc-sel]"); if (sel) { ORG.sel = ORG.sel === sel.dataset.ocSel && !sel.closest(".oc-panel") ? null : sel.dataset.ocSel; renderOrg(); if (ORG.sel) setTimeout(() => orgFocus(ORG.sel), 30); return; }
+  if (t.closest("[data-oc-close]")) { ORG.sel = null; renderOrg(); return; }
+  const f = t.closest("[data-oc-filter]"); if (f) { ORG.filter = ORG.filter === f.dataset.ocFilter ? "" : f.dataset.ocFilter; renderOrg(); return; }
+  const z = t.closest("[data-oc-zoom]"); if (z) { const c = $("#oc-canvas"); const v = z.dataset.ocZoom; if (v === "fit") orgFit(); else orgZoomAt(v === "+" ? 1.15 : 0.87, c.clientWidth / 2, c.clientHeight / 2); return; }
+  if (t.closest("[data-oc-expand]")) { if (ORG.collapsed.size) ORG.collapsed.clear(); else { const T = buildOrg(ORG.data.people); T.roots.forEach((r) => r.kids.forEach((k) => { if (k.kids.length) ORG.collapsed.add(k.id); })); } ORG.fitted = false; renderOrg(); return; }
+});
+document.addEventListener("change", (e) => { if (e.target.id === "oc-file" && e.target.files?.[0]) { importOrgFile(e.target.files[0]); e.target.value = ""; } });
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "oc-q") return;
+  ORG.q = e.target.value; const pos = e.target.selectionStart;
+  renderOrg(); const q = $("#oc-q"); q?.focus(); q?.setSelectionRange(pos, pos);
+  if (ORG.q.trim()) { const T = buildOrg(ORG.data.people); const m = T.people.find((p) => orgNorm(p.name).includes(orgNorm(ORG.q)) || orgNorm(p.title).includes(orgNorm(ORG.q))); if (m) orgFocus(m.id); }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && ORG.sel && currentTool === "org") { ORG.sel = null; renderOrg(); } if (e.key === "Enter" && e.target.matches?.(".oc-card[data-oc-sel]")) e.target.click(); });

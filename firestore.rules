@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// RULES VERSION: 2026-11-19 (Training, clean-up tools, profiles, super admin)
+// RULES VERSION: 2026-11-20 (Training, clean-up tools, profiles, super admin, org chart)
 // Paste this into Firebase console → Firestore Database → Rules → Publish.
 // These rules are the real lock on the data. Keep the two lists below in
 // sync with config.js (lowercase emails).
@@ -120,6 +120,11 @@ service cloud.firestore {
     // Each person's own dashboard preferences (like their column layout).
     match /user_prefs/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Org chart (imported from the employee list). Admins only: it lists names, titles and employment status.
+    match /org/{docId} {
+      allow read, write: if isAdmin();
     }
 
     // Dashboard settings (which tools are on). Everyone reads them; only super admins change them.
