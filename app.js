@@ -3211,8 +3211,8 @@ function renderNoteBody(id) {
     </div>
     <h3 class="tn-h">Recruiter notes <small>from Workable</small></h3>
     <div class="note-text">${esc(r.notes || "No notes in Workable.")}</div>
-    <h3 class="tn-h">Team notes <small>only in this dashboard</small></h3>
-    <div class="tn-add"><textarea id="tn-text" rows="2" maxlength="1000" placeholder="Add a note for your team… (not sent to Workable)">${esc(draft)}</textarea><button type="button" class="btn btn-primary btn-mini" data-tn-add="${esc(r.id)}">Add note</button></div>
+    <h3 class="tn-h">Team notes</h3>
+    <div class="tn-add"><textarea id="tn-text" rows="2" maxlength="1000" placeholder="Add a note">${esc(draft)}</textarea><button type="button" class="btn btn-primary btn-mini" data-tn-add="${esc(r.id)}">Add note</button></div>
     <div class="tn-list">${team.length ? team.map((n, i) => `<div class="tn-item" style="--i:${i}"><div class="tn-meta"><strong>${esc(n.by || "Someone")}</strong><span>${esc(ago(n.at))}</span>${n.byUid === state.user.uid || state.isAdmin ? `<button type="button" class="tn-del" data-tn-del="${esc(r.id)}" data-tn-at="${esc(n.at)}" aria-label="Delete this note" title="Delete">×</button>` : ""}</div><p>${esc(n.text)}</p></div>`).join("") : `<p class="tn-empty">No team notes yet.</p>`}</div>
     <dl class="note-meta">${fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>
     ${r.link ? `<a class="btn btn-ghost note-link" href="${esc(r.link)}" target="_blank" rel="noopener">Open in Workable</a>` : ""}`;
