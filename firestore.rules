@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// RULES VERSION: 2026-11-25 (… start dates, team notes, weekly spine)
+// RULES VERSION: 2026-11-26 (Training, clean-up tools, profiles, super admin, org chart, start dates, team notes)
 // Paste this into Firebase console → Firestore Database → Rules → Publish.
 // These rules are the real lock on the data. Keep the two lists below in
 // sync with config.js (lowercase emails).
@@ -133,11 +133,6 @@ service cloud.firestore {
     match /org/{docId} {
       allow read: if isAdmin();
       allow write: if isSuperAdmin();
-    }
-
-    // Weekly Maintenance & Security Spine: super admins only.
-    match /spine/{weekId} {
-      allow read, write: if isSuperAdmin();
     }
 
     // Dashboard settings (which tools are on). Everyone reads them; only super admins change them.

@@ -148,7 +148,7 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
-    // Open jobs report + spine (demo)
+    // Open jobs report (demo)
     async getJobsReport() {
       const jobs = (PL.clients || []).flatMap((c, ci) => [...new Set((c.candidates || []).map((r) => r.role))].slice(0, 3).map((t, i) => {
         const rows = (c.candidates || []).filter((r) => r.role === t);
@@ -157,9 +157,6 @@ function createDemoStore() {
       }));
       return { jobs, updatedAt: new Date().toISOString(), fresh: true };
     },
-    watchSpine(weekId, cb) { const key = "hra_demo_spine_" + weekId; const fn = (e) => { if (!e || e.key === key) { try { cb(JSON.parse(localStorage.getItem(key)) || {}); } catch { cb({}); } } }; addEventListener("storage", fn); setTimeout(() => fn(), 0); return () => removeEventListener("storage", fn); },
-    async saveSpine(weekId, patch) { const key = "hra_demo_spine_" + weekId; const d = JSON.parse(localStorage.getItem(key) || "{}"); const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" && !Array.isArray(v) ? merge(a[k] && typeof a[k] === "object" ? a[k] : {}, v) : v; return a; }; merge(d, { ...patch, updatedAt: new Date().toISOString() }); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
-    async listSpine() { return Object.keys(localStorage).filter((k) => k.startsWith("hra_demo_spine_")).map((k) => ({ id: k.slice(15), ...JSON.parse(localStorage.getItem(k)) })); },
     // Team notes (demo)
     async addTeamNote(clientId, candId, note) { const key = "hra_demo_edits_" + clientId; const d = JSON.parse(localStorage.getItem(key) || "{}"); d.notes = d.notes || {}; (d.notes[candId] = d.notes[candId] || []).push(note); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
     async removeTeamNote(clientId, candId, note) { const key = "hra_demo_edits_" + clientId; const d = JSON.parse(localStorage.getItem(key) || "{}"); d.notes = d.notes || {}; d.notes[candId] = (d.notes[candId] || []).filter((n) => !(n.at === note.at && n.byUid === note.byUid)); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
@@ -388,9 +385,6 @@ async function createFirebaseStore() {
     addTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayUnion(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
     removeTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayRemove(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
     async getJobsReport() { const d = await fsMod.getDoc(fsMod.doc(db, "workable_meta", "jobs")); return d.exists() ? d.data() : null; },
-    watchSpine(weekId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "spine", weekId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Spine unavailable", e); cb({}, e); }); },
-    saveSpine(weekId, patch) { return fsMod.setDoc(fsMod.doc(db, "spine", weekId), { ...patch, updatedAt: new Date().toISOString() }, { merge: true }); },
-    async listSpine() { const q = await fsMod.getDocs(fsMod.collection(db, "spine")); return q.docs.map((d) => ({ id: d.id, ...d.data() })); },
     async getEdits(clientId) { const d = await fsMod.getDoc(fsMod.doc(db, "pipeline_edits", clientId)); return d.exists() ? d.data() : {}; },
     watchEdits(clientId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "pipeline_edits", clientId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Start dates unavailable", e); cb({}); }); },
     saveStart(clientId, candId, date, by) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { starts: { [candId]: date ? { startDate: date, by, at: new Date().toISOString() } : fsMod.deleteField() }, updatedAt: new Date().toISOString() }, { merge: true }); },
@@ -2359,9 +2353,8 @@ function applyAccess() {
     }
   }
   const su = $('#rail [data-tool="super"]'); if (su) su.hidden = !state.isSuper;
-  const sp = $('#rail [data-tool="spine"]'); if (sp) sp.hidden = !state.isSuper;
   const oj = $("#pl-openjobs"); if (oj) oj.hidden = !state.isAdmin;
-  if (currentTool && currentTool !== "super" && currentTool !== "spine" && toolAccess(currentTool) === "hidden") setTool(firstOpenTool(), true);
+  if (currentTool && currentTool !== "super" && toolAccess(currentTool) === "hidden") setTool(firstOpenTool(), true);
   moveRailGlow();
 }
 function startSettings() {
@@ -2545,8 +2538,8 @@ async function saveProfile(btn) {
 function setTool(id, silent) {
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
   if ((id === "insights" || id === "org") && !state.isAdmin) id = "requests";
-  if ((id === "super" || id === "spine") && !state.isSuper) id = "requests";
-  if (id !== "super" && id !== "spine" && toolAccess(id) === "hidden") id = firstOpenTool();
+  if (id === "super" && !state.isSuper) id = "requests";
+  if (id !== "super" && toolAccess(id) === "hidden") id = firstOpenTool();
   const changed = id !== currentTool;
   currentTool = id;
   try { localStorage.setItem(TOOL_KEY, id); } catch {}
@@ -2563,7 +2556,6 @@ function setTool(id, silent) {
   if (id === "insights") { IN.animate = true; startInsights(); }
   if (id === "training") { renderTraining(); } else { document.body.classList.remove("in-course"); stopTeamWatch(); }
   if (id === "super") renderSuper();
-  if (id === "spine") startSpine();
   if (id === "org") startOrg();
   if (id === "contacts") { renderContacts(); if (!silent && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#ct-q")?.focus({ preventScroll: true }), 350); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
@@ -6205,158 +6197,7 @@ async function downloadOpenJobs(btn) {
     const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
     toast(`Open jobs report downloaded (${jobs.length} jobs)`, "var(--s-done)");
-    if (state.isSuper) spineMark("ojr", "done", `Report downloaded: ${jobs.length} open jobs`);
   } catch (e) { console.error(e); toast("Couldn't build the report. Check your connection.", "#E2632B"); }
   finally { btn?.classList.remove("is-loading"); if (btn) btn.disabled = false; }
 }
-
-/* ==========================================================================
-   Weekly Maintenance & Security Spine (super admin)
-   ========================================================================== */
-const SPINE_CHECKS = [
-  { id: "ojr", group: "Operational", title: "Workable Open Jobs Report: clean, upload, share", cadence: "weekly", label: "Weekly (Mon)", action: "ojr" },
-  { id: "jazz", group: "Operational", title: "JazzHR ↔ Workable connections firing; candidates flowing", cadence: "weekly", label: "Ongoing spot-check" },
-  { id: "zapier", group: "Operational", title: "Zapier health (watch silent failures)", cadence: "weekly", label: "Weekly" },
-  { id: "jeanie", group: "Operational", title: "Jeanie spot-check: never answering as the wrong name", cadence: "weekly", label: "Weekly" },
-  { id: "indeed", group: "Operational", title: "Indeed / JazzHR reconnections", cadence: "weekly", label: "Ongoing" },
-  { id: "billing", group: "Operational", title: "Billing-meeting prep support (Holly / Jacqueline)", cadence: "weekly", label: "Weekly / Monthly" },
-  { id: "alerts", group: "Operational", title: "Fathom API health; MailParser alerts", cadence: "weekly", label: "On alert" },
-  { id: "renewals", group: "Operational", title: "Vendor renewals review (Workable Oct, Indeed Feb, Vector Choice Dec, Udemy / Zoom)", cadence: "quarterly", label: "Quarterly" },
-  { id: "vault", group: "Security", title: "Credential governance: all logins in the vault, none in shared files", cadence: "weekly", label: "Set up, then ongoing", vault: true },
-  { id: "access", group: "Security", title: "Access / least-privilege review across all systems", cadence: "monthly", label: "Monthly" },
-  { id: "offboard", group: "Security", title: "Offboarding: access revoked everywhere, same day", cadence: "weekly", label: "On event", offboard: true },
-  { id: "mfa", group: "Security", title: "MFA / Authenticator enforced where supported", cadence: "monthly", label: "Monthly + on add" },
-  { id: "admins", group: "Security", title: "Admin / owner inventory kept minimal and documented", cadence: "quarterly", label: "Quarterly" },
-  { id: "connectors", group: "Security", title: "Connector / integration audit (least-privilege)", cadence: "quarterly", label: "Quarterly" }
-];
-const SP = { week: null, data: {}, unsub: null, history: [], showLater: false };
-const isoDayLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const mondayOf = (d) => { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
-const spineDue = (c, mon) => c.cadence === "weekly" || (c.cadence === "monthly" && mon.getDate() <= 7) || (c.cadence === "quarterly" && mon.getDate() <= 7 && [0, 3, 6, 9].includes(mon.getMonth()));
-function startSpine(weekId) {
-  const id = weekId || SP.week || isoDayLocal(mondayOf(new Date()));
-  if (id !== SP.week || !SP.unsub) { SP.unsub?.(); SP.week = id; SP.data = {}; SP.unsub = state.store.watchSpine(id, (d) => { SP.data = d || {}; if (currentTool === "spine") renderSpine(); }); }
-  state.store.listSpine().then((h) => { SP.history = h; if (currentTool === "spine") renderSpine(); }).catch(() => {});
-  renderSpine();
-}
-function spineOverall(due, mon) {
-  const st = (c) => SP.data.checks?.[c.id]?.state || "";
-  const issues = due.filter((c) => st(c) === "issue").length, done = due.filter((c) => st(c)).length;
-  const fri = new Date(mon); fri.setDate(fri.getDate() + 4); fri.setHours(23, 59);
-  if (issues) return { key: "yellow", label: "Attention", emoji: "🟡" };
-  if (done === due.length) return { key: "green", label: "All clear", emoji: "🟢" };
-  if (Date.now() > fri.getTime()) return { key: "red", label: "Incomplete", emoji: "🔴" };
-  return { key: "progress", label: "In progress", emoji: "🟢" };
-}
-function offboardThisWeek(mon) {
-  const start = mon.getTime(), end = start + 7 * 86400e3;
-  const list = state.tickets.filter((t) => t.type === "offboarding");
-  const week = list.filter((t) => { const c = new Date(t.createdAt?.toDate ? t.createdAt.toDate() : t.createdAt || 0).getTime(); return c >= start && c < end; });
-  return { week: week.length, open: list.filter((t) => t.status !== "completed" && !t.archived).length };
-}
-function renderSpine() {
-  const root = $("#spine-root"); if (!root || !state.isSuper) return;
-  const mon = new Date(SP.week + "T12:00:00"), today = mondayOf(new Date());
-  const all = SPINE_CHECKS, due = all.filter((c) => spineDue(c, mon)), later = all.filter((c) => !spineDue(c, mon));
-  const st = (id) => SP.data.checks?.[id] || {};
-  const ov = spineOverall(due, mon);
-  const doneN = due.filter((c) => st(c.id).state).length;
-  const ob = offboardThisWeek(mon);
-  const v = SP.data.vault || {};
-  const row = (c) => { const s = st(c.id); return `<div class="sp-row is-${s.state || "todo"}" data-sp-row="${c.id}">
-      <div class="sp-main">
-        <div class="sp-btns" role="group" aria-label="${esc(c.title)}">
-          <button type="button" class="sp-b sp-done${s.state === "done" ? " is-on" : ""}" data-sp-set="${c.id}:done" title="Done"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
-          <button type="button" class="sp-b sp-issue${s.state === "issue" ? " is-on" : ""}" data-sp-set="${c.id}:issue" title="Issue found">!</button>
-        </div>
-        <div class="sp-text"><strong>${esc(c.title)}</strong><span class="sp-cad">${esc(c.label)}</span>
-          ${c.offboard ? `<span class="sp-auto">${ob.week} offboarding request${ob.week === 1 ? "" : "s"} this week · ${ob.open} still open</span>` : ""}
-          ${s.at ? `<span class="sp-when">${s.state === "issue" ? "Issue noted" : "Done"} ${esc(ago(s.at))}</span>` : ""}</div>
-        ${c.action === "ojr" ? `<button type="button" class="btn btn-ghost btn-mini" data-ojr>Download report</button>` : ""}
-      </div>
-      ${c.vault ? `<div class="sp-vault"><label>Moved<input type="number" min="0" data-sp-vault="moved" value="${esc(v.moved ?? "")}"/></label><span>of</span><label>Total<input type="number" min="0" data-sp-vault="total" value="${esc(v.total ?? "")}"/></label><label>Rotated<input type="number" min="0" data-sp-vault="rotated" value="${esc(v.rotated ?? "")}"/></label></div>` : ""}
-      <input class="sp-note" data-sp-note="${c.id}" value="${esc(s.note || "")}" placeholder="${s.state === "issue" ? "What's wrong, and what's next?" : "Note (optional)"}" maxlength="300"/>
-    </div>`; };
-  const groups = ["Operational", "Security"];
-  const weeks = SP.history.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 8);
-  root.innerHTML = `
-    <div class="hero sp-hero"><div><h1 class="hero-title">Weekly spine</h1><p class="hero-sub">Maintenance and security checks, and the written status to Aaron.</p></div>
-      <div class="sp-week"><button type="button" class="icon-btn" data-sp-week="-1" aria-label="Previous week">‹</button><span>Week of <b>${esc(mon.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }))}</b>${SP.week === isoDayLocal(today) ? `<em>This week</em>` : ""}</span><button type="button" class="icon-btn" data-sp-week="1" aria-label="Next week" ${SP.week >= isoDayLocal(today) ? "disabled" : ""}>›</button></div></div>
-    <div class="sp-summary is-${ov.key}"><span class="sp-dot"></span><strong>${esc(ov.label)}</strong><span>${doneN} of ${due.length} checks this week</span><div class="sp-prog"><i style="width:${due.length ? Math.round(doneN / due.length * 100) : 0}%"></i></div></div>
-    ${groups.map((g) => { const items = due.filter((c) => c.group === g); return items.length ? `<section class="sp-card"><h2>${g}</h2>${items.map(row).join("")}</section>` : ""; }).join("")}
-    ${later.length ? `<button type="button" class="sp-later-btn" data-sp-later>${SP.showLater ? "Hide" : "Show"} checks not due this week (${later.length})</button>${SP.showLater ? `<section class="sp-card sp-later">${later.map(row).join("")}</section>` : ""}` : ""}
-    <section class="sp-card"><h2>Status to Aaron</h2>
-      <label class="field"><span class="field-label">Needs Aaron <small>one line each: what you need and the cost or option</small></span><textarea data-sp-field="risks" rows="2" placeholder="Approve Bitwarden pilot (free) → paid plan ~$20/mo">${esc(SP.data.risks || "")}</textarea></label>
-      <label class="field"><span class="field-label">Next week <small>up to 3 lines</small></span><textarea data-sp-field="next" rows="2" placeholder="Finish vault migration">${esc(SP.data.next || "")}</textarea></label>
-      <div class="sp-preview"><span class="sp-preview-label">Preview</span><strong id="sp-subj">${esc(spineSubject())}</strong><pre id="sp-prev">${esc(spineStatusText())}</pre></div>
-      <div class="sp-send"><button type="button" class="btn btn-ghost" data-sp-copy>Copy status</button><button type="button" class="btn btn-primary" data-sp-email>Email status to Aaron</button>${SP.data.sentAt ? `<span class="sp-sent">Sent ${esc(ago(SP.data.sentAt))}</span>` : ""}</div>
-      ${CFG.spine?.statusTo ? "" : `<p class="sp-hint">Add Aaron's email in config.js → <code>spine.statusTo</code> to fill the “To” line automatically.</p>`}
-    </section>
-    ${weeks.length ? `<section class="sp-card"><h2>History</h2><div class="sp-hist">${weeks.map((w) => { const m = new Date(w.id + "T12:00:00"); const d = SPINE_CHECKS.filter((c) => spineDue(c, m)); const n = d.filter((c) => w.checks?.[c.id]?.state).length; const iss = d.some((c) => w.checks?.[c.id]?.state === "issue"); return `<button type="button" class="sp-h${w.id === SP.week ? " is-cur" : ""}" data-sp-goto="${w.id}"><span class="sp-hdot is-${iss ? "yellow" : n === d.length ? "green" : "grey"}"></span><b>${esc(m.toLocaleDateString([], { month: "short", day: "numeric" }))}</b><span>${n}/${d.length}</span>${w.sentAt ? `<em>Sent</em>` : ""}</button>`; }).join("")}</div></section>` : ""}`;
-}
-function spineMark(id, stateVal, note) {
-  const wk = isoDayLocal(mondayOf(new Date()));
-  const patch = { checks: { [id]: { state: stateVal, at: new Date().toISOString(), ...(note ? { note } : {}) } } };
-  return state.store.saveSpine(wk, patch).catch((e) => console.error(e));
-}
-/* Aaron wants it short: status, what needs him, issues only, key numbers, next week. Done items collapse into a count. */
-const spLines = (txt) => String(txt || "").split(/\n+/).map((l) => l.replace(/^[\s•\-*]+/, "").trim()).filter(Boolean);
-function spineSubject() {
-  const mon = new Date(SP.week + "T12:00:00"); const due = SPINE_CHECKS.filter((c) => spineDue(c, mon)); const ov = spineOverall(due, mon);
-  const iss = due.filter((c) => SP.data.checks?.[c.id]?.state === "issue").length;
-  return `Spine · ${mon.toLocaleDateString([], { month: "short", day: "numeric" })} · ${ov.emoji} ${iss ? `${iss} issue${iss === 1 ? "" : "s"}` : ov.label}`;
-}
-function spineStatusText() {
-  const mon = new Date(SP.week + "T12:00:00"); const due = SPINE_CHECKS.filter((c) => spineDue(c, mon)); const ov = spineOverall(due, mon);
-  const s = (c) => SP.data.checks?.[c.id] || {};
-  const done = due.filter((c) => s(c).state === "done").length;
-  const issues = due.filter((c) => s(c).state === "issue");
-  const open = due.filter((c) => !s(c).state);
-  const short = (c) => c.title.split(/[:(]/)[0].replace(/^Workable /, "").trim();
-  const v = SP.data.vault || {}; const ob = offboardThisWeek(mon);
-  const needs = spLines(SP.data.risks), next = spLines(SP.data.next);
-  const out = [`Status: ${ov.emoji} ${done}/${due.length} done${issues.length ? ` · ${issues.length} issue${issues.length === 1 ? "" : "s"}` : ""}${open.length && !issues.length && ov.key !== "green" ? ` · ${open.length} pending` : ""}`];
-  if (needs.length) out.push("", "Needs you:", ...needs.map((l) => `• ${l}`));
-  if (issues.length) out.push("", "Issues:", ...issues.map((c) => `• ${short(c)}${s(c).note ? `: ${s(c).note}` : ""}`));
-  if (open.length && ov.key === "red") out.push("", "Not done:", `• ${open.map(short).join(" · ")}`);
-  const facts = [];
-  if (v.total) facts.push(`Vault: ${v.moved || 0}/${v.total} moved · ${v.rotated || 0} rotated`);
-  if (ob.week || ob.open) facts.push(`Offboarding: ${ob.week} this week${ob.open ? ` · ${ob.open} open` : " · done"}`);
-  if (facts.length) out.push("", ...facts);
-  if (next.length) out.push("", "Next week:", ...next.slice(0, 3).map((l) => `• ${l}`));
-  return out.join("\n");
-}
-const spTimers = new Map();   // one save timer per box, so typing in one box never cancels another box's save
-document.addEventListener("click", (e) => {
-  const t = e.target; if (!(t instanceof Element)) return;
-  if (t.closest("[data-ojr]")) { downloadOpenJobs(t.closest("[data-ojr]")); return; }
-  if (!t.closest("#spine-root")) return;
-  const set = t.closest("[data-sp-set]"); if (set) { const [id, v] = set.dataset.spSet.split(":"); const cur = SP.data.checks?.[id]?.state; const next = cur === v ? "" : v;
-    SP.data = { ...SP.data, checks: { ...(SP.data.checks || {}), [id]: { ...(SP.data.checks?.[id] || {}), state: next, at: new Date().toISOString() } } }; renderSpine();
-    state.store.saveSpine(SP.week, { checks: { [id]: { state: next, at: new Date().toISOString() } } }).catch(() => toast("Couldn't save. Publish the latest firestore.rules.", "#E2632B"));
-    if (next === "issue") setTimeout(() => $(`[data-sp-note="${id}"]`)?.focus(), 30); return; }
-  const wk = t.closest("[data-sp-week]"); if (wk) { const m = new Date(SP.week + "T12:00:00"); m.setDate(m.getDate() + 7 * Number(wk.dataset.spWeek)); startSpine(isoDayLocal(m)); return; }
-  const go = t.closest("[data-sp-goto]"); if (go) { startSpine(go.dataset.spGoto); return; }
-  if (t.closest("[data-sp-later]")) { SP.showLater = !SP.showLater; renderSpine(); return; }
-  if (t.closest("[data-sp-copy]")) { navigator.clipboard?.writeText(spineStatusText()).then(() => toast("Status copied", "var(--s-done)")); return; }
-  if (t.closest("[data-sp-email]")) {
-    const subject = spineSubject();
-    location.href = `mailto:${encodeURIComponent(CFG.spine?.statusTo || "").replace(/%40/g, "@")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(spineStatusText())}`;
-    state.store.saveSpine(SP.week, { sentAt: new Date().toISOString() }).catch(() => {}); return;
-  }
-});
-document.addEventListener("input", (e) => {
-  const n = e.target.closest?.("[data-sp-note], [data-sp-field], [data-sp-vault]"); if (!n || !n.closest("#spine-root")) return;
-  const key = n.dataset.spNote || n.dataset.spField || "vault-" + n.dataset.spVault;
-  clearTimeout(spTimers.get(key));
-  spTimers.set(key, setTimeout(() => {
-    let patch;
-    if (n.dataset.spNote) patch = { checks: { [n.dataset.spNote]: { note: n.value } } };
-    else if (n.dataset.spField) patch = { [n.dataset.spField]: n.value };
-    else patch = { vault: { [n.dataset.spVault]: n.value === "" ? null : Number(n.value) } };
-    const deep = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" ? deep({ ...(a[k] || {}) }, v) : v; return a; };
-    SP.data = deep({ ...SP.data }, patch);
-    const pv = $("#sp-prev"); if (pv) pv.textContent = spineStatusText(); const sj = $("#sp-subj"); if (sj) sj.textContent = spineSubject();
-    state.store.saveSpine(SP.week, patch).catch(() => toast("Couldn't save. Publish the latest firestore.rules.", "#E2632B"));
-  }, 500));
-});
+document.addEventListener("click", (e) => { const b = e.target instanceof Element && e.target.closest("[data-ojr]"); if (b) downloadOpenJobs(b); });
