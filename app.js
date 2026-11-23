@@ -147,6 +147,18 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Manual start dates (demo)
+    async getEdits(clientId) { try { return JSON.parse(localStorage.getItem("hra_demo_edits_" + clientId)) || {}; } catch { return {}; } },
+    watchEdits(clientId, cb) {
+      const key = "hra_demo_edits_" + clientId;
+      const fn = (e) => { if (!e || e.key === key) { try { cb(JSON.parse(localStorage.getItem(key)) || {}); } catch { cb({}); } } };
+      addEventListener("storage", fn); setTimeout(() => fn(), 0); return () => removeEventListener("storage", fn);
+    },
+    async saveStart(clientId, candId, date, by) {
+      const key = "hra_demo_edits_" + clientId; const d = JSON.parse(localStorage.getItem(key) || "{}"); d.starts = d.starts || {};
+      if (date) d.starts[candId] = { startDate: date, by, at: new Date().toISOString() }; else delete d.starts[candId];
+      localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key }));
+    },
     // Org chart (demo)
     watchOrg(cb) {
       const fn = (e) => { if (!e || e.key === "hra_demo_org") { try { cb(JSON.parse(localStorage.getItem("hra_demo_org")) || null); } catch { cb(null); } } };
@@ -357,6 +369,9 @@ async function createFirebaseStore() {
       return fsMod.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => trDbError(e, "questions"));
     },
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
+    async getEdits(clientId) { const d = await fsMod.getDoc(fsMod.doc(db, "pipeline_edits", clientId)); return d.exists() ? d.data() : {}; },
+    watchEdits(clientId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "pipeline_edits", clientId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Start dates unavailable", e); cb({}); }); },
+    saveStart(clientId, candId, date, by) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { starts: { [candId]: date ? { startDate: date, by, at: new Date().toISOString() } : fsMod.deleteField() }, updatedAt: new Date().toISOString() }, { merge: true }); },
     watchOrg(cb) { return fsMod.onSnapshot(fsMod.doc(db, "org", "chart"), (d) => cb(d.exists() ? d.data() : null), (e) => { console.warn("Org chart unavailable", e); cb(null, e); }); },
     saveOrg(data) { return fsMod.setDoc(fsMod.doc(db, "org", "chart"), data); },
     watchSettings(cb) {
@@ -1932,6 +1947,10 @@ function bind() {
       if (f && to && f > to) [f, to] = [to, f];
       PL.range = { preset: "custom", from: f, to }; PL.pop = null; saveRange(); PL.animate = true; renderPipeline(); $('[data-pop="range"]')?.focus(); return;
     }
+    const stF = t.closest(".st-pop [data-status-filter]"); if (stF) { const k = stF.dataset.statusFilter; PL.filter.has(k) ? PL.filter.delete(k) : PL.filter.add(k); renderSheet(); return; }
+    if (t.closest("[data-status-clear]")) { PL.filter.clear(); PL.pop = null; renderSheet(); return; }
+    const sdB = t.closest("[data-sd]"); if (sdB) { openStartPicker(sdB); return; }
+    const sdC = t.closest("[data-sd-clear]"); if (sdC) { saveStartDate(sdC.dataset.sdClear, ""); return; }
     const clP = t.closest("[data-cl-pick]"); if (clP) { PL.pop = null; PL.clQ = ""; PL.animate = true; PL.client = clP.dataset.clPick; PL.filter.clear(); PL.search = ""; PL.colFilters = {}; renderPipeline(); return; }
     const clH = t.closest("[data-cl-hide]"); if (clH) { const name = clH.dataset.clHide; toggleHiddenClient(name); if (sameName(name, PL.client) && PL.hidden.has(name)) PL.client = null; renderPipeline(); return; }
     if (t.closest("[data-cl-hidden]")) { PL.clShowHidden = !PL.clShowHidden; renderClientList(amClients()); return; }
@@ -2027,6 +2046,7 @@ function bind() {
   });
 
   document.addEventListener("change", (e) => {
+    if (e.target.matches?.("[data-sd-input]")) { saveStartDate(e.target.dataset.sdInput, e.target.value); return; }
     if (e.target.id === "pl-from" || e.target.id === "pl-to") {
       PL.range[e.target.id === "pl-from" ? "from" : "to"] = e.target.value;
       if (PL.range.from && PL.range.to && PL.range.from > PL.range.to) [PL.range.from, PL.range.to] = [PL.range.to, PL.range.from];
@@ -2073,14 +2093,9 @@ function bind() {
   });
 
   document.addEventListener("input", (e) => {
+    if (e.target.matches?.("[data-sd-input]")) return;
     if (e.target.id === "cl-q") { PL.clQ = e.target.value; renderClientList(amClients()); return; }
-    if (e.target.matches?.("[data-col-filter]")) {
-      const key = e.target.dataset.colFilter, pos = e.target.selectionStart;
-      if (e.target.value) PL.colFilters[key] = e.target.value; else delete PL.colFilters[key];
-      renderSheet();
-      const again = $(`[data-col-filter="${key}"]`); again?.focus(); try { again?.setSelectionRange(pos, pos); } catch {}
-      return;
-    }
+
     if (e.target.id === "rp-from" || e.target.id === "rp-to") {
       const a = $("#rp-from").value, b = $("#rp-to").value, sum = $("#rp-sum"); $(".rp-custom")?.classList.add("is-on");
       sum.classList.remove("is-warn");
@@ -2555,24 +2570,28 @@ const PSTATUS = {
 };
 // Every column a person can show. The first nine are the spreadsheet's columns, in its order.
 const PL_COLS = [
-  { key: "name",        label: "Candidate Submitted",             w: 14,   xw: 24, locked: true },
-  { key: "role",        label: "Role Submitted",                  w: 12.5, xw: 30 },
-  { key: "submitted",   label: "Date Submitted",                  w: 8.5,  xw: 14, date: true },
-  { key: "interview",   label: "Wants to Interview (Y/N), When?", w: 13.5, xw: 34, wrap: true },
-  { key: "hired",       label: "Hired (Y/N)",                     w: 9,    xw: 22, wrap: true },
-  { key: "roleHired",   label: "Role hired for",                  w: 10,   xw: 24 },
-  { key: "startDate",   label: "Start Date",                      w: 8,    xw: 14, date: true },
-  { key: "recruiter",   label: "Recruiter",                       w: 8,    xw: 16 },
-  { key: "notes",       label: "Notes",                           w: 16.5, xw: 60, wrap: true },
-  { key: "stage",       label: "Workable stage",                  w: 10,   xw: 22, extra: true },
-  { key: "statusLabel", label: "Status",                          w: 9,    xw: 18, extra: true },
-  { key: "daysOpen",    label: "Days since submitted",            w: 7,    xw: 12, extra: true, num: true }
+  { key: "name",        label: "Name of Candidate Submitted",     w: 13,   xw: 24, locked: true },
+  { key: "role",        label: "Role Submitted for (Job Title)",  w: 12,   xw: 30 },
+  { key: "dAM",         label: "Date Submitted to AM",            w: 8.6,  xw: 14, date: true },
+  { key: "submitted",   label: "Date Submitted to HM",            w: 8.6,  xw: 14, date: true },
+  { key: "dIR",         label: "Date HM Interview Requested",     w: 8.6,  xw: 14, date: true },
+  { key: "dIS",         label: "Date HM Interview Scheduled",     w: 8.6,  xw: 14, date: true },
+  { key: "dOP",         label: "Date Moved to Offer Prep",        w: 8.6,  xw: 14, date: true },
+  { key: "dOA",         label: "Date Offer Accepted",             w: 8.6,  xw: 14, date: true },
+  { key: "startDate",   label: "Start Date",                      w: 8.5,  xw: 16, date: true, manual: true },
+  { key: "recruiter",   label: "Recruiter",                       w: 8.5,  xw: 16 },
+  { key: "stage",       label: "Workable Status",                 w: 10,   xw: 22 },
+  { key: "notes",       label: "Recruiter Notes",                 w: 15,   xw: 60, wrap: true },
+  { key: "statusLabel", label: "Status",                          w: 8,    xw: 18 },
+  { key: "daysOpen",    label: "Days since submitted",            w: 6,    xw: 12, extra: true, num: true }
 ];
 const COL_BY_KEY = Object.fromEntries(PL_COLS.map((c) => [c.key, c]));
 const defaultCols = () => PL_COLS.map((c) => ({ key: c.key, on: !c.extra }));
 
 function cellValue(r, key) {
   if (key === "statusLabel") return PSTATUS[r.status]?.short || "";
+  if (key === "startDate") return PL.edits?.[r.id]?.startDate || "";
+  if (key === "stage") return r.stage ? r.stage + (r.dq ? " (disqualified)" : "") : "";
   if (key === "daysOpen") {
     if (!r.submitted) return "";
     const [y, m, d] = r.submitted.slice(0, 10).split("-").map(Number);
@@ -2587,6 +2606,7 @@ function visibleCols() {
 
 /* ---- per-person column layout: saved to their account (and cached in this browser) ---- */
 function normalizeCols(saved) {
+  if (Array.isArray(saved) && saved.some((c) => ["interview", "hired", "roleHired"].includes(c?.key))) return defaultCols();
   const known = (Array.isArray(saved) ? saved : []).filter((c) => COL_BY_KEY[c?.key]);
   const missing = PL_COLS.filter((c) => !known.some((k) => k.key === c.key)).map((c) => ({ key: c.key, on: !c.extra && !known.length }));
   const out = [...known.map((c) => ({ key: c.key, on: Boolean(c.on) })), ...missing];
@@ -2774,6 +2794,82 @@ function renderPipeline() {
   renderSheet();
 }
 
+/* ---------- Column filters: a small list of the values that exist in that column ---------- */
+const COLF_BLANK = "(Blank)";
+function colfValue(r, key) {
+  const col = COL_BY_KEY[key]; let v = cellValue(r, key);
+  if (col?.date) { if (!v || !/^\d{4}-\d{2}/.test(v)) return COLF_BLANK; const [y, m] = v.split("-"); return new Date(+y, +m - 1, 1).toLocaleDateString([], { month: "short", year: "numeric" }); }
+  v = String(v ?? "").split("\n")[0].trim();
+  return v ? (v.length > 70 ? v.slice(0, 70) + "…" : v) : COLF_BLANK;
+}
+function colfRows() {
+  const c = clientDoc(PL.client); const rb = rangeBounds();
+  return (c?.candidates || []).filter((r) => !rb || inRange(r, rb));
+}
+function openColf(key, anchor) {
+  closeColf();
+  const col = COL_BY_KEY[key]; if (!col) return;
+  const counts = new Map();
+  for (const r of colfRows()) { const v = colfValue(r, key); counts.set(v, (counts.get(v) || 0) + 1); }
+  let vals = [...counts.entries()];
+  if (col.date) vals.sort((a, b) => a[0] === COLF_BLANK ? 1 : b[0] === COLF_BLANK ? -1 : new Date("1 " + b[0]) - new Date("1 " + a[0]));
+  else vals.sort((a, b) => a[0] === COLF_BLANK ? 1 : b[0] === COLF_BLANK ? -1 : b[1] - a[1] || a[0].localeCompare(b[0]));
+  const sel = new Set(PL.colFilters[key] || []);
+  const pop = document.createElement("div");
+  pop.className = "colf-pop pop"; pop.id = "colf-pop"; pop.dataset.key = key;
+  pop.innerHTML = `<div class="colf-head"><strong>${esc(col.label)}</strong>${sel.size ? `<button type="button" class="link-btn" data-colf-reset>Clear</button>` : ""}</div>
+    ${vals.length > 8 ? `<label class="search colf-search"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg><input type="search" id="colf-q" placeholder="Search" autocomplete="off"/></label>` : ""}
+    <div class="colf-list">${vals.length ? vals.map(([v, n], i) => `<button type="button" class="colf-opt${sel.has(v) ? " is-on" : ""}" data-colf-val="${esc(v)}" style="--i:${Math.min(i, 12)}"><span class="st-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="colf-v${v === COLF_BLANK ? " is-blank" : ""}">${esc(v)}</span><span class="st-n">${n}</span></button>`).join("") : `<p class="colf-none">Nothing to filter yet.</p>`}</div>`;
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect(), w = 270;
+  pop.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.right - w + 8)) + "px";
+  pop.style.top = Math.min(r.bottom + 8, window.innerHeight - 140) + "px";
+  pop.style.maxHeight = Math.max(160, window.innerHeight - r.bottom - 24) + "px";
+  anchor.classList.add("is-open");
+  setTimeout(() => $("#colf-q")?.focus(), 30);
+}
+function closeColf() { $("#colf-pop")?.remove(); $$(".colf-btn.is-open").forEach((b) => b.classList.remove("is-open")); }
+function toggleColfValue(key, v) {
+  const set = new Set(PL.colFilters[key] || []); set.has(v) ? set.delete(v) : set.add(v);
+  if (set.size) PL.colFilters[key] = [...set]; else delete PL.colFilters[key];
+  renderSheet();
+  const btn = $(`[data-colf="${key}"]`); if (btn) openColf(key, btn);
+}
+document.addEventListener("click", (e) => {
+  const t = e.target; if (!(t instanceof Element)) return;
+  const b = t.closest("[data-colf]"); if (b) { e.stopPropagation(); $("#colf-pop")?.dataset.key === b.dataset.colf ? closeColf() : openColf(b.dataset.colf, b); return; }
+  const pop = t.closest("#colf-pop");
+  if (pop) { const o = t.closest("[data-colf-val]"); if (o) toggleColfValue(pop.dataset.key, o.dataset.colfVal); if (t.closest("[data-colf-reset]")) { delete PL.colFilters[pop.dataset.key]; renderSheet(); closeColf(); } return; }
+  if ($("#colf-pop")) closeColf();
+}, true);
+document.addEventListener("input", (e) => { if (e.target.id !== "colf-q") return; const q = lower(e.target.value); $$("#colf-pop .colf-opt").forEach((o) => { o.hidden = q && !lower(o.dataset.colfVal).includes(q); }); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#colf-pop")) closeColf(); });
+document.addEventListener("scroll", (e) => { if ($("#colf-pop") && !e.target?.closest?.("#colf-pop")) closeColf(); }, true);
+
+const slug = (s) => lower(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "client";
+/* ---------- Manual start dates: one small Firebase record per client, read only for the client on screen ---------- */
+function watchClientEdits() {
+  const id = PL.client ? slug(PL.client) : "";
+  if (id === PL.editsFor) return;
+  PL.editsUnsub?.(); PL.edits = {}; PL.editsFor = id;
+  if (!id) return;
+  PL.editsUnsub = state.store.watchEdits(id, (d) => { PL.edits = d?.starts || {}; if (currentTool === "pipeline") renderSheet(); });
+}
+function openStartPicker(btn) {
+  const id = btn.dataset.sd, cur = PL.edits?.[id]?.startDate || "";
+  const td = btn.closest("td");
+  td.innerHTML = `<span class="sd-edit"><input type="date" value="${esc(cur)}" data-sd-input="${esc(id)}" aria-label="Start date"/>${cur ? `<button type="button" class="sd-clear" data-sd-clear="${esc(id)}" aria-label="Remove start date" title="Remove">×</button>` : ""}</span>`;
+  const inp = td.querySelector("input"); inp.focus(); try { inp.showPicker?.(); } catch {}
+  inp.addEventListener("blur", () => setTimeout(() => { if (!td.contains(document.activeElement)) renderSheet(); }, 150));
+}
+async function saveStartDate(id, date) {
+  const cid = slug(PL.client || "");
+  PL.edits = { ...PL.edits }; if (date) PL.edits[id] = { startDate: date, by: state.user.name }; else delete PL.edits[id];
+  renderSheet();
+  try { await state.store.saveStart(cid, id, date, state.user.name); toast(date ? "Start date saved" : "Start date removed", "var(--s-done)"); }
+  catch (e) { console.error(e); toast(e?.code === "permission-denied" ? "Saving is blocked. Publish the latest firestore.rules." : "Couldn't save the start date.", "#E2632B"); }
+}
+
 /* ---------- One client selector (replaces the row of tabs) ---------- */
 function clientStats(c) {
   const inR = (c.candidates || []).filter((r) => inRange(r));
@@ -2903,6 +2999,7 @@ function rangePopHTML() {
 }
 
 function renderSheet() {
+  watchClientEdits();
   const el = $("#pl-sheet");
   const c = amClients().find((x) => sameName(x.name, PL.client));
   if (!c) { el.innerHTML = `<div class="sheet-card">${emptyBlock("No clients for this account manager", "Add client names to this account manager in config.js.")}</div>`; return; }
@@ -2913,12 +3010,9 @@ function renderSheet() {
   const counts = Object.fromEntries(Object.keys(PSTATUS).map((k) => [k, rows.filter((r) => r.status === k).length]));
   const s = lower(PL.search);
   let shown = rows.filter((r) => (!PL.filter.size || PL.filter.has(r.status)) && (!s || lower([r.name, r.role, r.recruiter, r.notes, r.interview, r.hired].join(" ")).includes(s)));
-  // column filters: match what the cell shows (so dates work as displayed, e.g. "11/2026")
-  const cf = Object.entries(PL.colFilters).filter(([, v]) => v && v.trim());
-  if (cf.length) {
-    const colsAll = PL.cols.filter((x) => x.on);
-    shown = shown.filter((r) => cf.every(([k, v]) => { const col = colsAll.find((x) => x.key === k); if (!col) return true; return lower(cellHTML(r, col, false).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'").replace(/\s+/g, " ")).includes(lower(v.trim())); }));
-  }
+  // column filters: each column keeps a set of chosen values (dates grouped by month)
+  const cf = Object.entries(PL.colFilters).filter(([, v]) => v && v.length);
+  if (cf.length) shown = shown.filter((r) => cf.every(([k, vals]) => vals.includes(colfValue(r, k))));
   shown = shown.slice().sort((a, b) => (a.submitted || "").localeCompare(b.submitted || "") * (PL.newest ? -1 : 1));
   const interviewed = rows.filter((r) => /^y/i.test(r.interview || "")).length;
   const loc = c.location || extra.location, hrs = c.hours || extra.hours;
@@ -2945,11 +3039,16 @@ function renderSheet() {
       ${Object.keys(PL.colFilters).length ? `<div class="colf-bar"><span>Filtered by ${Object.keys(PL.colFilters).length} column${Object.keys(PL.colFilters).length === 1 ? "" : "s"}</span><button type="button" class="btn btn-ghost btn-mini" data-colf-clear>Clear filters</button></div>` : ""}
       <div class="collapse${PL.collapsed.has("candidates") ? " is-closed" : " is-settled"}" data-collapse-body="candidates"><div class="collapse-inner">
       <div class="sheet-tools">
-        <div class="legend" role="group" aria-label="Filter by status">
-          ${Object.entries(PSTATUS).map(([k, v]) => `
-            <button type="button" class="legend-item${PL.filter.has(k) ? " is-on" : ""}" data-status-filter="${k}" aria-pressed="${PL.filter.has(k)}" style="--sw:#${v.fill};--bar:${v.bar}" title="${esc(v.label)}">
-              <span class="legend-sw"></span><span class="legend-label">${esc(v.short)}</span><span class="legend-n">${counts[k]}</span>
-            </button>`).join("")}
+        <div class="st-wrap">
+          <button type="button" class="st-btn${PL.filter.size ? " is-active" : ""}" data-pop="status" aria-haspopup="dialog" aria-expanded="${PL.pop === "status"}">
+            <span class="st-dots">${(PL.filter.size ? [...PL.filter] : Object.keys(PSTATUS)).slice(0, 5).map((k) => `<i style="--bar:${PSTATUS[k].bar}"></i>`).join("")}</span>
+            <span>${PL.filter.size === 0 ? "All statuses" : PL.filter.size === 1 ? esc(PSTATUS[[...PL.filter][0]].short) : `${PL.filter.size} statuses`}</span>
+            <svg class="range-chev" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          ${PL.pop === "status" ? `<div class="st-pop pop" role="dialog" aria-label="Filter by status">
+            ${Object.entries(PSTATUS).map(([k, v], i) => `<button type="button" class="st-opt${PL.filter.has(k) ? " is-on" : ""}" data-status-filter="${k}" aria-pressed="${PL.filter.has(k)}" style="--bar:${v.bar};--sw:#${v.fill};--i:${i}"><span class="st-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="st-sw"></span><span class="st-name">${esc(v.short)}</span><span class="st-n">${counts[k]}</span></button>`).join("")}
+            ${PL.filter.size ? `<button type="button" class="st-clear" data-status-clear>Show all statuses</button>` : ""}
+          </div>` : ""}
         </div>
         <div class="sheet-tools-right">
           <div class="range-wrap">
@@ -2974,9 +3073,9 @@ function renderSheet() {
         ? `<div class="range-empty">${emptyBlock("No candidates in this date range", `Nobody was submitted to ${c.name} ${rangeLabel(rb).toLowerCase().startsWith("from") || rangeLabel(rb).toLowerCase().startsWith("until") ? rangeLabel(rb).toLowerCase() : "between " + rangeLabel(rb)}.`)}<button type="button" class="btn btn-ghost" data-range-clear>Show all dates</button></div>`
         : c.empty || !rows.length
         ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
-        : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, cols.length * 92)}px">
+        : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, Math.round(cols.reduce((t, c) => t + c.w, 0) * 11.5))}px">
             <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
-            <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col"><span class="th-label">${esc(col.label)}</span><label class="colf${PL.colFilters[col.key] ? " is-on" : ""}"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg><input type="text" data-col-filter="${col.key}" value="${esc(PL.colFilters[col.key] || "")}" placeholder="Filter" aria-label="Filter ${esc(col.label)}" autocomplete="off"/></label></th>`).join("")}</tr></thead>
+            <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col"><span class="th-in"><span class="th-label">${esc(col.label)}</span><button type="button" class="colf-btn${PL.colFilters[col.key]?.length ? " is-on" : ""}" data-colf="${col.key}" aria-label="Filter ${esc(col.label)}" title="Filter">${PL.colFilters[col.key]?.length ? `<b>${PL.colFilters[col.key].length}</b>` : ""}<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg></button></span></th>`).join("")}</tr></thead>
             <tbody>${shown.length ? shown.map((r, i) => `
               <tr class="pl-row" data-status="${r.status}" style="--sw:#${PSTATUS[r.status]?.fill || "FFFFFF"};--bar:${PSTATUS[r.status]?.bar || "#A3B1C6"};--i:${Math.min(i, 18)}" title="${esc(PSTATUS[r.status]?.label || "")}">
                 ${cols.map((col, ci) => cellHTML(r, col, ci === 0)).join("")}
@@ -2999,8 +3098,9 @@ function cellHTML(r, col, first) {
   if (col.key === "notes") return v
     ? `<td class="col-notes"><button type="button" class="note-btn" data-note="${esc(r.id)}" aria-label="Read the full notes for ${esc(r.name)}"><span class="notes">${esc(v)}</span><span class="note-open" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></span></button></td>`
     : `<td class="col-notes"></td>`;
+  if (col.key === "startDate") return `<td class="col-startDate"><button type="button" class="sd-cell${v ? " has-date" : ""}" data-sd="${esc(r.id)}" title="${v ? "Change the start date" : "Add a start date"}">${v ? esc(v) : `<span class="sd-add"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add</span>`}</button></td>`;
   if (col.key === "statusLabel") return `<td class="col-statusLabel"><span class="st-dot" style="--bar:${PSTATUS[r.status]?.bar}"></span>${esc(v)}</td>`;
-  return `<td class="col-${col.key}${col.num ? " num" : ""}">${esc(v)}</td>`;
+  return `<td class="col-${col.key}${col.num ? " num" : ""}${col.date ? " is-date" : ""}">${esc(v)}</td>`;
 }
 
 const GRIP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
@@ -3071,7 +3171,7 @@ function openNote(id) {
   if (!r) return;
   const st = PSTATUS[r.status] || PSTATUS.in_process;
   const fields = [["Date submitted", fmtDay(r.submitted)], ["Wants to interview", r.interview], ["Hired", r.hired], ["Role hired for", r.roleHired],
-    ["Start date", /^\d{4}-/.test(r.startDate || "") ? fmtDay(r.startDate) : r.startDate], ["Recruiter", r.recruiter], ["Workable stage", r.stage]].filter(([, v]) => v);
+    ["Start date", cellValue(r, "startDate") ? fmtDay(cellValue(r, "startDate")) : ""], ["Recruiter", r.recruiter], ["Workable stage", r.stage]].filter(([, v]) => v);
   $("#note-body").innerHTML = `
     <div class="note-head">
       <span class="note-status" style="--sw:#${st.fill};--bar:${st.bar}"><i></i>${esc(st.short)}</span>
@@ -3182,7 +3282,12 @@ async function downloadWorkbook(btn) {
     const fill = (hex) => ({ type: "pattern", pattern: "solid", fgColor: { argb: "FF" + hex } });
     const used = new Set();
 
+    // manual start dates live in Firebase per client: load them for every client in this workbook
+    const editsByClient = {};
+    await Promise.all(clients.map(async (c) => { try { editsByClient[c.name] = (await state.store.getEdits(slug(c.name)))?.starts || {}; } catch { editsByClient[c.name] = {}; } }));
+    const screenEdits = PL.edits;
     for (const c of clients) {
+      PL.edits = editsByClient[c.name] || {};
       let name = c.name.replace(/[\[\]:*?/\\]/g, " ").slice(0, 31).trim() || "Client";
       while (used.has(name)) name = name.slice(0, 28) + " " + (used.size + 1);
       used.add(name);
@@ -3253,6 +3358,7 @@ async function downloadWorkbook(btn) {
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const d = new Date();
     const rbx = rangeBounds();
+    PL.edits = screenEdits;
     const fname = `Weekly Hiring Update - ${am.name}${rbx ? ` - ${rangeLabel(rbx).replace(/,/g, "")}` : ""} - ${d.getMonth() + 1}-${d.getDate()}-${d.getFullYear()}.xlsx`.replace(/[\\/:*?"<>|]/g, "-");
     const url = URL.createObjectURL(blob);
     const a = Object.assign(document.createElement("a"), { href: url, download: fname });
@@ -3336,7 +3442,14 @@ function demoClients() {
         roleHired: status === "hired" ? role : "",
         startDate: status === "hired" ? iso(Math.max(hireDay - 14, -21)) : "",
         recruiter, notes: pick(notesBy[status]) + (rnd() < .3 ? `\n${md(Math.max(daysAgo - 3, 0))} Follow-up: ${pick(["candidate confirmed availability", "client asked for a second interview", "sent reminder text", "references checked, all positive"])}.` : ""),
-        status, link: ""
+        status, link: "",
+        dAM: iso(daysAgo + 1 + Math.floor(rnd() * 3)),
+        dIR: reachedInterview ? iso(ivDay + 1) : "",
+        dIS: reachedInterview ? iso(ivDay) : "",
+        dOP: isHire ? iso(hireDay + 3) : "",
+        dOA: status === "hired" ? iso(hireDay + 1) : "",
+        stage: status === "hired" ? "Hired" : status === "in_process" ? (reachedInterview ? "Hiring Mgr Interview Scheduled" : "Submitted to Hiring Manager") : status === "fell_through" ? "Offer Prep/Made" : "Submitted to Hiring Manager",
+        dq: status === "passed" || status === "no_show" || status === "fell_through"
       };
     }).sort((a, b) => a.submitted.localeCompare(b.submitted));
 

@@ -29,10 +29,11 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INSPECT = process.argv.includes("--inspect");
 const RESTART = process.argv.includes("--restart-full-load");
-const SUGGEST = process.argv.includes("--suggest-ams");          // preview + suggested account manager per client   // forget progress and start the first load over
+const SUGGEST = process.argv.includes("--suggest-ams");
+const REBUILD = process.argv.includes("--rebuild");             // rebuild every client page from saved data (0 Workable requests)          // preview + suggested account manager per client   // forget progress and start the first load over
 const DRY = process.argv.includes("--dry-run") || process.argv.includes("--suggest-ams");   // build everything, print a summary, write nothing
 const ONLY = (process.env.SYNC_CLIENT || "").trim();          // refresh a single client (from the Refresh button)
-const REQUESTED_BY = (process.env.SYNC_REQUESTED_BY || "").trim() || "schedule";
+const REQUESTED_BY = (process.env.SYNC_REQUESTED_BY || "").trim() || (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" ? "manual run" : "schedule");
 // Safety settings (see WORKABLE-SETUP.md → "Testing safely")
 const GENTLE = (process.env.WORKABLE_GENTLE ?? "1") !== "0";          // 1 request every 3 seconds, stop on any slow-down
 const MAX_CALLS = Number(process.env.WORKABLE_MAX_REQUESTS || (GENTLE ? 400 : 0)) || 0;  // hard cap per run (0 = none)
@@ -189,6 +190,10 @@ function buildRow(cand, job, acts) {
   const reached = (t) => (RANK[type] || 0) >= RANK[t] || Boolean(firstInto(t));
 
   const subAct = firstInto("submitted");
+  // exact stage dates for the Client Pipeline columns (config.js → workable.stageDates)
+  const SD = CFG.stageDates || {};
+  const firstExact = (k) => { const names = (SD[k] || []).map(lower); return names.length ? moves.find((a) => names.includes(lower(a.stage_name || ""))) : null; };
+  const amAct = firstExact("submittedToAM"), irAct = firstExact("interviewRequested"), isAct = firstExact("interviewScheduled"), opAct = firstExact("offerPrep"), oaAct = firstExact("offerAccepted");
   const intAct = firstInto("interview");
   const hireAct = firstInto("hired");
   const comments = acts.filter((a) => lower(a.action) === "comment" && a.body).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -220,12 +225,18 @@ function buildRow(cand, job, acts) {
     id: String(cand.id),
     name: cand.name || [cand.firstname, cand.lastname].filter(Boolean).join(" "),
     role: job.title,
-    submitted: day(subAct?.created_at || cand.updated_at || cand.created_at),
+    submitted: day(subAct?.created_at || cand.created_at || cand.updated_at),   // no recorded move: use the application date (last-updated can be Workable housekeeping)
     interview,
     hired,
     roleHired: type === "hired" ? job.title : "",
     startDate: "",
-    recruiter: subAct?.member?.name || "",
+    recruiter: amAct?.member?.name || subAct?.member?.name || "",   // who submitted to the AM (the recruiter), else who submitted to the HM
+    dAM: day(amAct?.created_at || ""),
+    dIR: day(irAct?.created_at || ""),
+    dIS: day(isAct?.created_at || ""),
+    dOP: day(opAct?.created_at || ""),
+    dOA: day(oaAct?.created_at || ""),
+    dq: Boolean(disq),
     notes,
     status,
     interviewAt: day(intAct?.created_at || ""),
@@ -288,7 +299,8 @@ function entryToRow(e, job) {
 
 /* ---------- Reading Workable efficiently ----------
    The first load is candidate-driven: the job list once, then candidates updated in the window (100 per request,
-   no history), then the full history ONLY for candidates the dashboard shows (reached "Submitted to Hiring
+   no history; only candidates who applied within the window, since Workable's background housekeeping marks
+   many old records as "updated"), then the full history ONLY for candidates the dashboard shows (reached "Submitted to Hiring
    Manager" or beyond) and for recently screened candidates (weekly sourcing numbers). Everyone else (for example
    Jeanie's screening conversations with candidates who were never submitted) costs no extra requests. */
 const sourcingSince = () => Date.now() - Math.min(Math.max(CFG.sourcingWeeks || 8, 1), 26) * 7 * 86400e3 - 7 * 86400e3;
@@ -304,7 +316,19 @@ async function listAllJobs() {
   const seen = new Set();
   return jobs.filter((j) => j.shortcode && !seen.has(j.shortcode) && seen.add(j.shortcode));
 }
-async function historyFor(id) { return all(`/candidates/${id}/activities?limit=100`, "activities", 10); }
+const unknownStages = new Map();   // stage names seen in histories that config.js doesn't map
+async function historyFor(id) {
+  const acts = await all(`/candidates/${id}/activities?limit=100`, "activities", 10);
+  for (const a of acts) if (a.stage_name && !stageType(a.stage_name)) unknownStages.set(a.stage_name, (unknownStages.get(a.stage_name) || 0) + 1);
+  return acts;
+}
+function reportUnknownStages() {
+  const ignore = new Set(["sourced", "applied", "initial contact made", "jeanie in screening", "ai opt out", "jeanie candidate not responsive", "jeanie candidate not interested", "phone screen scheduled", "candidate hold"]);
+  const list = [...unknownStages.entries()].filter(([n]) => !ignore.has(lower(n))).sort((a, b) => b[1] - a[1]);
+  if (!list.length) return;
+  console.log("\nStage names found in candidate histories that config.js doesn't map (check whether any mean 'submitted', 'interview', 'offer' or 'hired'):");
+  for (const [n, c] of list.slice(0, 40)) console.log(`  ${n}  (${c} moves)`);
+}
 
 async function saveJobCache(doc) {
   doc.cands = (doc.cands || []).filter(inWindow);
@@ -479,7 +503,7 @@ async function firstLoad(state) {
       full.jobs = Object.fromEntries(jobs.map((j) => [j.shortcode, jobMetaCompact(j)]).filter(([, m]) => m.client));
       await saveJobsMeta(full.jobs);
       full.phase = "candidates";
-      full.next = `/candidates?updated_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
+      full.next = `/candidates?created_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
       await save();
       console.log(`  Jobs: ${jobs.length} in Workable, ${Object.keys(full.jobs).length} belong to clients.`);
     }
@@ -525,6 +549,7 @@ async function firstLoad(state) {
   state.mode = "incremental"; state.full = null;
   await rebuildClients("all", state);
   await saveState({ mode: "incremental", cursor: state.cursor, full: null, hashes: state.hashes, parts: state.parts, counts: state.counts, lastRebuildDay: state.lastRebuildDay });
+  reportUnknownStages();
   console.log(`\n✔ First load complete. From now on, runs only fetch what changed.`);
 }
 
@@ -540,8 +565,10 @@ async function changesOnly(state) {
   for (const j of changedJobs) if (j.shortcode) metas[j.shortcode] = jobMetaCompact(j);
   const pending = makePending();
   let histories = 0;
+  let oldSkipped = 0;
   for (const c of changedCands) {
     const sc = c.job?.shortcode; if (!sc) continue;
+    if (new Date(c.created_at || 0).getTime() < since) { oldSkipped++; continue; }   // applied before the window: Workable housekeeping, not real work
     if (!metas[sc]) {
       const snap = await db.collection(CACHE).doc(sc).get();
       if (snap.exists) { const d = snap.data(); metas[sc] = { title: d.title, client: d.client, state: d.state, jobUpdated: d.jobUpdated }; }
@@ -559,7 +586,7 @@ async function changesOnly(state) {
   }
   const touched = await flushPending(pending, metas);
   for (const [k, m] of Object.entries(metas)) if (k.startsWith("__old_") && m.client) touched.add(m.client);
-  console.log(`  ${histories} candidates needed their history.`);
+  console.log(`  ${histories} candidates needed their history${oldSkipped ? `; ${oldSkipped} older records skipped (applied before the window)` : ""}.`);
   const today = runStart.slice(0, 10);
   const daily = state.lastRebuildDay !== today;   // once a day: refresh every client (weeks roll over, old entries age out)
   if (daily) console.log("  Daily refresh of all clients (no Workable requests needed).");
@@ -572,21 +599,33 @@ async function changesOnly(state) {
 async function oneClient(state) {
   RUN_KIND = "one client";
   const jobs = (await listAllJobs()).filter((j) => lower(clientForJob(j)) === lower(ONLY));
-  console.log(`Refreshing only ${nm(`"${ONLY}"`, "client")} (${jobs.length} jobs), requested by ${REQUESTED_BY}`);
+  console.log(`Refreshing only ${nm(`"${ONLY}"`, "client")} (${jobs.length} jobs), ${["manual run", "schedule"].includes(REQUESTED_BY) ? REQUESTED_BY : `requested by ${REQUESTED_BY}`}`);
+  if (!jobs.length) { console.log("No jobs found for that client. Check the name matches the Workable department exactly."); return ONLY; }
   const metas = Object.fromEntries(jobs.map((j) => [j.shortcode, jobMetaCompact(j)]));
+  const name = clientForJob(jobs[0]);
   const pending = makePending();
-  for (const j of jobs) {
-    const cands = (await all(`/candidates?shortcode=${j.shortcode}&limit=100`, "candidates", 60)).filter((x) => new Date(x.updated_at || x.created_at || 0).getTime() > since);
-    for (const c of cands) {
-      const entry = basicEntry(c);
-      if (needsHistory(c)) { const e = compactCandidate(c, await historyFor(c.id)); entry.mv = e.mv; entry.cm = e.cm; }
-      addPending(pending, j.shortcode, entry);
+  const after = encodeURIComponent(new Date(since).toISOString());
+  let done = 0, cands = 0, hist = 0;
+  try {
+    for (const j of jobs) {
+      // only candidates who applied within the window (old applicants on archived jobs cost nothing)
+      const list = await all(`/candidates?shortcode=${j.shortcode}&created_after=${after}&limit=100`, "candidates", 60);
+      for (const c of list) {
+        const entry = basicEntry(c); cands++;
+        if (needsHistory(c)) { const e = compactCandidate(c, await historyFor(c.id)); entry.mv = e.mv; entry.cm = e.cm; hist++; }
+        addPending(pending, j.shortcode, entry);
+      }
+      await flushPending(pending, metas);
+      done++;
     }
-    await flushPending(pending, metas);
+  } finally {
+    // Show whatever was read, even if the run stopped early.
+    try { await flushPending(pending, metas); } catch {}
+    console.log(`  ${done} of ${jobs.length} jobs read: ${cands} candidates, ${hist} histories.`);
+    await rebuildClients(new Set([name]), state);
+    await saveState({ hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {} });
+    if (done < jobs.length) console.log("  This client is only partly loaded. Run the same client again with a higher safety cap to finish it.");
   }
-  const name = jobs[0] ? clientForJob(jobs[0]) : ONLY;
-  await rebuildClients(new Set([name]), state);
-  await saveState({ hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {} });
   return name;
 }
 
@@ -616,6 +655,7 @@ async function suggestAccountManagers(sample) {
   console.log("accountManagers: [");
   for (const [who, clients] of byPerson) console.log(`  { name: ${JSON.stringify(who)}, email: "", clients: ${JSON.stringify(clients.map((c) => c.replace(/ \(\d+\/\d+\)$/, "")))} },`);
   console.log("],");
+  reportUnknownStages();
   console.log("\nThis log shows client and team names: delete it after copying (Actions → this run → ⋯ → Delete all logs).");
 }
 
@@ -631,7 +671,7 @@ async function preview() {
     jobCount = jobs.length;
     clientJobs = Object.fromEntries(jobs.map((j) => [j.shortcode, clientForJob(j)]).filter(([, c]) => c && (!ONLY || lower(c) === lower(ONLY))));
     console.log(`Preview: ${jobs.length} jobs in Workable, ${Object.keys(clientJobs).length} belong to clients${ONLY ? " (this client)" : ""}.`);
-    let next = `/candidates?updated_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
+    let next = `/candidates?created_after=${encodeURIComponent(new Date(since).toISOString())}&limit=100`;
     while (next) {
       const data = await api(next);
       for (const c of data?.candidates || []) {
@@ -656,7 +696,7 @@ async function preview() {
     console.log(`So far ${queue} candidates would need their history. Raise the safety cap (for example 1500) to read the whole list and get an exact first-load size.`);
   } else {
     const total = jobPages + pages + queue;
-    console.log(`\nCandidates updated in the last ${CFG.lookbackDays || 365} days: ${cands} (${pages} pages).`);
+    console.log(`\nCandidates who applied in the last ${CFG.lookbackDays || 365} days, on client jobs: ${cands} (${pages} pages).`);
     console.log(`Candidates whose history is needed (submitted or recently screened): ${queue}.`);
     console.log(`A full first load would need about ${total} requests (about ${Math.round(total * FULL_PACE_MS / 60000)} minutes at 1 request every ${FULL_PACE_MS / 1000} s). It can be spread over several runs.`);
   }
@@ -674,8 +714,15 @@ async function sync() {
     console.log(`\n✔ Refreshed ${nm(`"${name}"`, "client")} (${calls} API calls).`);
     return;
   }
-  if (RESTART || state.mode !== "incremental" || !state.cursor) await firstLoad(state);
+  if (REBUILD) {
+    RUN_KIND = "rebuild pages (no Workable requests)";
+    if (state.mode !== "incremental") { console.log("The first load isn't finished yet; run mode sync instead."); return; }
+    await rebuildClients("all", state);
+    await saveState({ hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {}, lastRebuildDay: state.lastRebuildDay || "" });
+    console.log("\n✔ All client pages rebuilt from saved data.");
+  } else if (RESTART || state.mode !== "incremental" || !state.cursor) await firstLoad(state);
   else await changesOnly(state);
+  if (REBUILD) { await setStatus({ running: false, ok: true, message: "", lastRebuildAt: new Date().toISOString() }); return; }
   const counts = state.counts || {};
   await setStatus({
     lastSync: new Date().toISOString(), ok: true, clients: Object.keys(counts).length, candidates: Object.values(counts).reduce((t, n) => t + n, 0),
@@ -686,7 +733,7 @@ async function sync() {
 (INSPECT ? inspect() : sync()).catch(async (e) => {
   if (e instanceof SafeStop) {
     console.log("\n■ " + e.message);
-    if (!INSPECT && !DRY) console.log("Progress is saved. The next run continues where this one stopped.");
+    if (!INSPECT && !DRY && !ONLY) console.log("Progress is saved. The next run continues where this one stopped.");
     try { if (!INSPECT && !DRY) await setStatus({ running: false, ok: true, message: "" }); } catch {}
     process.exitCode = 0; return;
   }

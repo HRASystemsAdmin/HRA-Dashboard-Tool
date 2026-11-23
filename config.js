@@ -273,6 +273,14 @@ window.HRA_CONFIG = {
     noShowWords:      ["no show", "no-show", "ncns", "no call"],
     fellThroughWords: ["declined offer", "offer declined", "quit", "fired", "rescinded", "no show to start", "didn't start"],
 
+    // Exact stages behind the Client Pipeline date columns (first time a candidate entered one of them)
+    stageDates: {
+      submittedToAM:      ["Submitted to AM"],
+      interviewRequested: ["HM Interview Requested"],
+      interviewScheduled: ["Hiring Mgr Interview Scheduled", "Interview Scheduled", "In-Person Interview Scheduled"],
+      offerPrep:          ["Offer Prep/Made", "Offer Made", "Offer"],
+      offerAccepted:      ["Offer Accepted"]
+    },
     // Start dates from Workable offers cost one request per hire; HRA records almost no offers in Workable, so this is off.
     startDatesFromOffers: false,
     lookbackDays: 365,                  // ignore candidates older than this

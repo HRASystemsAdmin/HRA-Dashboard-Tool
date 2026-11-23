@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// RULES VERSION: 2026-11-21 (Training, clean-up tools, profiles, super admin, org chart)
+// RULES VERSION: 2026-11-23 (Training, clean-up tools, profiles, super admin, org chart, start dates)
 // Paste this into Firebase console → Firestore Database → Rules → Publish.
 // These rules are the real lock on the data. Keep the two lists below in
 // sync with config.js (lowercase emails).
@@ -120,6 +120,12 @@ service cloud.firestore {
     // Each person's own dashboard preferences (like their column layout).
     match /user_prefs/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Manual start dates on the Client Pipeline (one record per client; the Workable sync never touches it).
+    match /pipeline_edits/{clientId} {
+      allow read: if isMember();
+      allow write: if isMember() && request.resource.data.keys().hasOnly(['starts', 'updatedAt']);
     }
 
     // Org chart (imported from the employee list): admins can view it, only super admins can replace it.
