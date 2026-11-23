@@ -29,7 +29,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INSPECT = process.argv.includes("--inspect");
 const RESTART = process.argv.includes("--restart-full-load");
-const SUGGEST = process.argv.includes("--suggest-ams");          // preview + suggested account manager per client   // forget progress and start the first load over
+const SUGGEST = process.argv.includes("--suggest-ams");
+const REBUILD = process.argv.includes("--rebuild");             // rebuild every client page from saved data (0 Workable requests)          // preview + suggested account manager per client   // forget progress and start the first load over
 const DRY = process.argv.includes("--dry-run") || process.argv.includes("--suggest-ams");   // build everything, print a summary, write nothing
 const ONLY = (process.env.SYNC_CLIENT || "").trim();          // refresh a single client (from the Refresh button)
 const REQUESTED_BY = (process.env.SYNC_REQUESTED_BY || "").trim() || (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" ? "manual run" : "schedule");
@@ -189,6 +190,10 @@ function buildRow(cand, job, acts) {
   const reached = (t) => (RANK[type] || 0) >= RANK[t] || Boolean(firstInto(t));
 
   const subAct = firstInto("submitted");
+  // exact stage dates for the Client Pipeline columns (config.js → workable.stageDates)
+  const SD = CFG.stageDates || {};
+  const firstExact = (k) => { const names = (SD[k] || []).map(lower); return names.length ? moves.find((a) => names.includes(lower(a.stage_name || ""))) : null; };
+  const amAct = firstExact("submittedToAM"), irAct = firstExact("interviewRequested"), isAct = firstExact("interviewScheduled"), opAct = firstExact("offerPrep"), oaAct = firstExact("offerAccepted");
   const intAct = firstInto("interview");
   const hireAct = firstInto("hired");
   const comments = acts.filter((a) => lower(a.action) === "comment" && a.body).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -225,7 +230,13 @@ function buildRow(cand, job, acts) {
     hired,
     roleHired: type === "hired" ? job.title : "",
     startDate: "",
-    recruiter: subAct?.member?.name || "",
+    recruiter: amAct?.member?.name || subAct?.member?.name || "",   // who submitted to the AM (the recruiter), else who submitted to the HM
+    dAM: day(amAct?.created_at || ""),
+    dIR: day(irAct?.created_at || ""),
+    dIS: day(isAct?.created_at || ""),
+    dOP: day(opAct?.created_at || ""),
+    dOA: day(oaAct?.created_at || ""),
+    dq: Boolean(disq),
     notes,
     status,
     interviewAt: day(intAct?.created_at || ""),
@@ -703,8 +714,15 @@ async function sync() {
     console.log(`\n✔ Refreshed ${nm(`"${name}"`, "client")} (${calls} API calls).`);
     return;
   }
-  if (RESTART || state.mode !== "incremental" || !state.cursor) await firstLoad(state);
+  if (REBUILD) {
+    RUN_KIND = "rebuild pages (no Workable requests)";
+    if (state.mode !== "incremental") { console.log("The first load isn't finished yet; run mode sync instead."); return; }
+    await rebuildClients("all", state);
+    await saveState({ hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {}, lastRebuildDay: state.lastRebuildDay || "" });
+    console.log("\n✔ All client pages rebuilt from saved data.");
+  } else if (RESTART || state.mode !== "incremental" || !state.cursor) await firstLoad(state);
   else await changesOnly(state);
+  if (REBUILD) { await setStatus({ running: false, ok: true, message: "", lastRebuildAt: new Date().toISOString() }); return; }
   const counts = state.counts || {};
   await setStatus({
     lastSync: new Date().toISOString(), ok: true, clients: Object.keys(counts).length, candidates: Object.values(counts).reduce((t, n) => t + n, 0),
