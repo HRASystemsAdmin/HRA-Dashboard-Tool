@@ -11,10 +11,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "inspect = list jobs and stage names only · preview = read, save nothing · sync = first load (resumes if stopped), then only changes · restart-full-load = start the first load over · suggest-account-managers = preview + who submits for each client"
+        description: "inspect = list jobs and stage names only · preview = read, save nothing · sync = first load (resumes if stopped), then only changes · restart-full-load = start the first load over · suggest-account-managers = preview + who submits for each client · rebuild-pages = refresh every client page from saved data (no Workable requests)"
         type: choice
-        options: [inspect, preview, suggest-account-managers, sync, restart-full-load]
-        default: inspect
+        options: [sync, rebuild-pages, inspect, preview, suggest-account-managers, restart-full-load]
+        default: sync
       client:
         description: "Only this client (exact name). Leave empty for all clients"
         type: string
@@ -67,3 +67,4 @@ jobs:
           ${{ github.event.inputs.mode == 'preview' && '--dry-run' || '' }}
           ${{ github.event.inputs.mode == 'restart-full-load' && '--restart-full-load' || '' }}
           ${{ github.event.inputs.mode == 'suggest-account-managers' && '--suggest-ams' || '' }}
+          ${{ github.event.inputs.mode == 'rebuild-pages' && '--rebuild' || '' }}
