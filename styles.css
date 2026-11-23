@@ -3198,7 +3198,8 @@ body.in-course .tp-nav { margin-right: 86px; }
 .colf-bar { display: flex; align-items: center; gap: 10px; padding: 8px 22px; font-size: 12.5px; font-weight: 700; color: #A3400B; background: #FFF7F1; border-top: 1px solid #FBE1D0; }
 @media (max-width: 760px) { .cl-trigger { min-width: 0; width: 100%; } .cl-select { display: block; } }
 
-/* Client Pipeline: client menu always on top of the table */
+/* Client Pipeline layers: account manager menu > client menu > table */
+.pl-am { z-index: 40 !important; }
 .sheet-tabs-wrap { z-index: 30 !important; }
 .cl-menu { z-index: 60; }
 /* Status: one dropdown instead of chips */
