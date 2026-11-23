@@ -147,6 +147,9 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Team notes (demo)
+    async addTeamNote(clientId, candId, note) { const key = "hra_demo_edits_" + clientId; const d = JSON.parse(localStorage.getItem(key) || "{}"); d.notes = d.notes || {}; (d.notes[candId] = d.notes[candId] || []).push(note); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
+    async removeTeamNote(clientId, candId, note) { const key = "hra_demo_edits_" + clientId; const d = JSON.parse(localStorage.getItem(key) || "{}"); d.notes = d.notes || {}; d.notes[candId] = (d.notes[candId] || []).filter((n) => !(n.at === note.at && n.byUid === note.byUid)); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
     // Manual start dates (demo)
     async getEdits(clientId) { try { return JSON.parse(localStorage.getItem("hra_demo_edits_" + clientId)) || {}; } catch { return {}; } },
     watchEdits(clientId, cb) {
@@ -369,6 +372,8 @@ async function createFirebaseStore() {
       return fsMod.onSnapshot(q, (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => trDbError(e, "questions"));
     },
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
+    addTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayUnion(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
+    removeTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayRemove(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
     async getEdits(clientId) { const d = await fsMod.getDoc(fsMod.doc(db, "pipeline_edits", clientId)); return d.exists() ? d.data() : {}; },
     watchEdits(clientId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "pipeline_edits", clientId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Start dates unavailable", e); cb({}); }); },
     saveStart(clientId, candId, date, by) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { starts: { [candId]: date ? { startDate: date, by, at: new Date().toISOString() } : fsMod.deleteField() }, updatedAt: new Date().toISOString() }, { merge: true }); },
@@ -1949,6 +1954,8 @@ function bind() {
     }
     const stF = t.closest(".st-pop [data-status-filter]"); if (stF) { const k = stF.dataset.statusFilter; PL.filter.has(k) ? PL.filter.delete(k) : PL.filter.add(k); renderSheet(); return; }
     if (t.closest("[data-status-clear]")) { PL.filter.clear(); PL.pop = null; renderSheet(); return; }
+    const tnA = t.closest("[data-tn-add]"); if (tnA) { addTeamNote(tnA.dataset.tnAdd, tnA); return; }
+    const tnD = t.closest("[data-tn-del]"); if (tnD) { deleteTeamNote(tnD.dataset.tnDel, tnD.dataset.tnAt); return; }
     const sdB = t.closest("[data-sd]"); if (sdB) { openStartPicker(sdB); return; }
     const sdC = t.closest("[data-sd-clear]"); if (sdC) { saveStartDate(sdC.dataset.sdClear, ""); return; }
     const clP = t.closest("[data-cl-pick]"); if (clP) { PL.pop = null; PL.clQ = ""; PL.animate = true; PL.client = clP.dataset.clPick; PL.filter.clear(); PL.search = ""; PL.colFilters = {}; renderPipeline(); return; }
@@ -2843,7 +2850,10 @@ document.addEventListener("click", (e) => {
   if ($("#colf-pop")) closeColf();
 }, true);
 document.addEventListener("input", (e) => { if (e.target.id !== "colf-q") return; const q = lower(e.target.value); $$("#colf-pop .colf-opt").forEach((o) => { o.hidden = q && !lower(o.dataset.colfVal).includes(q); }); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#colf-pop")) closeColf(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("#colf-pop")) closeColf();
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.target.id === "tn-text") { e.preventDefault(); $("[data-tn-add]")?.click(); }
+});
 document.addEventListener("scroll", (e) => { if ($("#colf-pop") && !e.target?.closest?.("#colf-pop")) closeColf(); }, true);
 
 const slug = (s) => lower(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "client";
@@ -2851,9 +2861,13 @@ const slug = (s) => lower(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").s
 function watchClientEdits() {
   const id = PL.client ? slug(PL.client) : "";
   if (id === PL.editsFor) return;
-  PL.editsUnsub?.(); PL.edits = {}; PL.editsFor = id;
+  PL.editsUnsub?.(); PL.edits = {}; PL.teamNotes = {}; PL.editsFor = id;
   if (!id) return;
-  PL.editsUnsub = state.store.watchEdits(id, (d) => { PL.edits = d?.starts || {}; if (currentTool === "pipeline") renderSheet(); });
+  PL.editsUnsub = state.store.watchEdits(id, (d) => {
+    PL.edits = d?.starts || {}; PL.teamNotes = d?.notes || {};
+    if (currentTool === "pipeline") renderSheet();
+    if (PL.noteOpen && !$("#note-modal")?.hidden) renderNoteBody(PL.noteOpen);
+  });
 }
 function openStartPicker(btn) {
   const id = btn.dataset.sd, cur = PL.edits?.[id]?.startDate || "";
@@ -3073,7 +3087,7 @@ function renderSheet() {
         ? `<div class="range-empty">${emptyBlock("No candidates in this date range", `Nobody was submitted to ${c.name} ${rangeLabel(rb).toLowerCase().startsWith("from") || rangeLabel(rb).toLowerCase().startsWith("until") ? rangeLabel(rb).toLowerCase() : "between " + rangeLabel(rb)}.`)}<button type="button" class="btn btn-ghost" data-range-clear>Show all dates</button></div>`
         : c.empty || !rows.length
         ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
-        : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, Math.round(cols.reduce((t, c) => t + c.w, 0) * 11.5))}px">
+        : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, Math.round(cols.reduce((t, c) => t + c.w, 0) * 12.5))}px">
             <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
             <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col"><span class="th-in"><span class="th-label">${esc(col.label)}</span><button type="button" class="colf-btn${PL.colFilters[col.key]?.length ? " is-on" : ""}" data-colf="${col.key}" aria-label="Filter ${esc(col.label)}" title="Filter">${PL.colFilters[col.key]?.length ? `<b>${PL.colFilters[col.key].length}</b>` : ""}<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg></button></span></th>`).join("")}</tr></thead>
             <tbody>${shown.length ? shown.map((r, i) => `
@@ -3095,8 +3109,10 @@ function cellHTML(r, col, first) {
     const inner = col.key === "name" && r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v);
     return `<th scope="row" class="col-${col.key}">${inner}</th>`;
   }
+  const tn = (PL.teamNotes?.[r.id] || []).length;
+  if (col.key === "notes" && !v && tn) return `<td class="col-notes"><button type="button" class="note-btn" data-note="${esc(r.id)}" aria-label="Team notes for ${esc(r.name)}"><span class="tn-badge" title="${tn} team note${tn === 1 ? "" : "s"}">${tn} team note${tn === 1 ? "" : "s"}</span></button></td>`;
   if (col.key === "notes") return v
-    ? `<td class="col-notes"><button type="button" class="note-btn" data-note="${esc(r.id)}" aria-label="Read the full notes for ${esc(r.name)}"><span class="notes">${esc(v)}</span><span class="note-open" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></span></button></td>`
+    ? `<td class="col-notes"><button type="button" class="note-btn" data-note="${esc(r.id)}" aria-label="Read the full notes for ${esc(r.name)}">${tn ? `<span class="tn-badge" title="${tn} team note${tn === 1 ? "" : "s"}">${tn}</span>` : ""}<span class="notes">${esc(v)}</span><span class="note-open" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></span></button></td>`
     : `<td class="col-notes"></td>`;
   if (col.key === "startDate") return `<td class="col-startDate"><button type="button" class="sd-cell${v ? " has-date" : ""}" data-sd="${esc(r.id)}" title="${v ? "Change the start date" : "Add a start date"}">${v ? esc(v) : `<span class="sd-add"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add</span>`}</button></td>`;
   if (col.key === "statusLabel") return `<td class="col-statusLabel"><span class="st-dot" style="--bar:${PSTATUS[r.status]?.bar}"></span>${esc(v)}</td>`;
@@ -3166,23 +3182,52 @@ function startColDrag(e, grip) {
 }
 
 function openNote(id) {
+  PL.noteOpen = String(id);
+  if (!renderNoteBody(id)) return;
+  openOverlay($("#note-modal"));
+  setTimeout(() => $("#note-modal .sheet-close")?.focus(), 60);
+}
+function renderNoteBody(id) {
   const c = clientDoc(PL.client);
   const r = (c?.candidates || []).find((x) => String(x.id) === String(id));
-  if (!r) return;
+  if (!r) return false;
   const st = PSTATUS[r.status] || PSTATUS.in_process;
-  const fields = [["Date submitted", fmtDay(r.submitted)], ["Wants to interview", r.interview], ["Hired", r.hired], ["Role hired for", r.roleHired],
-    ["Start date", cellValue(r, "startDate") ? fmtDay(cellValue(r, "startDate")) : ""], ["Recruiter", r.recruiter], ["Workable stage", r.stage]].filter(([, v]) => v);
+  const D = (k) => (r[k] ? fmtDay(r[k]) : "");
+  const fields = [["Submitted to AM", D("dAM")], ["Submitted to HM", D("submitted")], ["Interview requested", D("dIR")], ["Interview scheduled", D("dIS")],
+    ["Offer prep", D("dOP")], ["Offer accepted", D("dOA")], ["Start date", cellValue(r, "startDate") ? fmtDay(cellValue(r, "startDate")) : ""], ["Recruiter", r.recruiter], ["Workable status", cellValue(r, "stage")]].filter(([, v]) => v);
+  const team = (PL.teamNotes?.[r.id] || []).slice().sort((x, y) => String(y.at).localeCompare(String(x.at)));
+  const draft = $("#tn-text")?.value || "";
   $("#note-body").innerHTML = `
     <div class="note-head">
       <span class="note-status" style="--sw:#${st.fill};--bar:${st.bar}"><i></i>${esc(st.short)}</span>
       <h2 id="note-title">${esc(r.name)}</h2>
       <p class="note-sub"><span>${esc(r.role)}</span><span class="note-sep" aria-hidden="true"></span><span>${esc(c.name)}</span></p>
     </div>
-    <div class="note-text">${esc(r.notes || "No notes yet.")}</div>
+    <h3 class="tn-h">Recruiter notes <small>from Workable</small></h3>
+    <div class="note-text">${esc(r.notes || "No notes in Workable.")}</div>
+    <h3 class="tn-h">Team notes <small>only in this dashboard</small></h3>
+    <div class="tn-add"><textarea id="tn-text" rows="2" maxlength="1000" placeholder="Add a note for your team… (not sent to Workable)">${esc(draft)}</textarea><button type="button" class="btn btn-primary btn-mini" data-tn-add="${esc(r.id)}">Add note</button></div>
+    <div class="tn-list">${team.length ? team.map((n, i) => `<div class="tn-item" style="--i:${i}"><div class="tn-meta"><strong>${esc(n.by || "Someone")}</strong><span>${esc(ago(n.at))}</span>${n.byUid === state.user.uid || state.isAdmin ? `<button type="button" class="tn-del" data-tn-del="${esc(r.id)}" data-tn-at="${esc(n.at)}" aria-label="Delete this note" title="Delete">×</button>` : ""}</div><p>${esc(n.text)}</p></div>`).join("") : `<p class="tn-empty">No team notes yet.</p>`}</div>
     <dl class="note-meta">${fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>
     ${r.link ? `<a class="btn btn-ghost note-link" href="${esc(r.link)}" target="_blank" rel="noopener">Open in Workable</a>` : ""}`;
-  openOverlay($("#note-modal"));
-  setTimeout(() => $("#note-modal .sheet-close")?.focus(), 60);
+  return true;
+}
+async function addTeamNote(candId, btn) {
+  const ta = $("#tn-text"); const text = (ta?.value || "").trim();
+  if (!text) { ta?.focus(); return; }
+  const note = { text, by: state.user.name, byUid: state.user.uid, at: new Date().toISOString() };
+  btn.disabled = true;
+  PL.teamNotes = { ...PL.teamNotes, [candId]: [...(PL.teamNotes?.[candId] || []), note] };
+  ta.value = ""; renderNoteBody(candId); renderSheet();
+  try { await state.store.addTeamNote(slug(PL.client || ""), candId, note); toast("Note added", "var(--s-done)"); }
+  catch (e) { console.error(e); toast(e?.code === "permission-denied" ? "Saving is blocked. Publish the latest firestore.rules." : "Couldn't save the note.", "#E2632B"); }
+}
+async function deleteTeamNote(candId, at) {
+  const note = (PL.teamNotes?.[candId] || []).find((n) => n.at === at); if (!note) return;
+  PL.teamNotes = { ...PL.teamNotes, [candId]: (PL.teamNotes[candId] || []).filter((n) => n !== note) };
+  renderNoteBody(candId); renderSheet();
+  try { await state.store.removeTeamNote(slug(PL.client || ""), candId, note); }
+  catch (e) { console.error(e); toast("Couldn't delete the note.", "#E2632B"); }
 }
 
 function emptyBlock(title, text) {

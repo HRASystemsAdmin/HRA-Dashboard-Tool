@@ -3251,6 +3251,32 @@ body.in-course .tp-nav { margin-right: 86px; }
 .sd-clear { width: 24px; height: 24px; border-radius: 50%; border: 0; background: #F2F5FA; color: var(--muted); font-size: 15px; line-height: 1; }
 .sd-clear:hover { background: #FDECEC; color: #B4232A; }
 
+/* Client Pipeline: the wide table scrolls inside its card (grid areas otherwise grow to fit) */
+.collapse { grid-template-columns: minmax(0, 1fr); }
+.collapse-inner, .pl-scroll-box { min-width: 0; max-width: 100%; }
+/* Cleaner table header: one soft gradient, more room, calmer type */
+.pl-table thead th { padding: 14px 14px 12px; font-size: 11.5px; font-weight: 650; letter-spacing: .01em; line-height: 1.4; color: #3D5478;
+  background: linear-gradient(180deg, #F8FAFD 0%, #EDF2F9 100%); border-bottom: 1px solid #DCE5F0; box-shadow: none; }
+.pl-table thead th:first-child { padding-left: 24px; }
+.pl-table thead th + th { background-clip: padding-box; }
+.pl-scroll-box::before { top: 58px; }
+/* Team notes */
+.tn-h { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 8px; font-size: 13px; font-weight: 750; color: var(--ink); }
+.tn-h small { font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.tn-add { display: flex; gap: 8px; align-items: flex-end; }
+.tn-add textarea { flex: 1; min-height: 44px; max-height: 160px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-strong); font: inherit; font-size: 13.5px; resize: vertical; outline: none; transition: border-color .15s, box-shadow .15s; }
+.tn-add textarea:focus { border-color: var(--navy); box-shadow: 0 0 0 4px rgba(0,55,127,.1); }
+.tn-list { display: grid; gap: 8px; margin-top: 10px; }
+.tn-item { padding: 10px 12px; border-radius: 12px; background: #F6F9FE; border: 1px solid #E1EAF6; animation: rise .25s var(--ease-out) both; animation-delay: calc(var(--i) * 25ms); }
+.tn-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.tn-meta strong { color: var(--ink); font-size: 12.5px; }
+.tn-del { margin-left: auto; width: 22px; height: 22px; border-radius: 50%; border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; opacity: .6; }
+.tn-del:hover { opacity: 1; background: #FDECEC; color: #B4232A; }
+.tn-item p { margin: 4px 0 0; font-size: 13.5px; white-space: pre-wrap; }
+.tn-empty { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.tn-list + .note-meta { margin-top: 18px; }
+.tn-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; margin-right: 6px; border-radius: 999px; background: var(--navy); color: #fff; font-size: 11px; font-weight: 800; vertical-align: 1px; }
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }
