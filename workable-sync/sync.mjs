@@ -385,7 +385,8 @@ async function loadJobsMeta() {
   for (let i = 0; i < (st.jobsChunks || 0); i++) { const s = await db.collection("sync_cache_meta").doc(`jobs_${i}`).get(); if (s.exists) Object.assign(out, s.data().jobs || {}); }
   return out;
 }
-const jobMetaCompact = (j) => { const m = jobMeta(j); return { title: m.title, client: m.client, state: m.state, jobUpdated: m.jobUpdated }; };
+const jobLocation = (j) => j.location?.location_str || [j.location?.city, j.location?.region_code || j.location?.region].filter(Boolean).join(", ") || (j.location?.telecommuting ? "Remote" : "");
+const jobMetaCompact = (j) => { const m = jobMeta(j); return { title: m.title, client: m.client, state: m.state, jobUpdated: m.jobUpdated, opened: j.created_at || "", location: jobLocation(j), url: j.url || j.application_url || "" }; };
 
 /* ---------- Build each client's page from the remembered jobs ---------- */
 function buildClient(name, jobDocs) {
@@ -481,6 +482,34 @@ async function rebuildClients(which, state) {
   return { written, skipped };
 }
 
+/* ---------- Open jobs summary for the Monday "Workable Open Jobs Report" (workable_meta/jobs) ---------- */
+async function writeJobsReport(freshPublished) {
+  const db = await firestore();
+  const docs = (await db.collection(CACHE).get()).docs.map((d) => d.data());
+  const byCode = new Map(docs.map((d) => [d.shortcode, d]));
+  // fresh list of published jobs (from Workable, when this run fetched it) wins over saved state
+  let open;
+  if (freshPublished) {
+    open = freshPublished.filter((j) => clientForJob(j)).map((j) => ({ ...(byCode.get(j.shortcode) || {}), ...jobMetaCompact(j), shortcode: j.shortcode }));
+    for (const j of open) { const d = byCode.get(j.shortcode); if (d) { Object.assign(d, { title: j.title, client: j.client, state: j.state, opened: j.opened, location: j.location, url: j.url }); await db.collection(CACHE).doc(j.shortcode).set(d); } }
+  } else open = docs.filter((d) => d.state === "published" && d.client);
+  const jobs = open.map((d) => {
+    const c = (byCode.get(d.shortcode)?.cands || []).filter(inWindow);
+    const r = (e) => maxRankOf(e);
+    return {
+      shortcode: d.shortcode, title: d.title || "", client: d.client || "", location: d.location || "", opened: d.opened || "", url: d.url || "",
+      applicants: c.length,
+      submitted: c.filter((e) => r(e) >= RANK.submitted).length,
+      inProcess: c.filter((e) => r(e) >= RANK.submitted && !e.dq && stageType(e.st) !== "hired").length,
+      interviews: c.filter((e) => r(e) >= RANK.interview).length,
+      hires: c.filter((e) => r(e) >= RANK.hired).length,
+      lastSubmitted: c.filter((e) => r(e) >= RANK.submitted).map((e) => (e.mv || []).find((m) => (RANK[stageType(m.s)] || 0) >= RANK.submitted)?.at || "").filter(Boolean).sort().pop() || ""
+    };
+  }).sort((a, b) => a.client.localeCompare(b.client) || a.title.localeCompare(b.title));
+  await db.collection("workable_meta").doc("jobs").set({ jobs, updatedAt: new Date().toISOString(), fresh: Boolean(freshPublished) });
+  console.log(`  Open jobs report: ${jobs.length} open jobs saved.`);
+}
+
 /* ---------- Run types ---------- */
 async function firstLoad(state) {
   RUN_KIND = "first load (resumable)";
@@ -548,6 +577,7 @@ async function firstLoad(state) {
   state.cursor = new Date(new Date(full.startedAt).getTime() - 10 * 60e3).toISOString();
   state.mode = "incremental"; state.full = null;
   await rebuildClients("all", state);
+  await writeJobsReport(null);
   await saveState({ mode: "incremental", cursor: state.cursor, full: null, hashes: state.hashes, parts: state.parts, counts: state.counts, lastRebuildDay: state.lastRebuildDay });
   reportUnknownStages();
   console.log(`\n✔ First load complete. From now on, runs only fetch what changed.`);
@@ -591,6 +621,7 @@ async function changesOnly(state) {
   const daily = state.lastRebuildDay !== today;   // once a day: refresh every client (weeks roll over, old entries age out)
   if (daily) console.log("  Daily refresh of all clients (no Workable requests needed).");
   if (daily || touched.size) await rebuildClients(daily ? "all" : touched, state);
+  if (daily) await writeJobsReport(await all("/jobs?state=published&limit=100", "jobs", 10));   // about 1–2 requests a day
   else console.log("  Nothing changed: no writes.");
   state.cursor = runStart;
   await saveState({ cursor: state.cursor, hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {}, lastRebuildDay: state.lastRebuildDay || "" });
@@ -718,6 +749,7 @@ async function sync() {
     RUN_KIND = "rebuild pages (no Workable requests)";
     if (state.mode !== "incremental") { console.log("The first load isn't finished yet; run mode sync instead."); return; }
     await rebuildClients("all", state);
+    await writeJobsReport(null);
     await saveState({ hashes: state.hashes || {}, parts: state.parts || {}, counts: state.counts || {}, lastRebuildDay: state.lastRebuildDay || "" });
     console.log("\n✔ All client pages rebuilt from saved data.");
   } else if (RESTART || state.mode !== "incremental" || !state.cursor) await firstLoad(state);
