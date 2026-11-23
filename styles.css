@@ -3291,6 +3291,77 @@ body.in-course .tp-nav { margin-right: 86px; }
   .pl-scroll-box .pl-table-wrap.pl-scroll { overflow-x: auto; }
 }
 
+/* Open jobs report button */
+.pl-ojr { display: inline-flex; align-items: center; gap: 8px; }
+.pl-ojr[hidden] { display: none; }
+/* Offboarding checklist (ticket drawer) */
+.ob { margin: 18px 0 6px; }
+.ob-head { display: flex; align-items: center; justify-content: space-between; }
+.ob-count { font-size: 12px; font-weight: 800; color: var(--muted); background: #F2F5FA; padding: 2px 9px; border-radius: 999px; }
+.ob-count.is-done { color: #0B7A61; background: #E3F6EF; }
+.ob-bar { height: 4px; border-radius: 999px; background: #E8EEF6; overflow: hidden; margin: 8px 0 10px; }
+.ob-bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--navy), #0E9F7E); transition: width .35s var(--ease-out); }
+.ob-list { display: grid; gap: 2px; }
+.ob-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 10px; background: none; text-align: left; font: inherit; font-size: 13.5px; color: var(--ink); transition: background .12s; }
+.ob-item:not(:disabled):hover { background: #F4F7FB; }
+.ob-item.is-on .st-box { background: #0E9F7E; border-color: #0E9F7E; color: #fff; }
+.ob-item.is-on .ob-name { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(98,120,154,.5); }
+.ob-name { flex: 1; }
+.ob-item small { font-size: 11.5px; color: var(--muted); }
+.ob-ready { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: #E3F6EF; color: #0B7A61; font-size: 13px; font-weight: 600; }
+/* Weekly spine */
+.workspace .tool-spine { max-width: 1040px; }
+.sp-hero { align-items: flex-end; }
+.sp-week { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.sp-week b { color: var(--ink); }
+.sp-week em { margin-left: 8px; font-style: normal; font-size: 11.5px; font-weight: 800; color: #0B7A61; background: #E3F6EF; padding: 2px 8px; border-radius: 999px; }
+.sp-week .icon-btn { font-size: 20px; line-height: 1; }
+.sp-summary { display: flex; align-items: center; gap: 12px; padding: 14px 18px; margin-bottom: 16px; border-radius: 18px; background: #fff; border: 1px solid var(--line); font-size: 14px; }
+.sp-summary span { color: var(--muted); }
+.sp-dot { width: 12px; height: 12px; border-radius: 50%; background: #2D6BFF; box-shadow: 0 0 0 4px rgba(45,107,255,.15); }
+.sp-summary.is-green .sp-dot { background: #0E9F7E; box-shadow: 0 0 0 4px rgba(14,159,126,.15); }
+.sp-summary.is-yellow .sp-dot { background: #E0A800; box-shadow: 0 0 0 4px rgba(224,168,0,.18); }
+.sp-summary.is-red .sp-dot { background: #E5484D; box-shadow: 0 0 0 4px rgba(229,72,77,.15); }
+.sp-prog { flex: 1; height: 6px; border-radius: 999px; background: #E8EEF6; overflow: hidden; margin-left: 8px; }
+.sp-prog i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--navy), #0E9F7E); transition: width .4s var(--ease-out); }
+.sp-card { padding: 18px 20px; margin-bottom: 14px; border-radius: 18px; background: #fff; border: 1px solid var(--line); }
+.sp-card h2 { margin: 0 0 10px; font-family: var(--display); font-size: 17px; font-weight: 600; }
+.sp-row { padding: 12px 0; border-top: 1px solid var(--line); }
+.sp-row:first-of-type { border-top: 0; padding-top: 2px; }
+.sp-main { display: flex; align-items: center; gap: 12px; }
+.sp-btns { display: flex; gap: 4px; flex: none; }
+.sp-b { width: 30px; height: 30px; border-radius: 9px; border: 1.5px solid #C9D4E3; background: #fff; display: grid; place-items: center; font: inherit; font-weight: 900; color: #A9B6C9; transition: all .18s var(--ease-spring); }
+.sp-b:hover { border-color: var(--navy); color: var(--navy); }
+.sp-done.is-on { background: #0E9F7E; border-color: #0E9F7E; color: #fff; transform: scale(1.05); }
+.sp-issue.is-on { background: #E0A800; border-color: #E0A800; color: #fff; transform: scale(1.05); }
+.sp-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.sp-text strong { font-size: 14px; font-weight: 650; }
+.sp-row.is-done .sp-text strong { color: var(--muted); }
+.sp-cad { font-size: 12px; color: var(--muted); }
+.sp-auto { font-size: 12px; font-weight: 700; color: var(--navy); }
+.sp-when { font-size: 11.5px; color: #0B7A61; }
+.sp-row.is-issue .sp-when { color: #8A6400; }
+.sp-note { width: calc(100% - 76px); margin: 8px 0 0 76px; height: 32px; padding: 0 10px; border-radius: 9px; border: 1px solid transparent; background: #F6F8FC; font: inherit; font-size: 13px; outline: none; transition: border-color .15s, background .15s; }
+.sp-note:focus { border-color: var(--navy); background: #fff; }
+.sp-row.is-issue .sp-note { background: #FFF8DB; }
+.sp-vault { display: flex; align-items: flex-end; gap: 8px; margin: 8px 0 0 76px; font-size: 12px; color: var(--muted); }
+.sp-vault label { display: grid; gap: 2px; font-weight: 700; }
+.sp-vault input { width: 72px; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-strong); font: inherit; font-size: 13px; }
+.sp-vault span { padding-bottom: 7px; }
+.sp-later-btn { display: block; margin: -4px 0 14px; padding: 6px 0; border: 0; background: none; font: inherit; font-size: 13px; font-weight: 700; color: var(--navy); }
+.sp-later { opacity: .85; }
+.sp-send { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.sp-sent { font-size: 12.5px; font-weight: 700; color: #0B7A61; }
+.sp-hint { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+.sp-hist { display: flex; flex-wrap: wrap; gap: 8px; }
+.sp-h { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 11px; border: 1px solid var(--line); background: #fff; font: inherit; font-size: 12.5px; color: var(--ink); }
+.sp-h.is-cur { border-color: var(--navy); }
+.sp-h span:not(.sp-hdot) { color: var(--muted); }
+.sp-h em { font-style: normal; font-size: 11px; font-weight: 800; color: #0B7A61; }
+.sp-hdot { width: 8px; height: 8px; border-radius: 50%; background: #C3CEDD; }
+.sp-hdot.is-green { background: #0E9F7E; } .sp-hdot.is-yellow { background: #E0A800; }
+@media (max-width: 760px) { .sp-note, .sp-vault { margin-left: 0; width: 100%; } .sp-hero { flex-direction: column; align-items: flex-start; } }
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }

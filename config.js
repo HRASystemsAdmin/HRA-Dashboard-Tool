@@ -214,6 +214,27 @@ window.HRA_CONFIG = {
       title: (d) => d.subject || "QuickBooks"
     },
 
+    offboarding: {
+      keywords: ["offboard", "offboarding", "leaving", "termination", "last day", "remove access"],
+      label: "Offboarding",
+      blurb: "Remove someone's access everywhere, the same day.",
+      icon: "userminus",
+      adminOnly: true,
+      fields: [
+        { name: "person",  label: "Who is leaving",      type: "text",     required: true,  placeholder: "Full name" },
+        { name: "email",   label: "Their work email",    type: "email",    required: true,  placeholder: "name@hunterrecruitment.net" },
+        { name: "lastDay", label: "Last day",            type: "date",     required: true },
+        { name: "notes",   label: "Anything else",       type: "textarea", required: false, placeholder: "Shared accounts they used, devices to collect, etc." }
+      ],
+      // Every system where access must be removed. Admins tick each one in the request (each tick is logged).
+      checklist: [
+        "Microsoft 365 (email, Teams, OneDrive)", "Workable", "JazzHR", "Indeed", "LinkedIn", "Zoom Phone", "ZRA",
+        "Zapier", "MailParser", "Fathom", "Udemy", "Classet / Jeanie", "QuickBooks",
+        "HRA Dashboard (Firebase login, config.js, rules)", "Credential vault (Bitwarden)", "Rotate shared passwords they knew"
+      ],
+      title: (d) => `Offboard ${d.person || "team member"}${d.lastDay ? " (last day " + d.lastDay + ")" : ""}`
+    },
+
     general: {
       label: "General help",
       blurb: "Ask for help with anything that isn't listed.",
@@ -289,6 +310,9 @@ window.HRA_CONFIG = {
   },
 
   /* 8) Links in the left panel. */
+  // Weekly Maintenance & Security Spine: who receives the written status (Aaron's email).
+  spine: { statusTo: "" },
+
   links: {
     sharepoint: "https://hunterrecruitmentnet.sharepoint.com/sites/TeamSite"
   },

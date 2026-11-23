@@ -18,6 +18,7 @@ const STATUS = {
 };
 
 const ICONS = {
+  userminus: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9.5" cy="8" r="3.5"/><path d="M3 20a6.5 6.5 0 0 1 13 0M16 11h6"/></svg>',
   bot:    '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="3.5"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16h5"/><circle cx="12" cy="3.5" r="1"/><path d="M2 12v3M22 12v3"/></svg>',
   coins:  '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="9" cy="7" rx="6" ry="2.6"/><path d="M3 7v4c0 1.4 2.7 2.6 6 2.6s6-1.2 6-2.6V7"/><path d="M3 11v4c0 1.4 2.7 2.6 6 2.6 1 0 2-.1 2.8-.3"/><circle cx="17" cy="16" r="4.5"/><path d="M17 14v4M15.5 16h3"/></svg>',
   ledger: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M12 6.5v5M10.3 7.8c0-.7.8-1.2 1.7-1.2s1.7.4 1.7 1.1c0 1.6-3.4.9-3.4 2.4 0 .7.8 1.2 1.7 1.2s1.7-.5 1.7-1.2"/></svg>',
@@ -147,6 +148,18 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Open jobs report + spine (demo)
+    async getJobsReport() {
+      const jobs = (PL.clients || []).flatMap((c, ci) => [...new Set((c.candidates || []).map((r) => r.role))].slice(0, 3).map((t, i) => {
+        const rows = (c.candidates || []).filter((r) => r.role === t);
+        return { shortcode: `D${ci}${i}`, title: t, client: c.name, location: c.location || "", opened: new Date(Date.now() - (20 + ci * 9 + i * 13) * 86400e3).toISOString(), url: "",
+          applicants: rows.length * 6, submitted: rows.length, inProcess: rows.filter((r) => r.status === "in_process").length, interviews: rows.filter((r) => r.interviewAt).length, hires: rows.filter((r) => r.status === "hired").length, lastSubmitted: rows.map((r) => r.submitted).sort().pop() || "" };
+      }));
+      return { jobs, updatedAt: new Date().toISOString(), fresh: true };
+    },
+    watchSpine(weekId, cb) { const key = "hra_demo_spine_" + weekId; const fn = (e) => { if (!e || e.key === key) { try { cb(JSON.parse(localStorage.getItem(key)) || {}); } catch { cb({}); } } }; addEventListener("storage", fn); setTimeout(() => fn(), 0); return () => removeEventListener("storage", fn); },
+    async saveSpine(weekId, patch) { const key = "hra_demo_spine_" + weekId; const d = JSON.parse(localStorage.getItem(key) || "{}"); const merge = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" && !Array.isArray(v) ? merge(a[k] && typeof a[k] === "object" ? a[k] : {}, v) : v; return a; }; merge(d, { ...patch, updatedAt: new Date().toISOString() }); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
+    async listSpine() { return Object.keys(localStorage).filter((k) => k.startsWith("hra_demo_spine_")).map((k) => ({ id: k.slice(15), ...JSON.parse(localStorage.getItem(k)) })); },
     // Team notes (demo)
     async addTeamNote(clientId, candId, note) { const key = "hra_demo_edits_" + clientId; const d = JSON.parse(localStorage.getItem(key) || "{}"); d.notes = d.notes || {}; (d.notes[candId] = d.notes[candId] || []).push(note); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
     async removeTeamNote(clientId, candId, note) { const key = "hra_demo_edits_" + clientId; const d = JSON.parse(localStorage.getItem(key) || "{}"); d.notes = d.notes || {}; d.notes[candId] = (d.notes[candId] || []).filter((n) => !(n.at === note.at && n.byUid === note.byUid)); localStorage.setItem(key, JSON.stringify(d)); dispatchEvent(new StorageEvent("storage", { key })); },
@@ -374,6 +387,10 @@ async function createFirebaseStore() {
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
     addTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayUnion(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
     removeTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayRemove(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
+    async getJobsReport() { const d = await fsMod.getDoc(fsMod.doc(db, "workable_meta", "jobs")); return d.exists() ? d.data() : null; },
+    watchSpine(weekId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "spine", weekId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Spine unavailable", e); cb({}, e); }); },
+    saveSpine(weekId, patch) { return fsMod.setDoc(fsMod.doc(db, "spine", weekId), { ...patch, updatedAt: new Date().toISOString() }, { merge: true }); },
+    async listSpine() { const q = await fsMod.getDocs(fsMod.collection(db, "spine")); return q.docs.map((d) => ({ id: d.id, ...d.data() })); },
     async getEdits(clientId) { const d = await fsMod.getDoc(fsMod.doc(db, "pipeline_edits", clientId)); return d.exists() ? d.data() : {}; },
     watchEdits(clientId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "pipeline_edits", clientId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Start dates unavailable", e); cb({}); }); },
     saveStart(clientId, candId, date, by) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { starts: { [candId]: date ? { startDate: date, by, at: new Date().toISOString() } : fsMod.deleteField() }, updatedAt: new Date().toISOString() }, { merge: true }); },
@@ -1456,6 +1473,28 @@ function confirmDialog({ title, body, confirm, danger = true }) {
   });
 }
 
+/* Offboarding: per-system checklist on the ticket; every tick is written to the ticket history (audit trail) */
+function checklistHTML(t) {
+  const items = CFG.requestTypes[t.type]?.checklist; if (!items?.length) return "";
+  const done = t.checklist || {}, n = items.filter((i) => done[i]).length, all = n === items.length;
+  return `<section class="ob">
+    <div class="ob-head"><h3 class="drawer-h">Access removed</h3><span class="ob-count${all ? " is-done" : ""}">${n} of ${items.length}</span></div>
+    <div class="ob-bar"><span style="width:${Math.round(n / items.length * 100)}%"></span></div>
+    <div class="ob-list">${items.map((i) => `<button type="button" class="ob-item${done[i] ? " is-on" : ""}" ${state.isAdmin ? `data-ob="${esc(i)}"` : "disabled"} aria-pressed="${Boolean(done[i])}">
+      <span class="st-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+      <span class="ob-name">${esc(i)}</span>${done[i] ? `<small>${esc(done[i].by?.split(" ")[0] || "")} · ${esc(new Date(done[i].at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</small>` : ""}</button>`).join("")}</div>
+    ${all && t.status !== "completed" ? `<p class="ob-ready">All access removed. Mark the request as completed when you're done.</p>` : ""}
+  </section>`;
+}
+async function toggleChecklist(item) {
+  const t = state.tickets.find((x) => x.id === state.openId); if (!t || !state.isAdmin) return;
+  const cl = { ...(t.checklist || {}) }; const on = !cl[item];
+  if (on) cl[item] = { by: state.user.name, at: new Date().toISOString() }; else delete cl[item];
+  t.checklist = cl; renderDrawer();
+  try { await state.store.update(t.id, { checklist: cl }, { status: t.status, by: state.user.name, at: new Date().toISOString(), note: `${on ? "Access removed" : "Unticked"}: ${item}` }); }
+  catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "#E2632B"); }
+}
+
 async function archiveTicket(on) {
   const t = state.tickets.find((x) => x.id === state.openId);
   if (!t || !state.isAdmin) return;
@@ -1709,6 +1748,7 @@ function renderDrawer() {
       ${rows}
       ${(CFG.requestTypes[t.type]?.standardInfo || []).map((info) => `<div class="detail detail-std"><dt>${esc(info.label)}</dt><dd><ul class="std-lines">${(info.lines || []).map(([k, v]) => `<li><strong>${esc(k)}</strong><span>${esc(v)}</span></li>`).join("")}</ul></dd></div>`).join("")}
     </dl>
+    ${checklistHTML(t)}
     ${emailHTML(t)}
     ${attachmentsHTML(t)}
     <h3 class="drawer-h">Activity</h3>
@@ -2014,6 +2054,7 @@ function bind() {
     }
     const set = t.closest("[data-set]"); if (set) { setStatus(set.dataset.set, set); return; }
     if (t.closest("[data-delete]")) { deleteTicket(); return; }
+    const obI = t.closest("[data-ob]"); if (obI) { toggleChecklist(obI.dataset.ob); return; }
     const arc = t.closest("[data-archive]"); if (arc) { archiveTicket(arc.dataset.archive === "1"); return; }
     const arcV = t.closest("[data-archive-view]"); if (arcV) { const b = BOARDS.find((x) => x.id === arcV.dataset.archiveView); if (b) { boardState[b.id].archive = !boardState[b.id].archive; renderBoard(b); $(`.panel[data-panel="${b.id}"]`)?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" }); } return; }
     const rs = t.closest("[data-resend]"); if (rs) { resendEmail(rs); return; }
@@ -2318,7 +2359,9 @@ function applyAccess() {
     }
   }
   const su = $('#rail [data-tool="super"]'); if (su) su.hidden = !state.isSuper;
-  if (currentTool && currentTool !== "super" && toolAccess(currentTool) === "hidden") setTool(firstOpenTool(), true);
+  const sp = $('#rail [data-tool="spine"]'); if (sp) sp.hidden = !state.isSuper;
+  const oj = $("#pl-openjobs"); if (oj) oj.hidden = !state.isAdmin;
+  if (currentTool && currentTool !== "super" && currentTool !== "spine" && toolAccess(currentTool) === "hidden") setTool(firstOpenTool(), true);
   moveRailGlow();
 }
 function startSettings() {
@@ -2502,8 +2545,8 @@ async function saveProfile(btn) {
 function setTool(id, silent) {
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
   if ((id === "insights" || id === "org") && !state.isAdmin) id = "requests";
-  if (id === "super" && !state.isSuper) id = "requests";
-  if (id !== "super" && toolAccess(id) === "hidden") id = firstOpenTool();
+  if ((id === "super" || id === "spine") && !state.isSuper) id = "requests";
+  if (id !== "super" && id !== "spine" && toolAccess(id) === "hidden") id = firstOpenTool();
   const changed = id !== currentTool;
   currentTool = id;
   try { localStorage.setItem(TOOL_KEY, id); } catch {}
@@ -2520,6 +2563,7 @@ function setTool(id, silent) {
   if (id === "insights") { IN.animate = true; startInsights(); }
   if (id === "training") { renderTraining(); } else { document.body.classList.remove("in-course"); stopTeamWatch(); }
   if (id === "super") renderSuper();
+  if (id === "spine") startSpine();
   if (id === "org") startOrg();
   if (id === "contacts") { renderContacts(); if (!silent && matchMedia("(pointer: fine)").matches) setTimeout(() => $("#ct-q")?.focus({ preventScroll: true }), 350); }
   if (id === "requests") requestAnimationFrame(() => $$(".tabs, .seg").forEach(moveIndicator));
@@ -6114,3 +6158,190 @@ document.addEventListener("input", (e) => {
   if (ORG.q.trim()) { const T = buildOrg(ORG.data.people); const m = T.people.find((p) => orgNorm(p.name).includes(orgNorm(ORG.q)) || orgNorm(p.title).includes(orgNorm(ORG.q))); if (m) orgFocus(m.id); }
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && ORG.sel && currentTool === "org") { ORG.sel = null; renderOrg(); } if (e.key === "Enter" && e.target.matches?.(".oc-card[data-oc-sel]")) e.target.click(); });
+
+/* ==========================================================================
+   Workable Open Jobs Report (Excel), from the sync's daily open-jobs summary
+   ========================================================================== */
+function amForClient(name) { const a = (WK.accountManagers || []).find((m) => (m.clients || []).some((c) => sameName(c, name))); return a?.name || "Unassigned"; }
+async function downloadOpenJobs(btn) {
+  btn?.classList.add("is-loading"); if (btn) btn.disabled = true;
+  try {
+    const rep = await state.store.getJobsReport();
+    if (!rep?.jobs?.length) { toast("No open jobs report yet. It's created by the next Workable sync (or a rebuild-pages run).", "#E2632B"); return; }
+    const Excel = await loadExcel(); const wb = new Excel.Workbook(); wb.creator = "HRA Dashboard";
+    const mon = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; })();
+    const jobs = rep.jobs.map((j) => ({ ...j, am: amForClient(j.client), days: j.opened ? Math.max(0, Math.floor((Date.now() - new Date(j.opened)) / 86400e3)) : "" }))
+      .sort((a, b) => (a.am === "Unassigned") - (b.am === "Unassigned") || a.am.localeCompare(b.am) || a.client.localeCompare(b.client) || a.title.localeCompare(b.title));
+    const navy = "FF00377F", line = { style: "thin", color: { argb: "FFDCE5F0" } }, box = { top: line, left: line, bottom: line, right: line };
+    const ws = wb.addWorksheet("Open jobs", { views: [{ state: "frozen", ySplit: 3 }] });
+    const cols = [["Account manager", 20], ["Client", 30], ["Job title", 34], ["Location", 20], ["Opened", 12], ["Days open", 10], ["Applicants (12 mo)", 12], ["Submitted", 11], ["In process", 11], ["Interviews", 11], ["Hires", 8], ["Last submission", 14], ["Link", 12]];
+    ws.columns = cols.map(([, w]) => ({ width: w }));
+    ws.mergeCells(1, 1, 1, cols.length);
+    Object.assign(ws.getCell("A1"), { value: `Workable Open Jobs Report · week of ${mon.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}` });
+    ws.getCell("A1").font = { bold: true, size: 15, color: { argb: navy } }; ws.getRow(1).height = 26;
+    ws.mergeCells(2, 1, 2, cols.length);
+    ws.getCell("A2").value = `${jobs.length} open jobs · ${new Set(jobs.map((j) => j.client)).size} clients · data from Workable, updated ${new Date(rep.updatedAt).toLocaleString()}`;
+    ws.getCell("A2").font = { size: 10, color: { argb: "FF62789A" } };
+    const head = ws.getRow(3);
+    cols.forEach(([l], i) => { const c = head.getCell(i + 1); c.value = l; c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } }; c.alignment = { vertical: "middle", wrapText: true }; c.border = box; });
+    head.height = 30;
+    jobs.forEach((j, i) => {
+      const r = ws.getRow(4 + i);
+      const vals = [j.am, j.client, j.title, j.location, j.opened ? new Date(j.opened) : "", j.days, j.applicants, j.submitted, j.inProcess, j.interviews, j.hires, j.lastSubmitted ? new Date(j.lastSubmitted) : "", j.url ? { text: "Open", hyperlink: j.url } : ""];
+      vals.forEach((v, k) => { const c = r.getCell(k + 1); c.value = v; c.border = box; c.alignment = { vertical: "top", wrapText: k < 4 }; if (i % 2) c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF6F9FD" } }; });
+      [5, 12].forEach((k) => (r.getCell(k).numFmt = "m/d/yyyy"));
+      if (j.url) r.getCell(13).font = { color: { argb: "FF2D6BFF" }, underline: true };
+      if (j.days !== "" && j.days > 60) r.getCell(6).font = { bold: true, color: { argb: "FFB4232A" } };
+    });
+    ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3 + jobs.length, column: cols.length } };
+    // summary by account manager
+    const sm = wb.addWorksheet("By account manager");
+    sm.columns = [{ width: 22 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 10 }];
+    const sh = sm.getRow(1); ["Account manager", "Open jobs", "Clients", "In process", "Interviews", "Hires"].forEach((l, i) => { const c = sh.getCell(i + 1); c.value = l; c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } }; c.border = box; });
+    [...new Set(jobs.map((j) => j.am))].forEach((am, i) => { const js = jobs.filter((j) => j.am === am); const r = sm.getRow(2 + i);
+      [am, js.length, new Set(js.map((j) => j.client)).size, js.reduce((t, j) => t + j.inProcess, 0), js.reduce((t, j) => t + j.interviews, 0), js.reduce((t, j) => t + j.hires, 0)].forEach((v, k) => { r.getCell(k + 1).value = v; r.getCell(k + 1).border = box; }); });
+    const buf = await wb.xlsx.writeBuffer();
+    const name = `Workable Open Jobs Report - ${mon.getMonth() + 1}-${mon.getDate()}-${mon.getFullYear()}.xlsx`;
+    const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast(`Open jobs report downloaded (${jobs.length} jobs)`, "var(--s-done)");
+    if (state.isSuper) spineMark("ojr", "done", `Report downloaded: ${jobs.length} open jobs`);
+  } catch (e) { console.error(e); toast("Couldn't build the report. Check your connection.", "#E2632B"); }
+  finally { btn?.classList.remove("is-loading"); if (btn) btn.disabled = false; }
+}
+
+/* ==========================================================================
+   Weekly Maintenance & Security Spine (super admin)
+   ========================================================================== */
+const SPINE_CHECKS = [
+  { id: "ojr", group: "Operational", title: "Workable Open Jobs Report: clean, upload, share", cadence: "weekly", label: "Weekly (Mon)", action: "ojr" },
+  { id: "jazz", group: "Operational", title: "JazzHR ↔ Workable connections firing; candidates flowing", cadence: "weekly", label: "Ongoing spot-check" },
+  { id: "zapier", group: "Operational", title: "Zapier health (watch silent failures)", cadence: "weekly", label: "Weekly" },
+  { id: "jeanie", group: "Operational", title: "Jeanie spot-check: never answering as the wrong name", cadence: "weekly", label: "Weekly" },
+  { id: "indeed", group: "Operational", title: "Indeed / JazzHR reconnections", cadence: "weekly", label: "Ongoing" },
+  { id: "billing", group: "Operational", title: "Billing-meeting prep support (Holly / Jacqueline)", cadence: "weekly", label: "Weekly / Monthly" },
+  { id: "alerts", group: "Operational", title: "Fathom API health; MailParser alerts", cadence: "weekly", label: "On alert" },
+  { id: "renewals", group: "Operational", title: "Vendor renewals review (Workable Oct, Indeed Feb, Vector Choice Dec, Udemy / Zoom)", cadence: "quarterly", label: "Quarterly" },
+  { id: "vault", group: "Security", title: "Credential governance: all logins in the vault, none in shared files", cadence: "weekly", label: "Set up, then ongoing", vault: true },
+  { id: "access", group: "Security", title: "Access / least-privilege review across all systems", cadence: "monthly", label: "Monthly" },
+  { id: "offboard", group: "Security", title: "Offboarding: access revoked everywhere, same day", cadence: "weekly", label: "On event", offboard: true },
+  { id: "mfa", group: "Security", title: "MFA / Authenticator enforced where supported", cadence: "monthly", label: "Monthly + on add" },
+  { id: "admins", group: "Security", title: "Admin / owner inventory kept minimal and documented", cadence: "quarterly", label: "Quarterly" },
+  { id: "connectors", group: "Security", title: "Connector / integration audit (least-privilege)", cadence: "quarterly", label: "Quarterly" }
+];
+const SP = { week: null, data: {}, unsub: null, history: [], showLater: false };
+const isoDayLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const mondayOf = (d) => { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+const spineDue = (c, mon) => c.cadence === "weekly" || (c.cadence === "monthly" && mon.getDate() <= 7) || (c.cadence === "quarterly" && mon.getDate() <= 7 && [0, 3, 6, 9].includes(mon.getMonth()));
+function startSpine(weekId) {
+  const id = weekId || SP.week || isoDayLocal(mondayOf(new Date()));
+  if (id !== SP.week || !SP.unsub) { SP.unsub?.(); SP.week = id; SP.data = {}; SP.unsub = state.store.watchSpine(id, (d) => { SP.data = d || {}; if (currentTool === "spine") renderSpine(); }); }
+  state.store.listSpine().then((h) => { SP.history = h; if (currentTool === "spine") renderSpine(); }).catch(() => {});
+  renderSpine();
+}
+function spineOverall(due, mon) {
+  const st = (c) => SP.data.checks?.[c.id]?.state || "";
+  const issues = due.filter((c) => st(c) === "issue").length, done = due.filter((c) => st(c)).length;
+  const fri = new Date(mon); fri.setDate(fri.getDate() + 4); fri.setHours(23, 59);
+  if (issues) return { key: "yellow", label: "Attention", emoji: "🟡" };
+  if (done === due.length) return { key: "green", label: "All clear", emoji: "🟢" };
+  if (Date.now() > fri.getTime()) return { key: "red", label: "Incomplete", emoji: "🔴" };
+  return { key: "progress", label: "In progress", emoji: "🟢" };
+}
+function offboardThisWeek(mon) {
+  const start = mon.getTime(), end = start + 7 * 86400e3;
+  const list = state.tickets.filter((t) => t.type === "offboarding");
+  const week = list.filter((t) => { const c = new Date(t.createdAt?.toDate ? t.createdAt.toDate() : t.createdAt || 0).getTime(); return c >= start && c < end; });
+  return { week: week.length, open: list.filter((t) => t.status !== "completed" && !t.archived).length };
+}
+function renderSpine() {
+  const root = $("#spine-root"); if (!root || !state.isSuper) return;
+  const mon = new Date(SP.week + "T12:00:00"), today = mondayOf(new Date());
+  const all = SPINE_CHECKS, due = all.filter((c) => spineDue(c, mon)), later = all.filter((c) => !spineDue(c, mon));
+  const st = (id) => SP.data.checks?.[id] || {};
+  const ov = spineOverall(due, mon);
+  const doneN = due.filter((c) => st(c.id).state).length;
+  const ob = offboardThisWeek(mon);
+  const v = SP.data.vault || {};
+  const row = (c) => { const s = st(c.id); return `<div class="sp-row is-${s.state || "todo"}" data-sp-row="${c.id}">
+      <div class="sp-main">
+        <div class="sp-btns" role="group" aria-label="${esc(c.title)}">
+          <button type="button" class="sp-b sp-done${s.state === "done" ? " is-on" : ""}" data-sp-set="${c.id}:done" title="Done"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
+          <button type="button" class="sp-b sp-issue${s.state === "issue" ? " is-on" : ""}" data-sp-set="${c.id}:issue" title="Issue found">!</button>
+        </div>
+        <div class="sp-text"><strong>${esc(c.title)}</strong><span class="sp-cad">${esc(c.label)}</span>
+          ${c.offboard ? `<span class="sp-auto">${ob.week} offboarding request${ob.week === 1 ? "" : "s"} this week · ${ob.open} still open</span>` : ""}
+          ${s.at ? `<span class="sp-when">${s.state === "issue" ? "Issue noted" : "Done"} ${esc(ago(s.at))}</span>` : ""}</div>
+        ${c.action === "ojr" ? `<button type="button" class="btn btn-ghost btn-mini" data-ojr>Download report</button>` : ""}
+      </div>
+      ${c.vault ? `<div class="sp-vault"><label>Moved<input type="number" min="0" data-sp-vault="moved" value="${esc(v.moved ?? "")}"/></label><span>of</span><label>Total<input type="number" min="0" data-sp-vault="total" value="${esc(v.total ?? "")}"/></label><label>Rotated<input type="number" min="0" data-sp-vault="rotated" value="${esc(v.rotated ?? "")}"/></label></div>` : ""}
+      <input class="sp-note" data-sp-note="${c.id}" value="${esc(s.note || "")}" placeholder="${s.state === "issue" ? "What's wrong, and what's next?" : "Note (optional)"}" maxlength="300"/>
+    </div>`; };
+  const groups = ["Operational", "Security"];
+  const weeks = SP.history.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 8);
+  root.innerHTML = `
+    <div class="hero sp-hero"><div><h1 class="hero-title">Weekly spine</h1><p class="hero-sub">Maintenance and security checks, and the written status to Aaron.</p></div>
+      <div class="sp-week"><button type="button" class="icon-btn" data-sp-week="-1" aria-label="Previous week">‹</button><span>Week of <b>${esc(mon.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }))}</b>${SP.week === isoDayLocal(today) ? `<em>This week</em>` : ""}</span><button type="button" class="icon-btn" data-sp-week="1" aria-label="Next week" ${SP.week >= isoDayLocal(today) ? "disabled" : ""}>›</button></div></div>
+    <div class="sp-summary is-${ov.key}"><span class="sp-dot"></span><strong>${esc(ov.label)}</strong><span>${doneN} of ${due.length} checks this week</span><div class="sp-prog"><i style="width:${due.length ? Math.round(doneN / due.length * 100) : 0}%"></i></div></div>
+    ${groups.map((g) => { const items = due.filter((c) => c.group === g); return items.length ? `<section class="sp-card"><h2>${g}</h2>${items.map(row).join("")}</section>` : ""; }).join("")}
+    ${later.length ? `<button type="button" class="sp-later-btn" data-sp-later>${SP.showLater ? "Hide" : "Show"} checks not due this week (${later.length})</button>${SP.showLater ? `<section class="sp-card sp-later">${later.map(row).join("")}</section>` : ""}` : ""}
+    <section class="sp-card"><h2>Status to Aaron</h2>
+      <label class="field"><span class="field-label">Risks / decisions needed</span><textarea data-sp-field="risks" rows="3" placeholder="e.g. The 'Candidate God permissions' token has broad write access and an unknown owner. I propose replacing it.">${esc(SP.data.risks || "")}</textarea></label>
+      <label class="field"><span class="field-label">Next week</span><textarea data-sp-field="next" rows="2" placeholder="Three bullets">${esc(SP.data.next || "")}</textarea></label>
+      <div class="sp-send"><button type="button" class="btn btn-ghost" data-sp-copy>Copy status</button><button type="button" class="btn btn-primary" data-sp-email>Email status to Aaron</button>${SP.data.sentAt ? `<span class="sp-sent">Sent ${esc(ago(SP.data.sentAt))}</span>` : ""}</div>
+      ${CFG.spine?.statusTo ? "" : `<p class="sp-hint">Add Aaron's email in config.js → <code>spine.statusTo</code> to fill the “To” line automatically.</p>`}
+    </section>
+    ${weeks.length ? `<section class="sp-card"><h2>History</h2><div class="sp-hist">${weeks.map((w) => { const m = new Date(w.id + "T12:00:00"); const d = SPINE_CHECKS.filter((c) => spineDue(c, m)); const n = d.filter((c) => w.checks?.[c.id]?.state).length; const iss = d.some((c) => w.checks?.[c.id]?.state === "issue"); return `<button type="button" class="sp-h${w.id === SP.week ? " is-cur" : ""}" data-sp-goto="${w.id}"><span class="sp-hdot is-${iss ? "yellow" : n === d.length ? "green" : "grey"}"></span><b>${esc(m.toLocaleDateString([], { month: "short", day: "numeric" }))}</b><span>${n}/${d.length}</span>${w.sentAt ? `<em>Sent</em>` : ""}</button>`; }).join("")}</div></section>` : ""}`;
+}
+function spineMark(id, stateVal, note) {
+  const wk = isoDayLocal(mondayOf(new Date()));
+  const patch = { checks: { [id]: { state: stateVal, at: new Date().toISOString(), ...(note ? { note } : {}) } } };
+  return state.store.saveSpine(wk, patch).catch((e) => console.error(e));
+}
+function spineStatusText() {
+  const mon = new Date(SP.week + "T12:00:00"); const due = SPINE_CHECKS.filter((c) => spineDue(c, mon)); const ov = spineOverall(due, mon);
+  const s = (c) => SP.data.checks?.[c.id] || {}; const mark = (c) => s(c).state === "done" ? "✓" : s(c).state === "issue" ? "⚠" : "–";
+  const line = (c) => `  ${mark(c)} ${c.title}${s(c).note ? ` (${s(c).note})` : ""}`;
+  const v = SP.data.vault || {}; const ob = offboardThisWeek(mon);
+  return [`Spine status, week of ${mon.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}: ${ov.emoji} ${ov.label}`, "",
+    "OPERATIONAL", ...due.filter((c) => c.group === "Operational").map(line), "",
+    "SECURITY", ...due.filter((c) => c.group === "Security").map(line),
+    v.total ? `  Vault migration: ${v.moved || 0} of ${v.total} credentials moved, ${v.rotated || 0} rotated` : "",
+    `  Offboarding: ${ob.week} this week, ${ob.open} open`, "",
+    "RISKS / DECISIONS NEEDED", SP.data.risks || "  None this week", "",
+    "NEXT WEEK", SP.data.next || "  –"].filter((x) => x !== "").join("\n").replace(/\n(OPERATIONAL|SECURITY|RISKS|NEXT)/g, "\n\n$1");
+}
+const spTimers = new Map();   // one save timer per box, so typing in one box never cancels another box's save
+document.addEventListener("click", (e) => {
+  const t = e.target; if (!(t instanceof Element)) return;
+  if (t.closest("[data-ojr]")) { downloadOpenJobs(t.closest("[data-ojr]")); return; }
+  if (!t.closest("#spine-root")) return;
+  const set = t.closest("[data-sp-set]"); if (set) { const [id, v] = set.dataset.spSet.split(":"); const cur = SP.data.checks?.[id]?.state; const next = cur === v ? "" : v;
+    SP.data = { ...SP.data, checks: { ...(SP.data.checks || {}), [id]: { ...(SP.data.checks?.[id] || {}), state: next, at: new Date().toISOString() } } }; renderSpine();
+    state.store.saveSpine(SP.week, { checks: { [id]: { state: next, at: new Date().toISOString() } } }).catch(() => toast("Couldn't save. Publish the latest firestore.rules.", "#E2632B"));
+    if (next === "issue") setTimeout(() => $(`[data-sp-note="${id}"]`)?.focus(), 30); return; }
+  const wk = t.closest("[data-sp-week]"); if (wk) { const m = new Date(SP.week + "T12:00:00"); m.setDate(m.getDate() + 7 * Number(wk.dataset.spWeek)); startSpine(isoDayLocal(m)); return; }
+  const go = t.closest("[data-sp-goto]"); if (go) { startSpine(go.dataset.spGoto); return; }
+  if (t.closest("[data-sp-later]")) { SP.showLater = !SP.showLater; renderSpine(); return; }
+  if (t.closest("[data-sp-copy]")) { navigator.clipboard?.writeText(spineStatusText()).then(() => toast("Status copied", "var(--s-done)")); return; }
+  if (t.closest("[data-sp-email]")) {
+    const mon = new Date(SP.week + "T12:00:00"); const ov = spineOverall(SPINE_CHECKS.filter((c) => spineDue(c, mon)), mon);
+    const subject = `Spine status, week of ${mon.toLocaleDateString([], { month: "short", day: "numeric" })}: ${ov.label}`;
+    location.href = `mailto:${encodeURIComponent(CFG.spine?.statusTo || "").replace(/%40/g, "@")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(spineStatusText())}`;
+    state.store.saveSpine(SP.week, { sentAt: new Date().toISOString() }).catch(() => {}); return;
+  }
+});
+document.addEventListener("input", (e) => {
+  const n = e.target.closest?.("[data-sp-note], [data-sp-field], [data-sp-vault]"); if (!n || !n.closest("#spine-root")) return;
+  const key = n.dataset.spNote || n.dataset.spField || "vault-" + n.dataset.spVault;
+  clearTimeout(spTimers.get(key));
+  spTimers.set(key, setTimeout(() => {
+    let patch;
+    if (n.dataset.spNote) patch = { checks: { [n.dataset.spNote]: { note: n.value } } };
+    else if (n.dataset.spField) patch = { [n.dataset.spField]: n.value };
+    else patch = { vault: { [n.dataset.spVault]: n.value === "" ? null : Number(n.value) } };
+    const deep = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" ? deep({ ...(a[k] || {}) }, v) : v; return a; };
+    SP.data = deep({ ...SP.data }, patch);
+    state.store.saveSpine(SP.week, patch).catch(() => toast("Couldn't save. Publish the latest firestore.rules.", "#E2632B"));
+  }, 500));
+});
