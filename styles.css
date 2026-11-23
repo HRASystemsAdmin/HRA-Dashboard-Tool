@@ -1126,7 +1126,7 @@ body.has-app::before {
 .search-sm { height: 36px; min-width: 210px; flex: 0 1 240px; }
 
 .pl-table-wrap { overflow-x: auto; overflow-y: hidden; border-top: 1px solid var(--line); border-radius: 0 0 22px 22px; scrollbar-width: thin; }
-.workspace .tool-pipeline { max-width: 1440px; }
+.workspace .tool-pipeline { max-width: none; }
 .pl-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
 .pl-table thead th {
   position: sticky; top: 0; z-index: 2; text-align: left; vertical-align: bottom;
@@ -3276,6 +3276,20 @@ body.in-course .tp-nav { margin-right: 86px; }
 .tn-empty { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
 .tn-list + .note-meta { margin-top: 18px; }
 .tn-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; margin-right: 6px; border-radius: 999px; background: var(--navy); color: #fff; font-size: 11px; font-weight: 800; vertical-align: 1px; }
+
+/* Client Pipeline: the table fills the width and grows with the window (no sideways scroll on desktop) */
+.pl-scroll .pl-table { min-width: 0; width: 100%; font-size: 13px; }
+.pl-scroll-box .pl-table-wrap.pl-scroll { overflow-x: hidden; }
+.pl-scroll .pl-row > * { padding: 10px 10px; }
+.pl-scroll .pl-row > th, .pl-scroll thead th:first-child { padding-left: 20px; }
+.pl-scroll thead th { padding: 13px 10px 11px; overflow-wrap: anywhere; }
+.pl-scroll td.is-date, .pl-scroll td.col-startDate { font-size: 12.5px; }
+@media (max-width: 1699px) { .pl-scroll .pl-row > td.is-date, .pl-scroll .pl-row > td.col-startDate { padding-left: 6px; padding-right: 6px; font-size: 12px; letter-spacing: -.01em; } }
+@media (max-width: 1400px) { .pl-scroll .pl-row > td.is-date, .pl-scroll .pl-row > td.col-startDate { padding-left: 4px; padding-right: 4px; } }
+@media (max-width: 1100px) {
+  .pl-scroll .pl-table { min-width: var(--tw); }
+  .pl-scroll-box .pl-table-wrap.pl-scroll { overflow-x: auto; }
+}
 
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {

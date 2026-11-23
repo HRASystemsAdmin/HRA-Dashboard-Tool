@@ -2577,18 +2577,18 @@ const PSTATUS = {
 };
 // Every column a person can show. The first nine are the spreadsheet's columns, in its order.
 const PL_COLS = [
-  { key: "name",        label: "Name of Candidate Submitted",     w: 13,   xw: 24, locked: true },
+  { key: "name",        label: "Name of Candidate Submitted",     w: 12,   xw: 24, locked: true },
   { key: "role",        label: "Role Submitted for (Job Title)",  w: 12,   xw: 30 },
-  { key: "dAM",         label: "Date Submitted to AM",            w: 8.6,  xw: 14, date: true },
-  { key: "submitted",   label: "Date Submitted to HM",            w: 8.6,  xw: 14, date: true },
-  { key: "dIR",         label: "Date HM Interview Requested",     w: 8.6,  xw: 14, date: true },
-  { key: "dIS",         label: "Date HM Interview Scheduled",     w: 8.6,  xw: 14, date: true },
-  { key: "dOP",         label: "Date Moved to Offer Prep",        w: 8.6,  xw: 14, date: true },
-  { key: "dOA",         label: "Date Offer Accepted",             w: 8.6,  xw: 14, date: true },
+  { key: "dAM",         label: "Date Submitted to AM",            w: 7.9,  xw: 14, date: true },
+  { key: "submitted",   label: "Date Submitted to HM",            w: 7.9,  xw: 14, date: true },
+  { key: "dIR",         label: "Date HM Interview Requested",     w: 7.9,  xw: 14, date: true },
+  { key: "dIS",         label: "Date HM Interview Scheduled",     w: 7.9,  xw: 14, date: true },
+  { key: "dOP",         label: "Date Moved to Offer Prep",        w: 7.9,  xw: 14, date: true },
+  { key: "dOA",         label: "Date Offer Accepted",             w: 7.9,  xw: 14, date: true },
   { key: "startDate",   label: "Start Date",                      w: 8.5,  xw: 16, date: true, manual: true },
   { key: "recruiter",   label: "Recruiter",                       w: 8.5,  xw: 16 },
   { key: "stage",       label: "Workable Status",                 w: 10,   xw: 22 },
-  { key: "notes",       label: "Recruiter Notes",                 w: 15,   xw: 60, wrap: true },
+  { key: "notes",       label: "Recruiter Notes",                 w: 13.5,   xw: 60, wrap: true },
   { key: "statusLabel", label: "Status",                          w: 8,    xw: 18 },
   { key: "daysOpen",    label: "Days since submitted",            w: 6,    xw: 12, extra: true, num: true }
 ];
@@ -2939,6 +2939,9 @@ function toggleHiddenClient(name) {
   toast(PL.hidden.has(name) ? `${name} hidden. Find it under “Hidden clients”.` : `${name} is visible again`, "var(--s-progress)");
 }
 
+/* re-render the table when crossing the compact-date width */
+{ let wasCompact = null, t = null; addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => { const c = compactDates(); if (wasCompact !== null && c !== wasCompact && currentTool === "pipeline") renderSheet(); wasCompact = c; }, 150); }); }
+
 /* ---------- Candidate table inner scroll: fades + back-to-top ---------- */
 function plScrollState(el) {
   const box = el?.closest(".pl-scroll-box"); if (!box) return;
@@ -3087,7 +3090,7 @@ function renderSheet() {
         ? `<div class="range-empty">${emptyBlock("No candidates in this date range", `Nobody was submitted to ${c.name} ${rangeLabel(rb).toLowerCase().startsWith("from") || rangeLabel(rb).toLowerCase().startsWith("until") ? rangeLabel(rb).toLowerCase() : "between " + rangeLabel(rb)}.`)}<button type="button" class="btn btn-ghost" data-range-clear>Show all dates</button></div>`
         : c.empty || !rows.length
         ? emptyBlock("No submitted candidates yet", c.empty ? "Workable has no jobs matched to this client yet. Check the client name or the job's department in Workable." : "Candidates appear here once they reach a submitted stage in Workable.")
-        : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="min-width:${Math.max(600, Math.round(cols.reduce((t, c) => t + c.w, 0) * 12.5))}px">
+        : `<div class="pl-scroll-box"><div class="pl-table-wrap pl-scroll" data-pl-scroll><table class="pl-table${PL.animate ? " is-enter" : ""}" style="--tw:${Math.max(600, Math.round(cols.reduce((t, c) => t + c.w, 0) * 9))}px">
             <colgroup>${cols.map((col) => `<col style="width:${(col.w / totalW * 100).toFixed(2)}%">`).join("")}</colgroup>
             <thead><tr>${cols.map((col) => `<th class="col-${col.key}" scope="col"><span class="th-in"><span class="th-label">${esc(col.label)}</span><button type="button" class="colf-btn${PL.colFilters[col.key]?.length ? " is-on" : ""}" data-colf="${col.key}" aria-label="Filter ${esc(col.label)}" title="Filter">${PL.colFilters[col.key]?.length ? `<b>${PL.colFilters[col.key].length}</b>` : ""}<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></svg></button></span></th>`).join("")}</tr></thead>
             <tbody>${shown.length ? shown.map((r, i) => `
@@ -3102,9 +3105,12 @@ function renderSheet() {
   PL.animate = false;
 }
 
+// On narrower screens the 13 columns need compact dates: 11/30/25 instead of 11/30/2025.
+const compactDates = () => window.innerWidth < 1700;
+function fmtDayFit(v) { const f = fmtDay(v); return compactDates() ? f.replace(/\/(\d{2})(\d{2})$/, "/$2") : f; }
 function cellHTML(r, col, first) {
   let v = cellValue(r, col.key);
-  if (col.date && /^\d{4}-/.test(v || "")) v = fmtDay(v);
+  if (col.date && /^\d{4}-/.test(v || "")) v = fmtDayFit(v);
   if (first) {
     const inner = col.key === "name" && r.link ? `<a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v);
     return `<th scope="row" class="col-${col.key}">${inner}</th>`;
