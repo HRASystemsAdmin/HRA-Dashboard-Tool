@@ -3229,11 +3229,13 @@ body.in-course .tp-nav { margin-right: 86px; }
 .pl-table thead th:hover .colf-btn, .colf-btn:focus-visible, .colf-btn.is-open { opacity: 1; color: var(--navy); background: rgba(0,55,127,.07); }
 .colf-btn.is-on { opacity: 1; color: #fff; background: var(--orange); }
 .colf-btn b { font-size: 10.5px; }
-.colf-pop { position: fixed; z-index: 80; width: 270px; display: flex; flex-direction: column; padding: 8px; border-radius: 16px; background: #fff; border: 1px solid var(--line); box-shadow: 0 26px 60px -22px rgba(0,30,80,.5); animation: menuIn .2s var(--ease-out) both; }
+.colf-pop { position: fixed; z-index: 80; width: 300px; display: flex; flex-direction: column; padding: 8px; border-radius: 16px; background: #fff; border: 1px solid var(--line); box-shadow: 0 26px 60px -22px rgba(0,30,80,.5); animation: menuIn .2s var(--ease-out) both; }
 .colf-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 8px; font-size: 13px; }
 .colf-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.colf-search { margin: 0 2px 6px; }
-.colf-list { overflow: auto; min-height: 0; scrollbar-width: thin; }
+.colf-search { flex: none; height: 36px; min-height: 36px; margin: 0 2px 6px; }
+.colf-search input { height: 100%; }
+.colf-list { flex: 1 1 auto; overflow: auto; min-height: 0; scrollbar-width: thin; }
+.colf-head { flex: none; }
 .colf-v.is-blank { color: var(--muted); font-style: italic; }
 .colf-none { margin: 6px; font-size: 13px; color: var(--muted); }
 /* dates stay on one line */

@@ -2819,9 +2819,9 @@ function openColf(key, anchor) {
   pop.className = "colf-pop pop"; pop.id = "colf-pop"; pop.dataset.key = key;
   pop.innerHTML = `<div class="colf-head"><strong>${esc(col.label)}</strong>${sel.size ? `<button type="button" class="link-btn" data-colf-reset>Clear</button>` : ""}</div>
     ${vals.length > 8 ? `<label class="search colf-search"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg><input type="search" id="colf-q" placeholder="Search" autocomplete="off"/></label>` : ""}
-    <div class="colf-list">${vals.length ? vals.map(([v, n], i) => `<button type="button" class="colf-opt${sel.has(v) ? " is-on" : ""}" data-colf-val="${esc(v)}" style="--i:${Math.min(i, 12)}"><span class="st-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="colf-v${v === COLF_BLANK ? " is-blank" : ""}">${esc(v)}</span><span class="st-n">${n}</span></button>`).join("") : `<p class="colf-none">Nothing to filter yet.</p>`}</div>`;
+    <div class="colf-list">${vals.length ? vals.map(([v, n], i) => `<button type="button" class="colf-opt${sel.has(v) ? " is-on" : ""}" data-colf-val="${esc(v)}" style="--i:${Math.min(i, 12)}"><span class="st-box"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="colf-v${v === COLF_BLANK ? " is-blank" : ""}" title="${esc(v)}">${esc(v)}</span><span class="st-n">${n}</span></button>`).join("") : `<p class="colf-none">Nothing to filter yet.</p>`}</div>`;
   document.body.appendChild(pop);
-  const r = anchor.getBoundingClientRect(), w = 270;
+  const r = anchor.getBoundingClientRect(), w = 300;
   pop.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.right - w + 8)) + "px";
   pop.style.top = Math.min(r.bottom + 8, window.innerHeight - 140) + "px";
   pop.style.maxHeight = Math.max(160, window.innerHeight - r.bottom - 24) + "px";
