@@ -6286,8 +6286,9 @@ function renderSpine() {
     ${groups.map((g) => { const items = due.filter((c) => c.group === g); return items.length ? `<section class="sp-card"><h2>${g}</h2>${items.map(row).join("")}</section>` : ""; }).join("")}
     ${later.length ? `<button type="button" class="sp-later-btn" data-sp-later>${SP.showLater ? "Hide" : "Show"} checks not due this week (${later.length})</button>${SP.showLater ? `<section class="sp-card sp-later">${later.map(row).join("")}</section>` : ""}` : ""}
     <section class="sp-card"><h2>Status to Aaron</h2>
-      <label class="field"><span class="field-label">Risks / decisions needed</span><textarea data-sp-field="risks" rows="3" placeholder="e.g. The 'Candidate God permissions' token has broad write access and an unknown owner. I propose replacing it.">${esc(SP.data.risks || "")}</textarea></label>
-      <label class="field"><span class="field-label">Next week</span><textarea data-sp-field="next" rows="2" placeholder="Three bullets">${esc(SP.data.next || "")}</textarea></label>
+      <label class="field"><span class="field-label">Needs Aaron <small>one line each: what you need and the cost or option</small></span><textarea data-sp-field="risks" rows="2" placeholder="Approve Bitwarden pilot (free) → paid plan ~$20/mo">${esc(SP.data.risks || "")}</textarea></label>
+      <label class="field"><span class="field-label">Next week <small>up to 3 lines</small></span><textarea data-sp-field="next" rows="2" placeholder="Finish vault migration">${esc(SP.data.next || "")}</textarea></label>
+      <div class="sp-preview"><span class="sp-preview-label">Preview</span><strong id="sp-subj">${esc(spineSubject())}</strong><pre id="sp-prev">${esc(spineStatusText())}</pre></div>
       <div class="sp-send"><button type="button" class="btn btn-ghost" data-sp-copy>Copy status</button><button type="button" class="btn btn-primary" data-sp-email>Email status to Aaron</button>${SP.data.sentAt ? `<span class="sp-sent">Sent ${esc(ago(SP.data.sentAt))}</span>` : ""}</div>
       ${CFG.spine?.statusTo ? "" : `<p class="sp-hint">Add Aaron's email in config.js → <code>spine.statusTo</code> to fill the “To” line automatically.</p>`}
     </section>
@@ -6298,18 +6299,32 @@ function spineMark(id, stateVal, note) {
   const patch = { checks: { [id]: { state: stateVal, at: new Date().toISOString(), ...(note ? { note } : {}) } } };
   return state.store.saveSpine(wk, patch).catch((e) => console.error(e));
 }
+/* Aaron wants it short: status, what needs him, issues only, key numbers, next week. Done items collapse into a count. */
+const spLines = (txt) => String(txt || "").split(/\n+/).map((l) => l.replace(/^[\s•\-*]+/, "").trim()).filter(Boolean);
+function spineSubject() {
+  const mon = new Date(SP.week + "T12:00:00"); const due = SPINE_CHECKS.filter((c) => spineDue(c, mon)); const ov = spineOverall(due, mon);
+  const iss = due.filter((c) => SP.data.checks?.[c.id]?.state === "issue").length;
+  return `Spine · ${mon.toLocaleDateString([], { month: "short", day: "numeric" })} · ${ov.emoji} ${iss ? `${iss} issue${iss === 1 ? "" : "s"}` : ov.label}`;
+}
 function spineStatusText() {
   const mon = new Date(SP.week + "T12:00:00"); const due = SPINE_CHECKS.filter((c) => spineDue(c, mon)); const ov = spineOverall(due, mon);
-  const s = (c) => SP.data.checks?.[c.id] || {}; const mark = (c) => s(c).state === "done" ? "✓" : s(c).state === "issue" ? "⚠" : "–";
-  const line = (c) => `  ${mark(c)} ${c.title}${s(c).note ? ` (${s(c).note})` : ""}`;
+  const s = (c) => SP.data.checks?.[c.id] || {};
+  const done = due.filter((c) => s(c).state === "done").length;
+  const issues = due.filter((c) => s(c).state === "issue");
+  const open = due.filter((c) => !s(c).state);
+  const short = (c) => c.title.split(/[:(]/)[0].replace(/^Workable /, "").trim();
   const v = SP.data.vault || {}; const ob = offboardThisWeek(mon);
-  return [`Spine status, week of ${mon.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}: ${ov.emoji} ${ov.label}`, "",
-    "OPERATIONAL", ...due.filter((c) => c.group === "Operational").map(line), "",
-    "SECURITY", ...due.filter((c) => c.group === "Security").map(line),
-    v.total ? `  Vault migration: ${v.moved || 0} of ${v.total} credentials moved, ${v.rotated || 0} rotated` : "",
-    `  Offboarding: ${ob.week} this week, ${ob.open} open`, "",
-    "RISKS / DECISIONS NEEDED", SP.data.risks || "  None this week", "",
-    "NEXT WEEK", SP.data.next || "  –"].filter((x) => x !== "").join("\n").replace(/\n(OPERATIONAL|SECURITY|RISKS|NEXT)/g, "\n\n$1");
+  const needs = spLines(SP.data.risks), next = spLines(SP.data.next);
+  const out = [`Status: ${ov.emoji} ${done}/${due.length} done${issues.length ? ` · ${issues.length} issue${issues.length === 1 ? "" : "s"}` : ""}${open.length && !issues.length && ov.key !== "green" ? ` · ${open.length} pending` : ""}`];
+  if (needs.length) out.push("", "Needs you:", ...needs.map((l) => `• ${l}`));
+  if (issues.length) out.push("", "Issues:", ...issues.map((c) => `• ${short(c)}${s(c).note ? `: ${s(c).note}` : ""}`));
+  if (open.length && ov.key === "red") out.push("", "Not done:", `• ${open.map(short).join(" · ")}`);
+  const facts = [];
+  if (v.total) facts.push(`Vault: ${v.moved || 0}/${v.total} moved · ${v.rotated || 0} rotated`);
+  if (ob.week || ob.open) facts.push(`Offboarding: ${ob.week} this week${ob.open ? ` · ${ob.open} open` : " · done"}`);
+  if (facts.length) out.push("", ...facts);
+  if (next.length) out.push("", "Next week:", ...next.slice(0, 3).map((l) => `• ${l}`));
+  return out.join("\n");
 }
 const spTimers = new Map();   // one save timer per box, so typing in one box never cancels another box's save
 document.addEventListener("click", (e) => {
@@ -6325,8 +6340,7 @@ document.addEventListener("click", (e) => {
   if (t.closest("[data-sp-later]")) { SP.showLater = !SP.showLater; renderSpine(); return; }
   if (t.closest("[data-sp-copy]")) { navigator.clipboard?.writeText(spineStatusText()).then(() => toast("Status copied", "var(--s-done)")); return; }
   if (t.closest("[data-sp-email]")) {
-    const mon = new Date(SP.week + "T12:00:00"); const ov = spineOverall(SPINE_CHECKS.filter((c) => spineDue(c, mon)), mon);
-    const subject = `Spine status, week of ${mon.toLocaleDateString([], { month: "short", day: "numeric" })}: ${ov.label}`;
+    const subject = spineSubject();
     location.href = `mailto:${encodeURIComponent(CFG.spine?.statusTo || "").replace(/%40/g, "@")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(spineStatusText())}`;
     state.store.saveSpine(SP.week, { sentAt: new Date().toISOString() }).catch(() => {}); return;
   }
@@ -6342,6 +6356,7 @@ document.addEventListener("input", (e) => {
     else patch = { vault: { [n.dataset.spVault]: n.value === "" ? null : Number(n.value) } };
     const deep = (a, b) => { for (const [k, v] of Object.entries(b)) a[k] = v && typeof v === "object" ? deep({ ...(a[k] || {}) }, v) : v; return a; };
     SP.data = deep({ ...SP.data }, patch);
+    const pv = $("#sp-prev"); if (pv) pv.textContent = spineStatusText(); const sj = $("#sp-subj"); if (sj) sj.textContent = spineSubject();
     state.store.saveSpine(SP.week, patch).catch(() => toast("Couldn't save. Publish the latest firestore.rules.", "#E2632B"));
   }, 500));
 });
