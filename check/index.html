@@ -94,18 +94,15 @@
       <div class="reqs">
         <div class="req"><b>Internet</b>10 Mbps download and 10 Mbps upload or faster</div>
         <div class="req"><b>Operating system</b>Windows 10 or 11</div>
-        <div class="req"><b>Processor</b>Intel Core i5, 14th gen or newer</div>
+        <div class="req"><b>Processor</b>Intel Core i5 or better</div>
         <div class="req"><b>Memory (RAM)</b>16 GB or more</div>
         <div class="req no" style="grid-column:1/-1"><b>Not supported</b>Chromebooks can't be used on our systems.</div>
       </div>
       <form id="who" novalidate>
-        <div class="row2">
-          <label class="f">Full name<input type="text" id="name" maxlength="100" autocomplete="name" required /></label>
-          <label class="f">Email<input type="email" id="email" maxlength="150" autocomplete="email" required /></label>
-        </div>
+        <label class="f">Full name<input type="text" id="name" maxlength="100" autocomplete="name" required /></label>
         <label class="f">Position or recruiter (optional)<input type="text" id="position" maxlength="150" placeholder="e.g. Recruiter role, or your recruiter's name" /></label>
         <p class="tip">Please run this on the <b>same computer and internet connection</b> you'll use for work.</p>
-        <label class="consent"><input type="checkbox" id="consent" required /> I agree to share my results, name, email and basic device information with Hunter Recruitment Advisors to review my application.</label>
+        <label class="consent"><input type="checkbox" id="consent" required /> I agree to share my results, name and basic device information with Hunter Recruitment Advisors to review my application.</label>
         <p class="err" id="err1"></p>
         <button class="btn wide" type="submit">Continue</button>
       </form>
@@ -119,10 +116,10 @@
       <div class="row2">
         <label class="f">Processor
           <select id="cpu"><option value="">Choose…</option>
-            <option value="i5-14">Intel Core i5 (14th gen or newer)</option>
-            <option value="i7-14">Intel Core i7 / i9 (14th gen or newer)</option>
+            <option value="i3">Intel Core i3</option>
+            <option value="i5">Intel Core i5</option>
+            <option value="i7">Intel Core i7 / i9</option>
             <option value="ultra">Intel Core Ultra</option>
-            <option value="older">Intel Core, 13th gen or older</option>
             <option value="amd">AMD Ryzen</option>
             <option value="other">Other</option>
             <option value="unsure">Not sure</option>
@@ -135,6 +132,7 @@
             <option value="unsure">Not sure</option>
           </select></label>
       </div>
+      <label class="f" id="cpu-other-wrap" hidden>Which processor?<input type="text" id="cpu-other" maxlength="60" placeholder="e.g. Intel Pentium Gold 7505" /></label>
       <p class="tip">Where to find them on Windows: <b>Settings → System → About</b> shows “Processor” and “Installed RAM”.</p>
       <p class="err" id="err2"></p>
       <button class="btn wide" id="go">Start speed test</button>
@@ -157,6 +155,7 @@
       <div class="verdict" id="verdict"></div>
       <div class="checks" id="checks"></div>
       <div class="note" id="advice" hidden></div>
+      <p class="tip" id="fastnote" hidden>Very fast connections can show a lower number here than on other speed tests (this test uses a single connection). It doesn't affect your result: only the minimum matters.</p>
       <p class="sent" id="sent">Sending your results…</p>
       <div class="actions"><button class="btn ghost" id="again">Run the test again</button></div>
     </section>
