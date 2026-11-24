@@ -77,6 +77,18 @@
     .sent { font-size: 13.5px; font-weight: 600; color: var(--ok); margin-bottom: 14px; }
     .sent.bad { color: var(--bad); }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .spec { margin: 6px 0 16px; padding: 16px; border-radius: 16px; background: #F6F9FE; border: 1px solid #E5EDF8; }
+    .spec h3 { margin: 0 0 8px; font-size: 15px; }
+    .steps { margin: 0 0 12px; padding-left: 20px; font-size: 13.5px; line-height: 1.55; color: #33465F; }
+    .steps li { margin-bottom: 4px; }
+    .drop { display: block; border: 2px dashed #C3D2E6; border-radius: 14px; background: #fff; cursor: pointer; transition: border-color .15s, background .15s; outline: none; }
+    .drop:hover, .drop:focus-visible, .drop.is-over { border-color: var(--navy); background: #F3F7FF; }
+    .drop-empty { display: grid; gap: 2px; place-items: center; text-align: center; padding: 22px 14px; font-size: 14px; color: var(--navy); }
+    .drop-empty small { color: var(--muted); font-size: 12px; }
+    .drop-full { position: relative; display: block; padding: 8px; }
+    .drop-full img { display: block; width: 100%; max-height: 260px; object-fit: contain; border-radius: 10px; background: #F6F9FE; }
+    .drop-x { position: absolute; top: 14px; right: 14px; height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(11,27,51,.82); color: #fff; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+    .drop.is-busy { opacity: .6; pointer-events: none; }
     footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 18px; }
     [hidden] { display: none !important; }
     @media (max-width: 560px) { .reqs, .row2 { grid-template-columns: 1fr; } .card { padding: 20px; } h1 { font-size: 24px; } }
@@ -93,7 +105,7 @@
       <p class="sub">Our team works remotely on video and phone calls all day. This 1-minute check confirms your computer and internet meet our requirements. Nothing to install.</p>
       <div class="reqs">
         <div class="req"><b>Internet</b>10 Mbps download and 10 Mbps upload or faster</div>
-        <div class="req"><b>Operating system</b>Windows 10 or 11</div>
+        <div class="req"><b>Operating system</b>Windows 11 (Windows 10 is not compatible)</div>
         <div class="req"><b>Processor</b>Intel Core i5 or better</div>
         <div class="req"><b>Memory (RAM)</b>16 GB or more</div>
         <div class="req no" style="grid-column:1/-1"><b>Not supported</b>Chromebooks can't be used on our systems.</div>
@@ -133,7 +145,19 @@
           </select></label>
       </div>
       <label class="f" id="cpu-other-wrap" hidden>Which processor?<input type="text" id="cpu-other" maxlength="60" placeholder="e.g. Intel Pentium Gold 7505" /></label>
-      <p class="tip">Where to find them on Windows: <b>Settings → System → About</b> shows “Processor” and “Installed RAM”.</p>
+      <div class="spec">
+        <h3>Upload your system specifications</h3>
+        <ol class="steps">
+          <li>Open <b>Settings → System → About</b> on this computer.</li>
+          <li>Press <b>Windows + Shift + S</b> and capture the window showing <b>Device specifications</b> (Processor, Installed RAM) and <b>Windows specifications</b> (Edition).</li>
+          <li>Come back here and press <b>Ctrl + V</b> to paste it, or click below to upload the image.</li>
+        </ol>
+        <label class="drop" id="drop" tabindex="0">
+          <input type="file" id="shot" accept="image/png,image/jpeg,image/webp" hidden />
+          <span class="drop-empty" id="drop-empty"><b>Click to upload, drop, or paste (Ctrl + V)</b><small>PNG or JPG screenshot</small></span>
+          <span class="drop-full" id="drop-full" hidden><img id="shot-prev" alt="Your system specifications" /><button type="button" class="drop-x" id="shot-x" aria-label="Remove screenshot">Remove</button></span>
+        </label>
+      </div>
       <p class="err" id="err2"></p>
       <button class="btn wide" id="go">Start speed test</button>
     </section>

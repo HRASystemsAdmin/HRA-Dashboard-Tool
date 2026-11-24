@@ -37,8 +37,8 @@ async function detectDevice() {
   if (uad?.getHighEntropyValues) { try { const h = await uad.getHighEntropyValues(["platformVersion"]); version = h.platformVersion || ""; } catch {} }
   if (chromebook) { os = "ChromeOS (Chromebook)"; win11 = "no"; }
   else if (mobile) { os = /iPhone|iPad|iPod/.test(ua) ? "iPhone / iPad" : "Android phone or tablet"; win11 = "no"; }
-  else if (platform === "Windows" && version) { const major = parseInt(version, 10); win11 = major >= 1 ? "yes" : "no"; os = major >= 13 ? "Windows 11" : major >= 1 ? "Windows 10" : "Older Windows"; }
-  else if (/Windows NT 10/.test(ua)) { os = "Windows 10 or 11"; win11 = "yes"; }
+  else if (platform === "Windows" && version) { const major = parseInt(version, 10); win11 = major >= 13 ? "yes" : "no"; os = major >= 13 ? "Windows 11" : major >= 1 ? "Windows 10" : "Older Windows"; }
+  else if (/Windows NT 10/.test(ua)) { os = "Windows (version confirmed by screenshot)"; win11 = "unknown"; }
   else if (/Windows/.test(ua)) { os = "Older Windows"; win11 = "no"; }
   else if (/Mac OS X|Macintosh/.test(ua)) { os = "macOS"; win11 = "no"; }
   else if (/Linux/.test(ua)) { os = "Linux"; win11 = "no"; }
@@ -47,16 +47,49 @@ async function detectDevice() {
 }
 function renderDevice() {
   const d = R.dev;
-  const osPill = d.win11 === "yes" ? ["ok", "Meets requirement"] : d.win11 === "no" ? ["bad", "Doesn't meet requirement"] : ["warn", "Couldn't confirm"];
+  const osPill = d.win11 === "yes" ? ["ok", "Meets requirement"] : d.win11 === "no" ? ["bad", "Windows 11 is required"] : ["warn", "Confirmed from your screenshot"];
   $("#dev").innerHTML = `
     <div><span>Operating system</span><b>${esc(d.os)} · <span class="pill ${osPill[0]}">${osPill[1]}</span></b></div>
     <div><span>Chromebook</span><b class="pill ${d.chromebook ? "bad" : "ok"}">${d.chromebook ? "Yes (not supported)" : "No"}</b></div>
     ${d.mobile ? `<div><span>Device</span><b class="pill bad">Phone or tablet: please use your work computer</b></div>` : ""}`;
 }
+/* ---------- System specifications screenshot: shrunk and compressed in the browser (about 150–400 KB) ---------- */
+let SHOT = "";
+const MAX_SHOT = 520000;   // characters of the compressed image; the database rule allows up to 700,000
+async function compressImage(file) {
+  if (!file || !/^image\//.test(file.type)) throw new Error("Please choose an image (PNG or JPG).");
+  if (file.size > 25e6) throw new Error("That image is too large. Please take a screenshot instead.");
+  const url = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("That image couldn't be read.")); i.src = url; });
+  let scale = Math.min(1, 1600 / img.width), q = 0.82, out = "";
+  for (let k = 0; k < 8; k++) {
+    const c = document.createElement("canvas"); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    out = c.toDataURL("image/jpeg", q);
+    if (out.length <= MAX_SHOT) return out;
+    if (q > 0.55) q -= 0.1; else scale *= 0.8;
+  }
+  throw new Error("That image is too large. Please take a smaller screenshot.");
+}
+async function takeShot(file) {
+  const drop = $("#drop"); drop.classList.add("is-busy"); $("#err2").textContent = "";
+  try { SHOT = await compressImage(file); $("#shot-prev").src = SHOT; $("#drop-empty").hidden = true; $("#drop-full").hidden = false; }
+  catch (e) { $("#err2").textContent = e.message; }
+  finally { drop.classList.remove("is-busy"); }
+}
+$("#shot").addEventListener("change", (e) => { if (e.target.files[0]) takeShot(e.target.files[0]); e.target.value = ""; });
+$("#drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#shot").click(); } });
+$("#drop").addEventListener("dragover", (e) => { e.preventDefault(); $("#drop").classList.add("is-over"); });
+$("#drop").addEventListener("dragleave", () => $("#drop").classList.remove("is-over"));
+$("#drop").addEventListener("drop", (e) => { e.preventDefault(); $("#drop").classList.remove("is-over"); const f = [...(e.dataTransfer?.files || [])].find((x) => x.type.startsWith("image/")); if (f) takeShot(f); });
+$("#shot-x").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); SHOT = ""; $("#shot-prev").removeAttribute("src"); $("#drop-full").hidden = true; $("#drop-empty").hidden = false; });
+document.addEventListener("paste", (e) => { if ($("#s2").hidden) return; const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith("image/")); if (f) { e.preventDefault(); takeShot(f); } });
+
 $("#cpu").addEventListener("change", () => { const o = $("#cpu").value === "other"; $("#cpu-other-wrap").hidden = !o; if (o) $("#cpu-other").focus(); });
 $("#go").addEventListener("click", () => {
   if (!$("#cpu").value || !$("#ram").value) { $("#err2").textContent = "Please choose your processor and memory (or “Not sure”)."; return; }
   if ($("#cpu").value === "other" && !$("#cpu-other").value.trim()) { $("#err2").textContent = "Please type which processor you have."; $("#cpu-other").focus(); return; }
+  if (!SHOT) { $("#err2").textContent = "Please upload a screenshot of your system specifications."; $("#drop").focus(); return; }
   $("#err2").textContent = ""; show("#s3"); runTest();
 });
 
@@ -111,7 +144,7 @@ function finish(sp) {
     { t: "Download speed", s: `Minimum ${MIN.down} Mbps`, v: fmtSpeed(sp.down), st: sp.down >= MIN.down ? "ok" : "bad" },
     { t: "Upload speed", s: `Minimum ${MIN.up} Mbps`, v: fmtSpeed(sp.up), st: sp.up >= MIN.up ? "ok" : "bad" },
     { t: "Latency", s: "Lower is better for calls", v: `${sp.ping} ms`, st: sp.ping <= 100 ? "ok" : sp.ping <= 200 ? "warn" : "bad", info: true },
-    { t: "Operating system", s: "Windows 10 or 11", v: d.os, st: d.win11 === "yes" ? "ok" : d.win11 === "no" ? "bad" : "warn" },
+    { t: "Operating system", s: "Windows 11", v: d.os, st: d.win11 === "yes" ? "ok" : d.win11 === "no" ? "bad" : "warn" },
     { t: "Not a Chromebook", s: "Chromebooks aren't supported", v: d.chromebook ? "Chromebook" : "OK", st: d.chromebook ? "bad" : "ok" },
     { t: "Processor (you selected)", s: "Intel Core i5 or better", v: cpuText, st: ["i5", "i7", "ultra"].includes(cpu) ? "ok" : cpu === "i3" ? "bad" : "warn" },
     { t: "Memory (you selected)", s: "16 GB or more", v: ramText, st: ["16", "32"].includes(ram) ? "ok" : ram === "8" ? "bad" : "warn" }
@@ -136,8 +169,10 @@ async function send(r) {
   try {
     if (!db) { const app = await import(FB + "firebase-app.js"); fs = await import(FB + "firebase-firestore.js"); db = fs.getFirestore(app.initializeApp(FIREBASE)); }
     const { collection, addDoc, serverTimestamp } = fs;
+    let shot = "";
+    if (SHOT) { try { shot = (await addDoc(collection(db, "techcheck_shots"), { img: SHOT, createdAt: serverTimestamp() })).id; } catch (e) { console.warn("Screenshot not saved", e); } }
     await addDoc(collection(db, "techchecks"), {
-      v: 2, name: R.name.slice(0, 100), position: R.position.slice(0, 150),
+      v: 3, shot, name: R.name.slice(0, 100), position: R.position.slice(0, 150),
       down: r.down, up: r.up, ping: r.ping, jitter: r.jitter, loc: String(r.loc).slice(0, 10), colo: String(r.colo).slice(0, 10),
       os: r.os.slice(0, 40), win11: r.win11, chromebook: r.chromebook, browser: r.browser.slice(0, 40),
       cores: Math.min(256, Math.max(0, Math.round(r.cores))), mem: Math.min(64, Math.max(0, Number(r.mem) || 0)),
