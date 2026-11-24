@@ -6277,8 +6277,9 @@ const tcLink = () => new URL("check/", location.href.replace(/[#?].*$/, "").repl
 // country name instead of a flag emoji (Windows shows flag emojis as two letters)
 const tcCountry = (() => { let dn = null; try { dn = new Intl.DisplayNames(["en"], { type: "region" }); } catch {} return (cc) => (/^[A-Z]{2}$/.test(cc || "") ? (dn?.of(cc) || cc) : ""); })();
 function startTech() {
-  if (!TC.unsub) TC.unsub = state.store.watchTech((list, err) => { TC.list = list || []; TC.error = err ? (err.code || "error") : ""; if (currentTool === "techcheck") renderTech(); });
+  if (!TC.unsub) TC.unsub = state.store.watchTech((list, err) => { TC.list = list || []; TC.error = err ? (err.code || "error") : ""; if (currentTool === "techcheck") { renderTech(); wmRefresh(); } });
   renderTech();
+  startWorldMap();
 }
 function renderTech() {
   const root = $("#tc-root"); if (!root) return;
@@ -6315,3 +6316,134 @@ document.addEventListener("click", async (e) => {
   const d = t.closest("[data-tc-del]"); if (d && state.isAdmin) { if (!confirm("Delete this result?")) return; try { await state.store.deleteTech(d.dataset.tcDel); toast("Result deleted", "var(--s-done)"); } catch { toast("Couldn't delete.", "#E2632B"); } }
 });
 document.addEventListener("input", (e) => { if (e.target.id !== "tc-q") return; TC.q = e.target.value; const pos = e.target.selectionStart; renderTech(); const q = $("#tc-q"); q?.focus(); q?.setSelectionRange(pos, pos); });
+
+/* ==========================================================================
+   Global connectivity map (Tech checks page)
+   Speed: HRA candidates' own tests · Power outages: World Bank Enterprise Surveys (via Our World in Data)
+   Internet outages: IODA, Georgia Tech (last 30 days). Outside data is cached 24 h in this browser.
+   ========================================================================== */
+const WM = { layer: "speed", built: false, data: { speed: null, power: null, net: null }, status: { power: "", net: "" } };
+const WM_LAYERS = {
+  speed: { label: "Internet speed", unit: "Mbps", icon: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4-6"/>',
+    title: "Average download speed of HRA candidates", src: "HRA candidate tech checks (single-connection browser test).",
+    bins: [[0, "Under 10", "#F2B8B5"], [10, "10–25", "#FFE08A"], [25, "25–50", "#BFE6C9"], [50, "50–100", "#5CC28B"], [100, "100+", "#0E8A64"]] },
+  power: { label: "Power outages", unit: "per month", icon: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+    title: "Power outages in a typical month (businesses)", src: "World Bank Enterprise Surveys, via Our World in Data. Latest survey year per country.",
+    bins: [[0, "Under 0.5", "#FFF1E3"], [0.5, "0.5–2", "#FFD2A8"], [2, "2–5", "#FFA668"], [5, "5–15", "#F2713A"], [15, "15+", "#C2410C"]] },
+  net: { label: "Internet outages", unit: "events", icon: '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3l18 18"/>',
+    title: "Internet outage events detected, last 30 days", src: "IODA, Georgia Tech Internet Outage Detection and Analysis. Live, last 30 days.",
+    bins: [[0, "None detected", "#D9E6FF"], [1, "1–2", "#C9D6FF"], [3, "3–5", "#8FA8FF"], [6, "6–10", "#5470F0"], [11, "11+", "#2E3FB8"]] }
+};
+const wmBin = (layer, v) => { const b = WM_LAYERS[layer].bins; let i = 0; for (let k = 0; k < b.length; k++) if (v >= b[k][0]) i = k; return i; };
+const wmCache = { get(k) { try { const v = JSON.parse(localStorage.getItem(k) || "null"); return v && Date.now() - v.at < 864e5 ? v : null; } catch { return null; } }, set(k, data) { try { localStorage.setItem(k, JSON.stringify({ at: Date.now(), data })); } catch {} } };
+
+function startWorldMap() {
+  if (window.HRA_WORLD) { buildWorldMap(); return; }
+  if (WM.loadingShapes) return; WM.loadingShapes = true;
+  const sc = document.createElement("script"); sc.src = "assets/world-map.js";
+  sc.onload = () => buildWorldMap(); sc.onerror = () => { const el = $("#tc-map"); if (el) el.innerHTML = ""; };
+  document.head.appendChild(sc);
+}
+function buildWorldMap() {
+  const el = $("#tc-map"); if (!el || !window.HRA_WORLD) return;
+  if (!WM.built) {
+    const W = window.HRA_WORLD;
+    el.innerHTML = `<section class="wm">
+      <div class="wm-head"><div><h2>Global connectivity</h2><p>Where candidates connect from, and how reliable power and internet are there.</p></div>
+        <div class="wm-seg" role="tablist"><span class="wm-pill" aria-hidden="true"></span>${Object.entries(WM_LAYERS).map(([k, L]) => `<button type="button" class="wm-btn${k === WM.layer ? " is-on" : ""}" data-wm-layer="${k}" role="tab"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${L.icon}</svg>${L.label}</button>`).join("")}</div></div>
+      <div class="wm-body">
+        <div class="wm-stage"><svg class="wm-svg" viewBox="0 0 ${W.w} ${W.h}" role="img" aria-label="World map"><g class="wm-g">${W.c.map((c) => `<path d="${c.d}" data-a2="${c.a2}" data-n="${esc(c.n)}" style="--d:${Math.round(((c.d.match(/M([\d.]+)/) || [0, 500])[1] / W.w) * 260)}ms"/>`).join("")}</g></svg>
+          <div class="wm-tip" id="wm-tip" hidden></div><div class="wm-loading" id="wm-loading" hidden><span></span>Loading data…</div></div>
+        <aside class="wm-side" id="wm-side"></aside>
+      </div></section>`;
+    WM.built = true;
+    requestAnimationFrame(() => { $(".wm")?.classList.add("is-in"); wmPill(true); });
+  }
+  wmRefresh();
+}
+function wmPill(instant) {
+  const on = $(".wm-btn.is-on"), pill = $(".wm-pill"); if (!on || !pill) return;
+  if (instant) pill.style.transition = "none";
+  pill.style.width = on.offsetWidth + "px"; pill.style.transform = `translateX(${on.offsetLeft - 4}px)`;
+  if (instant) { void pill.offsetWidth; pill.style.transition = ""; }
+}
+function wmSpeedData() {
+  const m = {};
+  for (const r of TC.list) { if (!r.loc || !(r.down >= 0)) continue; (m[r.loc] = m[r.loc] || { sum: 0, n: 0 }); m[r.loc].sum += r.down; m[r.loc].n++; }
+  const out = {}; for (const [k, v] of Object.entries(m)) out[k] = { v: v.sum / v.n, n: v.n };
+  return out;
+}
+async function wmLoad(layer) {
+  if (layer === "speed") { WM.data.speed = wmSpeedData(); return; }
+  if (WM.data[layer] || WM.status[layer] === "loading") return;
+  const key = "hra_wm_" + layer + "_v1", hit = wmCache.get(key);
+  if (hit) { WM.data[layer] = hit.data; WM.fetchedAt = hit.at; return; }
+  WM.status[layer] = "loading"; wmLoading(true);
+  try {
+    if (layer === "power") {
+      const csv = await (await fetch("https://ourworldindata.org/grapher/power-outages-in-firms-per-month.csv?v=1&csvType=full&useColumnShortNames=true")).text();
+      const lines = csv.trim().split(/\r?\n/), head = lines.shift().split(",");
+      const iC = head.indexOf("code"), iY = head.indexOf("year"), iV = head.length - 1;
+      const by3 = {};
+      for (const ln of lines) { const c = ln.split(","); const code = c[iC], y = +c[iY], v = parseFloat(c[iV]); if (!/^[A-Z]{3}$/.test(code || "") || isNaN(v)) continue; if (!by3[code] || y > by3[code].y) by3[code] = { v, y }; }
+      const out = {}; for (const ctry of window.HRA_WORLD.c) if (ctry.a3 && by3[ctry.a3]) out[ctry.a2] = { v: by3[ctry.a3].v, y: by3[ctry.a3].y };
+      if (!Object.keys(out).length) throw new Error("No power data");
+      WM.data.power = out; wmCache.set(key, out);
+    } else {
+      const until = Math.floor(Date.now() / 1000), from = until - 30 * 86400;
+      const j = await (await fetch(`https://api.ioda.inetintel.cc.gatech.edu/v2/outages/summary?entityType=country&from=${from}&until=${until}&limit=300`)).json();
+      const rows = Array.isArray(j) ? j : j.data || [];
+      const out = {}; for (const r of rows) { const a2 = r?.entity?.code; if (/^[A-Z]{2}$/.test(a2 || "") && Number.isFinite(r.event_cnt)) out[a2] = { v: r.event_cnt, s: r.scores?.overall || 0 }; }
+      WM.data.net = out; wmCache.set(key, out);
+    }
+    WM.status[layer] = "";
+  } catch (e) { console.warn("Map data unavailable:", layer, e); WM.status[layer] = "error"; }
+  wmLoading(false);
+}
+function wmLoading(on) { const l = $("#wm-loading"); if (l) l.hidden = !on; }
+async function wmRefresh() {
+  if (!WM.built) return;
+  const layer = WM.layer;
+  if (layer === "speed") WM.data.speed = wmSpeedData(); else await wmLoad(layer);
+  if (layer !== WM.layer) return;   // switched while loading
+  const L = WM_LAYERS[layer], data = WM.data[layer] || {};
+  $$(".wm-g path").forEach((p) => {
+    const d = data[p.dataset.a2];
+    const isNet = layer === "net";
+    const fill = d ? L.bins[wmBin(layer, d.v)][2] : isNet && WM.data.net && p.dataset.a2 ? L.bins[0][2] : "";
+    p.style.fill = fill; p.classList.toggle("has-data", Boolean(d) || Boolean(fill));
+  });
+  const ranked = Object.entries(data).filter(([, d]) => d.v > 0).sort((a, b) => layer === "speed" ? b[1].n - a[1].n : b[1].v - a[1].v).slice(0, 7);
+  const name = (a2) => tcCountry(a2) || a2;
+  const fmt = (d) => layer === "speed" ? (d.v >= 100 ? "100+ Mbps" : `${d.v.toFixed(1)} Mbps`) : layer === "power" ? `${d.v.toFixed(1)} / month` : `${d.v} event${d.v === 1 ? "" : "s"}`;
+  const err = WM.status[layer] === "error";
+  $("#wm-side").innerHTML = `<h3>${esc(L.title)}</h3>
+    <div class="wm-legend">${L.bins.map((b) => `<span><i style="background:${b[2]}"></i>${esc(b[1])}</span>`).join("")}<span><i class="is-none"></i>No data</span></div>
+    ${err ? `<p class="wm-err">Couldn't load this data right now. Try again later.</p>`
+      : ranked.length ? `<h4>${layer === "speed" ? "Most tested countries" : "Highest"}</h4><ol class="wm-list">${ranked.map(([a2, d], i) => `<li style="--i:${i}" data-wm-focus="${a2}"><span>${esc(name(a2))}</span><b>${esc(fmt(d))}</b>${layer === "speed" ? `<small>${d.n} test${d.n === 1 ? "" : "s"}</small>` : ""}</li>`).join("")}</ol>`
+      : `<p class="wm-empty">${layer === "speed" ? "No candidate tests yet. Countries fill in as candidates take the test." : "No data."}</p>`}
+    <p class="wm-src">${esc(L.src)}</p>`;
+}
+function wmTip(e, p) {
+  const tip = $("#wm-tip"), stage = $(".wm-stage"); if (!tip || !stage) return;
+  if (!p) { tip.hidden = true; return; }
+  const layer = WM.layer, d = (WM.data[layer] || {})[p.dataset.a2];
+  const name = tcCountry(p.dataset.a2) || p.dataset.n;
+  let val = "No data";
+  if (d) val = layer === "speed" ? `${d.v >= 100 ? "100+" : d.v.toFixed(1)} Mbps avg · ${d.n} test${d.n === 1 ? "" : "s"}` : layer === "power" ? `${d.v.toFixed(1)} outages / month · survey ${d.y}` : `${d.v} outage event${d.v === 1 ? "" : "s"} · last 30 days`;
+  else if (layer === "net" && WM.data.net && p.dataset.a2) val = "No outages detected · last 30 days";
+  tip.innerHTML = `<strong>${esc(name)}</strong><span>${esc(val)}</span>`; tip.hidden = false;
+  const r = stage.getBoundingClientRect();
+  const x = Math.min(e.clientX - r.left + 14, r.width - tip.offsetWidth - 8), y = Math.max(8, e.clientY - r.top - tip.offsetHeight - 12);
+  tip.style.transform = `translate(${x}px, ${y}px)`;
+}
+document.addEventListener("pointermove", (e) => { const p = e.target instanceof Element && e.target.closest(".wm-g path"); if (p || !$("#wm-tip")?.hidden) wmTip(e, p || null); });
+document.addEventListener("click", (e) => {
+  const b = e.target instanceof Element && e.target.closest("[data-wm-layer]"); if (!b) return;
+  WM.layer = b.dataset.wmLayer;
+  $$(".wm-btn").forEach((x) => x.classList.toggle("is-on", x === b)); wmPill();
+  const svg = $(".wm-svg"); svg?.classList.remove("is-sweep"); void svg?.offsetWidth; svg?.classList.add("is-sweep");
+  wmRefresh();
+});
+document.addEventListener("pointerover", (e) => { const li = e.target instanceof Element && e.target.closest("[data-wm-focus]"); $$(".wm-g path.is-focus").forEach((p) => p.classList.remove("is-focus")); if (li) $$(`.wm-g path[data-a2="${li.dataset.wmFocus}"]`).forEach((p) => p.classList.add("is-focus")); });
+addEventListener("resize", () => wmPill(true));
