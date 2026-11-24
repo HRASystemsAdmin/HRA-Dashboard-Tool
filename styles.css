@@ -3394,9 +3394,33 @@ html.rail-collapsed .rail-more-btn { padding: 0 6px; gap: 6px; }
 .wm-body { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 18px; align-items: start; }
 .wm-stage { position: relative; border-radius: 18px; overflow: hidden; background: radial-gradient(ellipse at 50% 40%, #FDFEFF 0%, #EEF3FA 100%); }
 .wm-svg { display: block; width: 100%; height: auto; }
-.wm-g path { fill: #E3E9F2; stroke: #fff; stroke-width: .6; transition: fill .45s var(--ease-out) var(--d, 0ms), filter .15s, stroke-width .15s; cursor: default; }
+.wm-g path { fill: #E3E9F2; stroke: #fff; stroke-width: .7; vector-effect: non-scaling-stroke; transition: fill .45s var(--ease-out) var(--d, 0ms), filter .15s, stroke-width .15s; cursor: default; }
 .wm-svg:not(.is-sweep) .wm-g path { transition-delay: 0ms, 0ms, 0ms; }
-.wm-g path:hover, .wm-g path.is-focus { filter: brightness(.92) drop-shadow(0 2px 4px rgba(0,30,80,.25)); stroke: #fff; stroke-width: 1.4; }
+.wm-g path:hover, .wm-g path.is-focus { filter: brightness(.92) drop-shadow(0 2px 4px rgba(0,30,80,.25)); stroke: #fff; stroke-width: 1.6; }
+.wm-g.has-focus path:not(.is-sel) { opacity: .45; transition: opacity .35s, fill .45s var(--ease-out); }
+.wm-g path.is-sel { stroke: var(--navy); stroke-width: 1.8; filter: drop-shadow(0 4px 10px rgba(0,30,80,.35)); }
+.wm-focus { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 14px; }
+.wm-chip { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-strong); background: #fff; font: inherit; font-size: 13px; font-weight: 650; color: var(--muted); transition: all .2s var(--ease-out); }
+.wm-chip b { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; padding: 2px 6px; border-radius: 6px; background: #EEF2F8; color: var(--navy); }
+.wm-chip:hover { border-color: var(--navy); color: var(--ink); }
+.wm-chip.is-on { background: linear-gradient(135deg, var(--navy), #2D6BFF); border-color: transparent; color: #fff; box-shadow: 0 8px 18px -10px rgba(0,55,127,.7); }
+.wm-chip.is-on b { background: rgba(255,255,255,.2); color: #fff; }
+.wm-stage { cursor: grab; touch-action: none; }
+.wm-stage.is-drag { cursor: grabbing; }
+.wm-zoom { position: absolute; right: 12px; bottom: 12px; display: grid; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(255,255,255,.88); box-shadow: 0 8px 20px -12px rgba(0,30,80,.45); backdrop-filter: blur(6px); }
+.wm-zoom button { width: 30px; height: 30px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 17px; font-weight: 700; color: var(--navy); display: grid; place-items: center; transition: background .15s; }
+.wm-zoom button:hover { background: #EEF3FC; }
+.wm-hint { position: absolute; left: 12px; bottom: 12px; font-size: 11.5px; color: var(--muted); background: rgba(255,255,255,.75); padding: 4px 9px; border-radius: 999px; pointer-events: none; }
+.wm-glance { display: grid; gap: 6px; margin: 4px 0 14px; }
+.wm-glance button { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 11px; border-radius: 11px; border: 1px solid var(--line); background: #fff; font: inherit; font-size: 13px; color: var(--ink); text-align: left; transition: border-color .15s, transform .2s var(--ease-out); }
+.wm-glance button:hover { border-color: var(--navy); transform: translateX(2px); }
+.wm-glance b { font-variant-numeric: tabular-nums; }
+.wm-profile { margin-bottom: 14px; animation: rise .3s var(--ease-out) both; }
+.wm-profile h3 { margin: 0 0 10px; font-family: var(--display); font-size: 19px; letter-spacing: -.01em; }
+.wm-metric { display: flex; gap: 10px; padding: 10px 11px; margin-bottom: 6px; border-radius: 12px; background: #fff; border: 1px solid var(--line); }
+.wm-mi { width: 30px; height: 30px; flex: none; border-radius: 9px; display: grid; place-items: center; background: #EEF2F8; color: var(--navy); }
+.wm-metric.is-good .wm-mi { background: #E3F6EF; color: #0B7A61; } .wm-metric.is-ok .wm-mi { background: #FFF6D6; color: #8A6400; } .wm-metric.is-bad .wm-mi { background: #FDECEC; color: #B4232A; }
+.wm-metric small { display: block; font-size: 11.5px; color: var(--muted); } .wm-metric b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; } .wm-metric em { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); }
 .wm-tip { position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; display: grid; gap: 1px; padding: 8px 11px; border-radius: 11px; background: rgba(11,27,51,.92); color: #fff; font-size: 12.5px; box-shadow: 0 12px 26px -12px rgba(0,0,0,.5); backdrop-filter: blur(6px); white-space: nowrap; transition: transform .08s linear; }
 .wm-tip strong { font-size: 13px; } .wm-tip span { color: rgba(255,255,255,.8); }
 .wm-loading { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.9); font-size: 12.5px; font-weight: 600; color: var(--muted); box-shadow: 0 6px 16px -10px rgba(0,30,70,.4); }

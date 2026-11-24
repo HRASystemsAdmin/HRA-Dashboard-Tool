@@ -6319,44 +6319,50 @@ document.addEventListener("input", (e) => { if (e.target.id !== "tc-q") return; 
 
 /* ==========================================================================
    Global connectivity map (Tech checks page)
-   Speed: HRA candidates' own tests · Power outages: World Bank Enterprise Surveys (via Our World in Data)
+   Speed: Ookla Speedtest Global Index (via Wikipedia) · Power outages: World Bank Enterprise Surveys (via Our World in Data)
    Internet outages: IODA, Georgia Tech (last 30 days). Outside data is cached 24 h in this browser.
    ========================================================================== */
-const WM = { layer: "speed", built: false, data: { speed: null, power: null, net: null }, status: { power: "", net: "" } };
+const WM = { layer: "speed", focus: "", built: false, data: { speed: null, power: null, net: null }, status: { power: "", net: "" }, vb: null, home: null };
+const WM_FOCUS = [["MX", "Mexico"], ["US", "United States"], ["PH", "Philippines"]];
 const WM_LAYERS = {
-  speed: { label: "Internet speed", unit: "Mbps", icon: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4-6"/>',
-    title: "Average download speed of HRA candidates", src: "HRA candidate tech checks (single-connection browser test).",
-    bins: [[0, "Under 10", "#F2B8B5"], [10, "10–25", "#FFE08A"], [25, "25–50", "#BFE6C9"], [50, "50–100", "#5CC28B"], [100, "100+", "#0E8A64"]] },
-  power: { label: "Power outages", unit: "per month", icon: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
-    title: "Power outages in a typical month (businesses)", src: "World Bank Enterprise Surveys, via Our World in Data. Latest survey year per country.",
+  speed: { label: "Internet speed", icon: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4-6"/>',
+    title: "Median fixed broadband download speed", src: () => `Ookla Speedtest Global Index, ${window.HRA_SPEED?.month || ""} (via Wikipedia, CC BY-SA). Fixed broadband; hover a country for mobile.`,
+    bins: [[0, "Under 25 Mbps", "#F2B8B5"], [25, "25–50", "#FFE08A"], [50, "50–100", "#BFE6C9"], [100, "100–200", "#5CC28B"], [200, "200+", "#0E8A64"]] },
+  power: { label: "Power outages", icon: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+    title: "Power outages in a typical month (businesses)", src: () => "World Bank Enterprise Surveys, via Our World in Data. Latest survey year per country. The surveys cover mainly developing and emerging economies, so countries like the US, Canada and most of Western Europe have no data.",
     bins: [[0, "Under 0.5", "#FFF1E3"], [0.5, "0.5–2", "#FFD2A8"], [2, "2–5", "#FFA668"], [5, "5–15", "#F2713A"], [15, "15+", "#C2410C"]] },
-  net: { label: "Internet outages", unit: "events", icon: '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3l18 18"/>',
-    title: "Internet outage events detected, last 30 days", src: "IODA, Georgia Tech Internet Outage Detection and Analysis. Live, last 30 days.",
+  net: { label: "Internet outages", icon: '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1"/><path d="M3 3l18 18"/>',
+    title: "Internet outage events detected, last 30 days", src: () => "IODA, Georgia Tech Internet Outage Detection and Analysis. Live, last 30 days.",
     bins: [[0, "None detected", "#D9E6FF"], [1, "1–2", "#C9D6FF"], [3, "3–5", "#8FA8FF"], [6, "6–10", "#5470F0"], [11, "11+", "#2E3FB8"]] }
 };
 const wmBin = (layer, v) => { const b = WM_LAYERS[layer].bins; let i = 0; for (let k = 0; k < b.length; k++) if (v >= b[k][0]) i = k; return i; };
 const wmCache = { get(k) { try { const v = JSON.parse(localStorage.getItem(k) || "null"); return v && Date.now() - v.at < 864e5 ? v : null; } catch { return null; } }, set(k, data) { try { localStorage.setItem(k, JSON.stringify({ at: Date.now(), data })); } catch {} } };
+const wmScript = (src) => new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
 
 function startWorldMap() {
-  if (window.HRA_WORLD) { buildWorldMap(); return; }
+  if (window.HRA_WORLD && window.HRA_SPEED) { buildWorldMap(); return; }
   if (WM.loadingShapes) return; WM.loadingShapes = true;
-  const sc = document.createElement("script"); sc.src = "assets/world-map.js";
-  sc.onload = () => buildWorldMap(); sc.onerror = () => { const el = $("#tc-map"); if (el) el.innerHTML = ""; };
-  document.head.appendChild(sc);
+  Promise.all([window.HRA_WORLD ? 0 : wmScript("assets/world-map.js"), window.HRA_SPEED ? 0 : wmScript("assets/world-speed.js")])
+    .then(buildWorldMap).catch(() => { const el = $("#tc-map"); if (el) el.innerHTML = ""; });
 }
 function buildWorldMap() {
   const el = $("#tc-map"); if (!el || !window.HRA_WORLD) return;
   if (!WM.built) {
     const W = window.HRA_WORLD;
+    WM.home = { x: 0, y: 0, w: W.w, h: W.h }; WM.vb = { ...WM.home };
     el.innerHTML = `<section class="wm">
-      <div class="wm-head"><div><h2>Global connectivity</h2><p>Where candidates connect from, and how reliable power and internet are there.</p></div>
+      <div class="wm-head"><div><h2>Global connectivity</h2><p>Internet speed, power and internet reliability around the world.</p></div>
         <div class="wm-seg" role="tablist"><span class="wm-pill" aria-hidden="true"></span>${Object.entries(WM_LAYERS).map(([k, L]) => `<button type="button" class="wm-btn${k === WM.layer ? " is-on" : ""}" data-wm-layer="${k}" role="tab"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${L.icon}</svg>${L.label}</button>`).join("")}</div></div>
+      <div class="wm-focus" role="group" aria-label="Country">${[["", "All countries"], ...WM_FOCUS].map(([a2, n]) => `<button type="button" class="wm-chip${a2 === WM.focus ? " is-on" : ""}" data-wm-focus-btn="${a2}">${a2 ? `<b>${a2}</b>` : ""}${esc(n)}</button>`).join("")}</div>
       <div class="wm-body">
-        <div class="wm-stage"><svg class="wm-svg" viewBox="0 0 ${W.w} ${W.h}" role="img" aria-label="World map"><g class="wm-g">${W.c.map((c) => `<path d="${c.d}" data-a2="${c.a2}" data-n="${esc(c.n)}" style="--d:${Math.round(((c.d.match(/M([\d.]+)/) || [0, 500])[1] / W.w) * 260)}ms"/>`).join("")}</g></svg>
+        <div class="wm-stage" id="wm-stage"><svg class="wm-svg" id="wm-svg" viewBox="0 0 ${W.w} ${W.h}" role="img" aria-label="World map"><g class="wm-g">${W.c.map((c) => `<path d="${c.d}" data-a2="${c.a2}" data-n="${esc(c.n)}" style="--d:${Math.round(((c.d.match(/M([\d.]+)/) || [0, 500])[1] / W.w) * 260)}ms"/>`).join("")}</g></svg>
+          <div class="wm-zoom"><button type="button" data-wm-zoom="in" aria-label="Zoom in">+</button><button type="button" data-wm-zoom="out" aria-label="Zoom out">−</button><button type="button" data-wm-zoom="reset" aria-label="Reset view" title="Reset view"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button></div>
+          <div class="wm-hint">Ctrl + scroll or pinch to zoom · drag to move</div>
           <div class="wm-tip" id="wm-tip" hidden></div><div class="wm-loading" id="wm-loading" hidden><span></span>Loading data…</div></div>
         <aside class="wm-side" id="wm-side"></aside>
       </div></section>`;
     WM.built = true;
+    bindWmStage();
     requestAnimationFrame(() => { $(".wm")?.classList.add("is-in"); wmPill(true); });
   }
   wmRefresh();
@@ -6368,16 +6374,16 @@ function wmPill(instant) {
   if (instant) { void pill.offsetWidth; pill.style.transition = ""; }
 }
 function wmSpeedData() {
-  const m = {};
-  for (const r of TC.list) { if (!r.loc || !(r.down >= 0)) continue; (m[r.loc] = m[r.loc] || { sum: 0, n: 0 }); m[r.loc].sum += r.down; m[r.loc].n++; }
-  const out = {}; for (const [k, v] of Object.entries(m)) out[k] = { v: v.sum / v.n, n: v.n };
+  const S = window.HRA_SPEED; if (!S) return {};
+  const out = {}; for (const [a2, v] of Object.entries(S.fixed)) out[a2] = { v, m: S.mobile[a2] };
+  for (const [a2, m] of Object.entries(S.mobile)) if (!out[a2]) out[a2] = { v: null, m };
   return out;
 }
 async function wmLoad(layer) {
-  if (layer === "speed") { WM.data.speed = wmSpeedData(); return; }
+  if (layer === "speed") { WM.data.speed = WM.data.speed || wmSpeedData(); return; }
   if (WM.data[layer] || WM.status[layer] === "loading") return;
   const key = "hra_wm_" + layer + "_v1", hit = wmCache.get(key);
-  if (hit) { WM.data[layer] = hit.data; WM.fetchedAt = hit.at; return; }
+  if (hit) { WM.data[layer] = hit.data; return; }
   WM.status[layer] = "loading"; wmLoading(true);
   try {
     if (layer === "power") {
@@ -6393,7 +6399,7 @@ async function wmLoad(layer) {
       const until = Math.floor(Date.now() / 1000), from = until - 30 * 86400;
       const j = await (await fetch(`https://api.ioda.inetintel.cc.gatech.edu/v2/outages/summary?entityType=country&from=${from}&until=${until}&limit=300`)).json();
       const rows = Array.isArray(j) ? j : j.data || [];
-      const out = {}; for (const r of rows) { const a2 = r?.entity?.code; if (/^[A-Z]{2}$/.test(a2 || "") && Number.isFinite(r.event_cnt)) out[a2] = { v: r.event_cnt, s: r.scores?.overall || 0 }; }
+      const out = {}; for (const r of rows) { const a2 = r?.entity?.code; if (/^[A-Z]{2}$/.test(a2 || "") && Number.isFinite(r.event_cnt)) out[a2] = { v: r.event_cnt }; }
       WM.data.net = out; wmCache.set(key, out);
     }
     WM.status[layer] = "";
@@ -6401,37 +6407,101 @@ async function wmLoad(layer) {
   wmLoading(false);
 }
 function wmLoading(on) { const l = $("#wm-loading"); if (l) l.hidden = !on; }
+const wmName = (a2) => tcCountry(a2) || a2;
+function wmValue(layer, a2) {
+  const d = (WM.data[layer] || {})[a2];
+  if (layer === "speed") return d ? (d.v != null ? `${d.v.toFixed(1)} Mbps` : "No fixed data") : "No data";
+  if (layer === "power") return d ? `${d.v.toFixed(1)} / month` : WM.status.power === "error" ? "Unavailable" : WM.data.power ? "Not surveyed" : "…";
+  return d ? `${d.v} event${d.v === 1 ? "" : "s"}` : WM.status.net === "error" ? "Unavailable" : WM.data.net ? "None detected" : "…";
+}
+function wmProfile(a2) {
+  const sp = (WM.data.speed || {})[a2], pw = (WM.data.power || {})[a2];
+  const row = (icon, label, val, sub, tone) => `<div class="wm-metric${tone ? " is-" + tone : ""}"><span class="wm-mi"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icon}</svg></span><div><small>${label}</small><b>${esc(val)}</b>${sub ? `<em>${esc(sub)}</em>` : ""}</div></div>`;
+  const speedTone = sp?.v == null ? "" : sp.v >= 100 ? "good" : sp.v >= 25 ? "ok" : "bad";
+  const pTone = !pw ? "" : pw.v < 2 ? "good" : pw.v < 5 ? "ok" : "bad";
+  const n = (WM.data.net || {})[a2]?.v || 0, nTone = !WM.data.net ? "" : n === 0 ? "good" : n <= 5 ? "ok" : "bad";
+  return `<div class="wm-profile"><h3>${esc(wmName(a2))}</h3>
+    ${row(WM_LAYERS.speed.icon, "Fixed broadband (median)", sp?.v != null ? `${sp.v.toFixed(1)} Mbps` : "No data", sp?.m != null ? `Mobile: ${sp.m.toFixed(1)} Mbps · ${window.HRA_SPEED?.month || ""}` : "", speedTone)}
+    ${row(WM_LAYERS.power.icon, "Power outages (businesses)", pw ? `${pw.v.toFixed(1)} per month` : WM.status.power === "error" ? "Unavailable right now" : WM.data.power ? "Not surveyed" : "Loading…", pw ? `World Bank survey, ${pw.y}` : WM.data.power ? "Not covered by the World Bank survey" : "", pTone)}
+    ${row(WM_LAYERS.net.icon, "Internet outages, last 30 days", WM.status.net === "error" ? "Unavailable right now" : WM.data.net ? (n ? `${n} event${n === 1 ? "" : "s"} detected` : "None detected") : "Loading…", "IODA, Georgia Tech", nTone)}
+  </div>`;
+}
 async function wmRefresh() {
   if (!WM.built) return;
-  const layer = WM.layer;
-  if (layer === "speed") WM.data.speed = wmSpeedData(); else await wmLoad(layer);
-  if (layer !== WM.layer) return;   // switched while loading
+  const layer = WM.layer, focus = WM.focus;
+  await wmLoad(layer);
+  if (focus) { await Promise.all(["speed", "power", "net"].map(wmLoad)); }
+  if (layer !== WM.layer || focus !== WM.focus) return;   // changed while loading
   const L = WM_LAYERS[layer], data = WM.data[layer] || {};
   $$(".wm-g path").forEach((p) => {
     const d = data[p.dataset.a2];
-    const isNet = layer === "net";
-    const fill = d ? L.bins[wmBin(layer, d.v)][2] : isNet && WM.data.net && p.dataset.a2 ? L.bins[0][2] : "";
-    p.style.fill = fill; p.classList.toggle("has-data", Boolean(d) || Boolean(fill));
+    let fill = "";
+    if (d && d.v != null) fill = L.bins[wmBin(layer, d.v)][2];
+    else if (layer === "net" && WM.data.net && p.dataset.a2) fill = L.bins[0][2];
+    p.style.fill = fill;
+    p.classList.toggle("is-sel", Boolean(focus) && p.dataset.a2 === focus);
   });
-  const ranked = Object.entries(data).filter(([, d]) => d.v > 0).sort((a, b) => layer === "speed" ? b[1].n - a[1].n : b[1].v - a[1].v).slice(0, 7);
-  const name = (a2) => tcCountry(a2) || a2;
-  const fmt = (d) => layer === "speed" ? (d.v >= 100 ? "100+ Mbps" : `${d.v.toFixed(1)} Mbps`) : layer === "power" ? `${d.v.toFixed(1)} / month` : `${d.v} event${d.v === 1 ? "" : "s"}`;
+  $(".wm-g")?.classList.toggle("has-focus", Boolean(focus));
   const err = WM.status[layer] === "error";
-  $("#wm-side").innerHTML = `<h3>${esc(L.title)}</h3>
-    <div class="wm-legend">${L.bins.map((b) => `<span><i style="background:${b[2]}"></i>${esc(b[1])}</span>`).join("")}<span><i class="is-none"></i>No data</span></div>
-    ${err ? `<p class="wm-err">Couldn't load this data right now. Try again later.</p>`
-      : ranked.length ? `<h4>${layer === "speed" ? "Most tested countries" : "Highest"}</h4><ol class="wm-list">${ranked.map(([a2, d], i) => `<li style="--i:${i}" data-wm-focus="${a2}"><span>${esc(name(a2))}</span><b>${esc(fmt(d))}</b>${layer === "speed" ? `<small>${d.n} test${d.n === 1 ? "" : "s"}</small>` : ""}</li>`).join("")}</ol>`
-      : `<p class="wm-empty">${layer === "speed" ? "No candidate tests yet. Countries fill in as candidates take the test." : "No data."}</p>`}
-    <p class="wm-src">${esc(L.src)}</p>`;
+  $("#wm-side").innerHTML = (focus ? wmProfile(focus) : `<h3>${esc(L.title)}</h3>
+      <div class="wm-glance">${WM_FOCUS.map(([a2, n]) => `<button type="button" data-wm-focus-btn="${a2}" data-wm-focus="${a2}"><span>${esc(n)}</span><b>${esc(wmValue(layer, a2))}</b></button>`).join("")}</div>`)
+    + `<div class="wm-legend">${L.bins.map((b) => `<span><i style="background:${b[2]}"></i>${esc(b[1])}</span>`).join("")}<span><i class="is-none"></i>No data</span></div>
+    ${err ? `<p class="wm-err">Couldn't load this data right now. Try again later.</p>` : ""}
+    <p class="wm-src">${esc(L.src())}</p>`;
+}
+/* ---- zoom & pan (viewBox), smooth and light ---- */
+function wmSetVB(vb, animate) {
+  const svg = $("#wm-svg"); if (!svg) return;
+  const H = WM.home, w = Math.min(H.w, Math.max(H.w / 12, vb.w)), h = w * H.h / H.w;
+  const x = Math.min(H.w - w * .25, Math.max(-w * .75, vb.x)), y = Math.min(H.h - h * .25, Math.max(-h * .75, vb.y));
+  const to = { x, y, w, h };
+  cancelAnimationFrame(WM.anim);
+  if (!animate || reduceMotion) { WM.vb = to; svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`); return; }
+  const from = { ...WM.vb }, t0 = performance.now(), dur = 420, ease = (t) => 1 - Math.pow(1 - t, 3);
+  const step = (now) => { const t = Math.min(1, (now - t0) / dur), e = ease(t);
+    WM.vb = { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, w: from.w + (to.w - from.w) * e, h: from.h + (to.h - from.h) * e };
+    svg.setAttribute("viewBox", `${WM.vb.x} ${WM.vb.y} ${WM.vb.w} ${WM.vb.h}`); if (t < 1) WM.anim = requestAnimationFrame(step); };
+  WM.anim = requestAnimationFrame(step);
+}
+function wmZoomAt(f, cx, cy, animate) { const v = WM.vb, w = v.w / f, h = v.h / f; wmSetVB({ x: cx - (cx - v.x) / f, y: cy - (cy - v.y) / f, w, h }, animate); }
+function wmFocusBox(a2) {
+  // predefined areas (contiguous US, Mexico, the whole Philippines); other countries: their main landmass
+  const fb = window.HRA_WORLD?.focus?.[a2];
+  if (fb) { const H = WM.home, pad = 0.12, bw = (fb[2] - fb[0]) * (1 + pad * 2), bh = (fb[3] - fb[1]) * (1 + pad * 2), w = Math.max(bw, bh * H.w / H.h), h = w * H.h / H.w; return { x: (fb[0] + fb[2]) / 2 - w / 2, y: (fb[1] + fb[3]) / 2 - h / 2, w, h }; }
+  const p = $(`.wm-g path[data-a2="${a2}"]`); if (!p) return null;
+  const subs = p.getAttribute("d").split("M").filter(Boolean).map((sp) => { const n = sp.match(/-?[\d.]+/g).map(Number); let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (let i = 0; i < n.length; i += 2) { x0 = Math.min(x0, n[i]); x1 = Math.max(x1, n[i]); y0 = Math.min(y0, n[i + 1]); y1 = Math.max(y1, n[i + 1]); } return { x0, y0, x1, y1, a: (x1 - x0) * (y1 - y0) }; });
+  const big = subs.reduce((a, b) => (b.a > a.a ? b : a)), diag = Math.hypot(big.x1 - big.x0, big.y1 - big.y0), cx = (big.x0 + big.x1) / 2, cy = (big.y0 + big.y1) / 2;
+  const near = subs.filter((s) => Math.hypot((s.x0 + s.x1) / 2 - cx, (s.y0 + s.y1) / 2 - cy) <= diag * 0.9);
+  const b = near.reduce((m, s) => ({ x0: Math.min(m.x0, s.x0), y0: Math.min(m.y0, s.y0), x1: Math.max(m.x1, s.x1), y1: Math.max(m.y1, s.y1) }), { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 });
+  const H = WM.home, pad = 0.35, bw = (b.x1 - b.x0) * (1 + pad * 2), bh = (b.y1 - b.y0) * (1 + pad * 2);
+  const w = Math.max(bw, bh * H.w / H.h, H.w / 10), h = w * H.h / H.w;
+  return { x: (b.x0 + b.x1) / 2 - w / 2, y: (b.y0 + b.y1) / 2 - h / 2, w, h };
+}
+function wmSvgPoint(e) { const svg = $("#wm-svg"), r = svg.getBoundingClientRect(), v = WM.vb; return [v.x + (e.clientX - r.left) / r.width * v.w, v.y + (e.clientY - r.top) / r.height * v.h]; }
+function bindWmStage() {
+  const stage = $("#wm-stage"); if (!stage) return;
+  let drag = null;
+  stage.addEventListener("wheel", (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); const [x, y] = wmSvgPoint(e); wmZoomAt(e.deltaY < 0 ? 1.18 : 1 / 1.18, x, y, false); }, { passive: false });
+  stage.addEventListener("pointerdown", (e) => { if (e.target.closest("button")) return; drag = { sx: e.clientX, sy: e.clientY, vb: { ...WM.vb }, moved: false }; stage.setPointerCapture(e.pointerId); });
+  stage.addEventListener("pointermove", (e) => { if (!drag) return; const r = stage.getBoundingClientRect(), dx = (e.clientX - drag.sx) / r.width * drag.vb.w, dy = (e.clientY - drag.sy) / r.height * drag.vb.h; if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 3) { drag.moved = true; stage.classList.add("is-drag"); } wmSetVB({ ...drag.vb, x: drag.vb.x - dx, y: drag.vb.y - dy }, false); });
+  const end = () => { drag = null; stage.classList.remove("is-drag"); };
+  stage.addEventListener("pointerup", end); stage.addEventListener("pointercancel", end);
+}
+function wmSetFocus(a2) {
+  WM.focus = a2;
+  $$(".wm-chip").forEach((c) => c.classList.toggle("is-on", c.dataset.wmFocusBtn === a2));
+  wmSetVB(a2 ? wmFocusBox(a2) || WM.home : WM.home, true);
+  wmRefresh();
 }
 function wmTip(e, p) {
-  const tip = $("#wm-tip"), stage = $(".wm-stage"); if (!tip || !stage) return;
-  if (!p) { tip.hidden = true; return; }
-  const layer = WM.layer, d = (WM.data[layer] || {})[p.dataset.a2];
-  const name = tcCountry(p.dataset.a2) || p.dataset.n;
-  let val = "No data";
-  if (d) val = layer === "speed" ? `${d.v >= 100 ? "100+" : d.v.toFixed(1)} Mbps avg · ${d.n} test${d.n === 1 ? "" : "s"}` : layer === "power" ? `${d.v.toFixed(1)} outages / month · survey ${d.y}` : `${d.v} outage event${d.v === 1 ? "" : "s"} · last 30 days`;
-  else if (layer === "net" && WM.data.net && p.dataset.a2) val = "No outages detected · last 30 days";
+  const tip = $("#wm-tip"), stage = $("#wm-stage"); if (!tip || !stage) return;
+  if (!p || stage.classList.contains("is-drag")) { tip.hidden = true; return; }
+  const layer = WM.layer, a2 = p.dataset.a2, d = (WM.data[layer] || {})[a2];
+  const name = tcCountry(a2) || p.dataset.n;
+  let val = layer === "speed" ? "No data in the Speedtest Global Index" : layer === "power" ? "Not covered by the World Bank survey" : "No data";
+  if (layer === "speed" && d) val = `${d.v != null ? `Fixed ${d.v.toFixed(1)} Mbps` : "Fixed: no data"}${d.m != null ? ` · Mobile ${d.m.toFixed(1)} Mbps` : ""}`;
+  if (layer === "power" && d) val = `${d.v.toFixed(1)} outages / month · survey ${d.y}`;
+  if (layer === "net") val = d ? `${d.v} outage event${d.v === 1 ? "" : "s"} · last 30 days` : WM.data.net && a2 ? "No outages detected · last 30 days" : "No data";
   tip.innerHTML = `<strong>${esc(name)}</strong><span>${esc(val)}</span>`; tip.hidden = false;
   const r = stage.getBoundingClientRect();
   const x = Math.min(e.clientX - r.left + 14, r.width - tip.offsetWidth - 8), y = Math.max(8, e.clientY - r.top - tip.offsetHeight - 12);
@@ -6439,11 +6509,11 @@ function wmTip(e, p) {
 }
 document.addEventListener("pointermove", (e) => { const p = e.target instanceof Element && e.target.closest(".wm-g path"); if (p || !$("#wm-tip")?.hidden) wmTip(e, p || null); });
 document.addEventListener("click", (e) => {
-  const b = e.target instanceof Element && e.target.closest("[data-wm-layer]"); if (!b) return;
-  WM.layer = b.dataset.wmLayer;
-  $$(".wm-btn").forEach((x) => x.classList.toggle("is-on", x === b)); wmPill();
-  const svg = $(".wm-svg"); svg?.classList.remove("is-sweep"); void svg?.offsetWidth; svg?.classList.add("is-sweep");
-  wmRefresh();
+  const t = e.target; if (!(t instanceof Element) || !t.closest("#tc-map")) return;
+  const b = t.closest("[data-wm-layer]");
+  if (b) { WM.layer = b.dataset.wmLayer; $$(".wm-btn").forEach((x) => x.classList.toggle("is-on", x === b)); wmPill(); const svg = $("#wm-svg"); svg?.classList.remove("is-sweep"); void svg?.offsetWidth; svg?.classList.add("is-sweep"); wmRefresh(); return; }
+  const f = t.closest("[data-wm-focus-btn]"); if (f) { wmSetFocus(f.dataset.wmFocusBtn); return; }
+  const z = t.closest("[data-wm-zoom]"); if (z) { const v = WM.vb, cx = v.x + v.w / 2, cy = v.y + v.h / 2; if (z.dataset.wmZoom === "reset") wmSetVB(WM.focus ? wmFocusBox(WM.focus) : WM.home, true); else wmZoomAt(z.dataset.wmZoom === "in" ? 1.5 : 1 / 1.5, cx, cy, true); }
 });
 document.addEventListener("pointerover", (e) => { const li = e.target instanceof Element && e.target.closest("[data-wm-focus]"); $$(".wm-g path.is-focus").forEach((p) => p.classList.remove("is-focus")); if (li) $$(`.wm-g path[data-a2="${li.dataset.wmFocus}"]`).forEach((p) => p.classList.add("is-focus")); });
 addEventListener("resize", () => wmPill(true));
