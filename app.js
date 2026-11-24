@@ -151,7 +151,7 @@ function createDemoStore() {
     // Candidate tech checks (demo)
     watchTech(cb) {
       if (!localStorage.getItem("hra_demo_tech")) {
-        const mk = (n, e, p, down, up, ping, os, w, cb2, cpu, ram, res, band, days, loc) => ({ id: "t" + Math.random().toString(36).slice(2, 8), v: 1, name: n, email: e, position: p, down, up, ping, jitter: 4, loc, colo: "", os, win11: w, chromebook: cb2, browser: "Chrome", cores: 8, mem: 8, cpu, ram, band, result: res, ua: "", createdAt: new Date(Date.now() - days * 86400e3).toISOString() });
+        const mk = (n, e, p, down, up, ping, os, w, cb2, cpu, ram, res, band, days, loc) => ({ id: "t" + Math.random().toString(36).slice(2, 8), v: 1, name: n, email: e, position: p, down, up, ping, jitter: 4, loc, colo: "", os, win11: w, chromebook: cb2, browser: "Chrome", cores: 8, mem: 8, cpu, ram, band, result: res, ua: "", shot: "demo", createdAt: new Date(Date.now() - days * 86400e3).toISOString() });
         localStorage.setItem("hra_demo_tech", JSON.stringify([
           mk("Maria Fernanda Ruiz", "mf.ruiz@gmail.com", "Recruiter", 92.4, 41.2, 18, "Windows 11", "yes", false, "i5-14", "16", "pass", "Excellent", 0.2, "MX"),
           mk("Kevin Otieno", "kotieno@outlook.com", "Sourcer · Holly", 18.7, 6.3, 64, "Windows 11", "yes", false, "i7-14", "16", "fail", "Below minimum", 1, "KE"),
@@ -162,6 +162,9 @@ function createDemoStore() {
       const fn = (e) => { if (!e || e.key === "hra_demo_tech") cb(JSON.parse(localStorage.getItem("hra_demo_tech") || "[]")); };
       addEventListener("storage", fn); setTimeout(() => fn(), 0); return () => removeEventListener("storage", fn);
     },
+    async getShot() { return "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520"><rect width="100%" height="100%" fill="#f3f6fb"/><text x="40" y="70" font-family="Segoe UI,Arial" font-size="30" font-weight="700" fill="#0B1B33">Device specifications</text><text x="40" y="130" font-family="Segoe UI,Arial" font-size="22" fill="#33465F">Processor   13th Gen Intel(R) Core(TM) i5-13400</text><text x="40" y="175" font-family="Segoe UI,Arial" font-size="22" fill="#33465F">Installed RAM   16.0 GB</text><text x="40" y="260" font-family="Segoe UI,Arial" font-size="30" font-weight="700" fill="#0B1B33">Windows specifications</text><text x="40" y="320" font-family="Segoe UI,Arial" font-size="22" fill="#33465F">Edition   Windows 11 Pro</text><text x="40" y="365" font-family="Segoe UI,Arial" font-size="22" fill="#33465F">Version   24H2</text><text x="40" y="470" font-family="Segoe UI,Arial" font-size="16" fill="#8A9BB4">Demo screenshot</text></svg>'); },
+    async deleteShot() {},
+    async oldShots() { return []; },
     async deleteTech(id) { const a = JSON.parse(localStorage.getItem("hra_demo_tech") || "[]").filter((x) => x.id !== id); localStorage.setItem("hra_demo_tech", JSON.stringify(a)); dispatchEvent(new StorageEvent("storage", { key: "hra_demo_tech" })); },
     // Open jobs report (demo)
     async getJobsReport() {
@@ -401,6 +404,9 @@ async function createFirebaseStore() {
     removeTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayRemove(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
     watchTech(cb) { return fsMod.onSnapshot(fsMod.query(fsMod.collection(db, "techchecks"), fsMod.orderBy("createdAt", "desc"), fsMod.limit(300)), (q) => cb(q.docs.map((d) => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.toDate?.()?.toISOString() || "" }))), (e) => { console.warn("Tech checks unavailable", e); cb([], e); }); },
     deleteTech(id) { return fsMod.deleteDoc(fsMod.doc(db, "techchecks", id)); },
+    async getShot(id) { const d = await fsMod.getDoc(fsMod.doc(db, "techcheck_shots", id)); return d.exists() ? d.data().img : ""; },
+    deleteShot(id) { return fsMod.deleteDoc(fsMod.doc(db, "techcheck_shots", id)); },
+    async oldShots(days) { const cut = fsMod.Timestamp.fromDate(new Date(Date.now() - days * 864e5)); const q = await fsMod.getDocs(fsMod.query(fsMod.collection(db, "techcheck_shots"), fsMod.where("createdAt", "<", cut))); return q.docs.map((d) => d.id); },
     async getJobsReport() { const d = await fsMod.getDoc(fsMod.doc(db, "workable_meta", "jobs")); return d.exists() ? d.data() : null; },
     async getEdits(clientId) { const d = await fsMod.getDoc(fsMod.doc(db, "pipeline_edits", clientId)); return d.exists() ? d.data() : {}; },
     watchEdits(clientId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "pipeline_edits", clientId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Start dates unavailable", e); cb({}); }); },
@@ -6290,8 +6296,8 @@ function renderTech() {
   const sp = (v, min) => `<span class="tc-sp${v < min ? " is-low" : ""}"${v >= 100 ? ` title="Measured ${esc(String(v))} Mbps (single-connection browser test)"` : ""}>${v >= 100 ? "100+" : esc(String(v))}</span>`;
   root.innerHTML = `
     <div class="hero tc-hero"><div><h1 class="hero-title">Tech checks</h1><p class="hero-sub">Candidates' internet speed and computer, against HRA's minimum requirements.</p></div>
-      <div class="tc-actions"><button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button></div></div>
-    <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 10 or 11</span><span><b>CPU</b> Intel Core i5 or better</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
+      <div class="tc-actions">${state.isAdmin ? `<button type="button" class="btn btn-ghost" data-tc-clean title="Delete specification screenshots older than 90 days to keep storage small">Clear old screenshots</button>` : ""}<button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button></div></div>
+    <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 11</span><span><b>CPU</b> Intel Core i5 or better</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
     <div class="tc-bar">
       <div class="tc-tabs">${[["", "All", TC.list.length], ["pass", "Meets", cnt("pass")], ["review", "Review", cnt("review")], ["fail", "Doesn't meet", cnt("fail")]].map(([k, l, n]) => `<button type="button" class="tc-tab${TC.filter === k ? " is-on" : ""}" data-tc-filter="${k}">${l}<b>${n}</b></button>`).join("")}</div>
       <label class="search tc-search">${svgI('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', 15)}<input id="tc-q" type="search" placeholder="Find a candidate" value="${esc(TC.q)}" autocomplete="off"/></label>
@@ -6302,7 +6308,7 @@ function renderTech() {
         <td><strong>${esc(r.name)}</strong><small>${esc(r.position || "")}</small></td>
         <td><span class="tc-res is-${rc}">${esc(rl)}</span><small>${esc(r.band || "")}</small></td>
         <td>${sp(r.down, 10)}<small>Mbps</small></td><td>${sp(r.up, 10)}<small>Mbps</small></td><td>${esc(String(r.ping))}<small>ms</small></td>
-        <td><span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(r.cpu === "other" && r.cpuOther ? r.cpuOther : TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
+        <td>${r.shot ? `<button type="button" class="tc-shot" data-tc-shot="${esc(r.shot)}" data-tc-name="${esc(r.name)}" title="View system specifications screenshot">${svgI('<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/>', 14)}View specs</button>` : ""}<span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(r.cpu === "other" && r.cpuOther ? r.cpuOther : TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
         <td>${esc(r.createdAt ? ago(r.createdAt) : "")}<small>${esc(tcCountry(r.loc))}</small></td>
         ${state.isAdmin ? `<td><button type="button" class="icon-btn tc-del" data-tc-del="${esc(r.id)}" title="Delete" aria-label="Delete result">${svgI('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', 15)}</button></td>` : ""}
       </tr>`; }).join("")}</tbody></table></div>`
@@ -6313,8 +6319,31 @@ document.addEventListener("click", async (e) => {
   if (t.closest("[data-tc-copy]")) { try { await navigator.clipboard.writeText(tcLink()); toast("Candidate link copied", "var(--s-done)"); } catch { prompt("Copy this link:", tcLink()); } return; }
   if (t.closest("[data-tc-open]")) { window.open(tcLink(), "_blank", "noopener"); return; }
   const f = t.closest("[data-tc-filter]"); if (f) { TC.filter = f.dataset.tcFilter; renderTech(); return; }
-  const d = t.closest("[data-tc-del]"); if (d && state.isAdmin) { if (!confirm("Delete this result?")) return; try { await state.store.deleteTech(d.dataset.tcDel); toast("Result deleted", "var(--s-done)"); } catch { toast("Couldn't delete.", "#E2632B"); } }
+  const d = t.closest("[data-tc-del]"); if (d && state.isAdmin) { if (!confirm("Delete this result and its screenshot?")) return; const r = TC.list.find((x) => x.id === d.dataset.tcDel); try { if (r?.shot) await state.store.deleteShot(r.shot).catch(() => {}); await state.store.deleteTech(d.dataset.tcDel); toast("Result deleted", "var(--s-done)"); } catch { toast("Couldn't delete.", "#E2632B"); } return; }
+  const sh = t.closest("[data-tc-shot]"); if (sh) { openShot(sh.dataset.tcShot, sh.dataset.tcName); return; }
+  const cl = t.closest("[data-tc-clean]"); if (cl && state.isAdmin) {
+    cl.disabled = true;
+    try { const ids = await state.store.oldShots(90); if (!ids.length) { toast("No screenshots older than 90 days", "var(--s-done)"); return; }
+      if (!confirm(`Delete ${ids.length} screenshot${ids.length === 1 ? "" : "s"} older than 90 days? The test results stay.`)) return;
+      for (const id of ids) await state.store.deleteShot(id).catch(() => {});
+      toast(`${ids.length} old screenshot${ids.length === 1 ? "" : "s"} deleted`, "var(--s-done)"); }
+    catch (e) { console.error(e); toast("Couldn't clear screenshots. Publish the latest firestore.rules.", "#E2632B"); }
+    finally { cl.disabled = false; }
+  }
 });
+/* screenshot viewer: loaded only when opened (one read) */
+async function openShot(id, name) {
+  let box = $("#tc-shot-view");
+  if (!box) { box = document.createElement("div"); box.id = "tc-shot-view"; box.className = "tc-view"; document.body.appendChild(box);
+    box.addEventListener("click", (e) => { if (e.target === box || e.target.closest("[data-tcv-x]")) box.classList.remove("is-open"); }); }
+  box.innerHTML = `<div class="tc-view-card"><div class="tc-view-head"><strong>${esc(name || "")}</strong><span>System specifications</span><button type="button" class="icon-btn" data-tcv-x aria-label="Close">✕</button></div><div class="tc-view-body"><span class="tc-view-load"></span></div></div>`;
+  requestAnimationFrame(() => box.classList.add("is-open"));
+  try { const img = await state.store.getShot(id);
+    $(".tc-view-body", box).innerHTML = img && /^data:image\/(jpeg|png|webp|svg\+xml)/.test(img) ? `<a href="${img}" target="_blank" rel="noopener" title="Open full size"><img src="${img}" alt="System specifications for ${esc(name || "")}"/></a>` : `<p class="tc-view-none">This screenshot is no longer available (it may have been cleared after 90 days).</p>`; }
+  catch (e) { console.error(e); $(".tc-view-body", box).innerHTML = `<p class="tc-view-none">Couldn't load the screenshot. Make sure the latest firestore.rules is published.</p>`; }
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#tc-shot-view")?.classList.remove("is-open"); });
+
 document.addEventListener("input", (e) => { if (e.target.id !== "tc-q") return; TC.q = e.target.value; const pos = e.target.selectionStart; renderTech(); const q = $("#tc-q"); q?.focus(); q?.setSelectionRange(pos, pos); });
 
 /* ==========================================================================
