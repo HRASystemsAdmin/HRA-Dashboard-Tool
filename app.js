@@ -6297,7 +6297,7 @@ function renderTech() {
   root.innerHTML = `
     <div class="hero tc-hero"><div><h1 class="hero-title">Tech checks</h1><p class="hero-sub">Candidates' internet speed and computer, against HRA's minimum requirements.</p></div>
       <div class="tc-actions"><button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button>${state.isAdmin ? `<button type="button" class="tc-clean" data-tc-clean title="Clear old screenshots" aria-label="Clear old specification screenshots"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="11" height="9" rx="2"/><circle cx="6.3" cy="7.4" r="1.1"/><path d="M13.5 11l-3-3-5 5"/><path d="M14 14.5h7.5M16 14.5v-1.3a1 1 0 0 1 1-1h1.5a1 1 0 0 1 1 1v1.3M15.2 14.5l.6 6.2a1 1 0 0 0 1 .8h2.4a1 1 0 0 0 1-.8l.6-6.2"/></svg></button>` : ""}</div></div>
-    <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 11</span><span><b>CPU</b> Intel Core i5 or better</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
+    <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 11</span><span><b>CPU</b> i5 / Ryzen or similar (recommended)</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
     <div class="tc-bar">
       <div class="tc-tabs">${[["", "All", TC.list.length], ["pass", "Meets", cnt("pass")], ["review", "Review", cnt("review")], ["fail", "Doesn't meet", cnt("fail")]].map(([k, l, n]) => `<button type="button" class="tc-tab${TC.filter === k ? " is-on" : ""}" data-tc-filter="${k}">${l}<b>${n}</b></button>`).join("")}</div>
       <label class="search tc-search">${svgI('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', 15)}<input id="tc-q" type="search" placeholder="Find a candidate" value="${esc(TC.q)}" autocomplete="off"/></label>
@@ -6308,7 +6308,7 @@ function renderTech() {
         <td><strong>${esc(r.name)}</strong><small>${esc(r.position || "")}</small></td>
         <td><span class="tc-res is-${rc}">${esc(rl)}</span><small>${esc(r.band || "")}</small></td>
         <td>${sp(r.down, 10)}<small>Mbps</small></td><td>${sp(r.up, 10)}<small>Mbps</small></td><td>${esc(String(r.ping))}<small>ms</small></td>
-        <td>${r.shot ? `<button type="button" class="tc-shot" data-tc-shot="${esc(r.shot)}" data-tc-name="${esc(r.name)}" title="View system specifications screenshot">${svgI('<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/>', 14)}View specs</button>` : ""}<span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(r.cpu === "other" && r.cpuOther ? r.cpuOther : TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
+        <td><button type="button" class="tc-shot" data-tc-shot="${esc(r.shot || "")}" data-tc-id="${esc(r.id)}" data-tc-name="${esc(r.name)}" title="See the full results${r.shot ? " and the specifications screenshot" : ""}">${svgI('<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/>', 14)}${r.shot ? "View specs" : "View results"}</button><span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(r.cpu === "other" && r.cpuOther ? r.cpuOther : TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
         <td>${esc(r.createdAt ? ago(r.createdAt) : "")}<small>${esc(tcCountry(r.loc))}</small></td>
         ${state.isAdmin ? `<td><button type="button" class="icon-btn tc-del" data-tc-del="${esc(r.id)}" title="Delete" aria-label="Delete result">${svgI('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', 15)}</button></td>` : ""}
       </tr>`; }).join("")}</tbody></table></div>`
@@ -6320,7 +6320,7 @@ document.addEventListener("click", async (e) => {
   if (t.closest("[data-tc-open]")) { window.open(tcLink(), "_blank", "noopener"); return; }
   const f = t.closest("[data-tc-filter]"); if (f) { TC.filter = f.dataset.tcFilter; renderTech(); return; }
   const d = t.closest("[data-tc-del]"); if (d && state.isAdmin) { if (!confirm("Delete this result and its screenshot?")) return; const r = TC.list.find((x) => x.id === d.dataset.tcDel); try { if (r?.shot) await state.store.deleteShot(r.shot).catch(() => {}); await state.store.deleteTech(d.dataset.tcDel); toast("Result deleted", "var(--s-done)"); } catch { toast("Couldn't delete.", "#E2632B"); } return; }
-  const sh = t.closest("[data-tc-shot]"); if (sh) { openShot(sh.dataset.tcShot, sh.dataset.tcName); return; }
+  const sh = t.closest("[data-tc-shot]"); if (sh) { openShot(sh.dataset.tcShot, sh.dataset.tcName, sh.dataset.tcId); return; }
   const cl = t.closest("[data-tc-clean]"); if (cl && state.isAdmin) {
     cl.disabled = true;
     try { const ids = await state.store.oldShots(90); if (!ids.length) { toast("There are no screenshots older than 90 days", "var(--s-done)"); return; }
@@ -6335,13 +6335,33 @@ document.addEventListener("click", async (e) => {
     finally { cl.disabled = false; }
   }
 });
+/* The checklist the candidate saw, rebuilt from the saved result (same rules as the test page) */
+function tcChecks(r) {
+  const fmtS = (v) => (v >= 100 ? "100+ Mbps" : `${v} Mbps`);
+  const cpuOk = ["i5", "i7", "ultra", "amd", "i5-14", "i7-14"].includes(r.cpu);
+  return [
+    { t: "Download speed", s: "Minimum 10 Mbps", v: fmtS(r.down), st: r.down >= 10 ? "ok" : "bad" },
+    { t: "Upload speed", s: "Minimum 10 Mbps", v: fmtS(r.up), st: r.up >= 10 ? "ok" : "bad" },
+    { t: "Latency", s: "Lower is better for calls", v: `${r.ping} ms`, st: r.ping <= 100 ? "ok" : r.ping <= 200 ? "warn" : "bad" },
+    { t: "Operating system", s: "Windows 11", v: r.os || "Unknown", st: r.win11 === "yes" ? "ok" : r.win11 === "no" ? "bad" : "warn" },
+    { t: "Not a Chromebook", s: "Chromebooks aren't supported", v: r.chromebook ? "Chromebook" : "OK", st: r.chromebook ? "bad" : "ok" },
+    { t: "Processor (self-reported)", s: "Recommended: Intel Core i5, AMD Ryzen or similar", v: r.cpu === "other" && r.cpuOther ? r.cpuOther : TC_CPU[r.cpu] || r.cpu || "—", st: cpuOk ? "ok" : "warn" },
+    { t: "Memory (self-reported)", s: "16 GB or more", v: TC_RAM[r.ram] || r.ram || "—", st: ["16", "32"].includes(r.ram) ? "ok" : r.ram === "8" ? "bad" : "warn" }
+  ];
+}
+
 /* screenshot viewer: loaded only when opened (one read) */
-async function openShot(id, name) {
+async function openShot(id, name, rid) {
+  const r = TC.list.find((x) => x.id === rid);
   let box = $("#tc-shot-view");
   if (!box) { box = document.createElement("div"); box.id = "tc-shot-view"; box.className = "tc-view"; document.body.appendChild(box);
     box.addEventListener("click", (e) => { if (e.target === box || e.target.closest("[data-tcv-x]")) box.classList.remove("is-open"); }); }
-  box.innerHTML = `<div class="tc-view-card"><div class="tc-view-head"><strong>${esc(name || "")}</strong><span>System specifications</span><button type="button" class="icon-btn" data-tcv-x aria-label="Close">✕</button></div><div class="tc-view-body"><span class="tc-view-load"></span></div></div>`;
+  const [rl, rc] = r ? (TC_RES[r.result] || ["—", ""]) : ["", ""];
+  box.innerHTML = `<div class="tc-view-card"><div class="tc-view-head"><strong>${esc(name || "")}</strong>${r ? `<span class="tc-res is-${rc}">${esc(rl)}</span><span>${esc(r.position || "")}</span>` : ""}<button type="button" class="icon-btn" data-tcv-x aria-label="Close">✕</button></div>
+    <div class="tc-view-grid">${r ? `<div class="tc-view-checks">${tcChecks(r).map((c) => `<div class="tcv-chk is-${c.st}"><span class="tcv-d">${c.st === "ok" ? "✓" : "!"}</span><div><b>${esc(c.t)}</b><small>${esc(c.s)}</small></div><span class="tcv-v">${esc(c.v)}</span></div>`).join("")}</div>` : ""}
+    <div class="tc-view-body">${id ? `<span class="tc-view-load"></span>` : `<p class="tc-view-none">No screenshot was uploaded with this result.</p>`}</div></div></div>`;
   requestAnimationFrame(() => box.classList.add("is-open"));
+  if (!id) return;
   try { const img = await state.store.getShot(id);
     $(".tc-view-body", box).innerHTML = img && /^data:image\/(jpeg|png|webp|svg\+xml)/.test(img) ? `<a href="${img}" target="_blank" rel="noopener" title="Open full size"><img src="${img}" alt="System specifications for ${esc(name || "")}"/></a>` : `<p class="tc-view-none">This screenshot is no longer available (it may have been cleared after 90 days).</p>`; }
   catch (e) { console.error(e); $(".tc-view-body", box).innerHTML = `<p class="tc-view-none">Couldn't load the screenshot. Make sure the latest firestore.rules is published.</p>`; }
