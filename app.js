@@ -6322,7 +6322,7 @@ document.addEventListener("input", (e) => { if (e.target.id !== "tc-q") return; 
    Speed: Ookla Speedtest Global Index (via Wikipedia) · Power outages: World Bank Enterprise Surveys (via Our World in Data)
    Internet outages: IODA, Georgia Tech (last 30 days). Outside data is cached 24 h in this browser.
    ========================================================================== */
-const WM = { layer: "speed", focus: "", built: false, data: { speed: null, power: null, net: null }, status: { power: "", net: "" }, vb: null, home: null };
+const WM = { collapsed: (() => { try { return localStorage.getItem("hra_wm_collapsed") === "1"; } catch { return false; } })(), layer: "speed", focus: "", built: false, data: { speed: null, power: null, net: null }, status: { power: "", net: "" }, vb: null, home: null };
 const WM_FOCUS = [["MX", "Mexico"], ["US", "United States"], ["PH", "Philippines"]];
 const WM_LAYERS = {
   speed: { label: "Internet speed", icon: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4-6"/>',
@@ -6350,9 +6350,11 @@ function buildWorldMap() {
   if (!WM.built) {
     const W = window.HRA_WORLD;
     WM.home = { x: 0, y: 0, w: W.w, h: W.h }; WM.vb = { ...WM.home };
-    el.innerHTML = `<section class="wm">
+    el.innerHTML = `<section class="wm${WM.collapsed ? " is-collapsed" : ""}">
       <div class="wm-head"><div><h2>Global connectivity</h2><p>Internet speed, power and internet reliability around the world.</p></div>
-        <div class="wm-seg" role="tablist"><span class="wm-pill" aria-hidden="true"></span>${Object.entries(WM_LAYERS).map(([k, L]) => `<button type="button" class="wm-btn${k === WM.layer ? " is-on" : ""}" data-wm-layer="${k}" role="tab"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${L.icon}</svg>${L.label}</button>`).join("")}</div></div>
+        <div class="wm-head-r"><div class="wm-seg" role="tablist"><span class="wm-pill" aria-hidden="true"></span>${Object.entries(WM_LAYERS).map(([k, L]) => `<button type="button" class="wm-btn${k === WM.layer ? " is-on" : ""}" data-wm-layer="${k}" role="tab"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${L.icon}</svg>${L.label}</button>`).join("")}</div>
+        <button type="button" class="wm-toggle" data-wm-toggle aria-expanded="${!WM.collapsed}"><span>${WM.collapsed ? "Show" : "Hide"}</span><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button></div></div>
+      <div class="wm-collapse"><div class="wm-collapse-in">
       <div class="wm-focus" role="group" aria-label="Country">${[["", "All countries"], ...WM_FOCUS].map(([a2, n]) => `<button type="button" class="wm-chip${a2 === WM.focus ? " is-on" : ""}" data-wm-focus-btn="${a2}">${a2 ? `<b>${a2}</b>` : ""}${esc(n)}</button>`).join("")}</div>
       <div class="wm-body">
         <div class="wm-stage" id="wm-stage"><svg class="wm-svg" id="wm-svg" viewBox="0 0 ${W.w} ${W.h}" role="img" aria-label="World map"><g class="wm-g">${W.c.map((c) => `<path d="${c.d}" data-a2="${c.a2}" data-n="${esc(c.n)}" style="--d:${Math.round(((c.d.match(/M([\d.]+)/) || [0, 500])[1] / W.w) * 260)}ms"/>`).join("")}</g></svg>
@@ -6360,7 +6362,7 @@ function buildWorldMap() {
           <div class="wm-hint">Ctrl + scroll or pinch to zoom · drag to move</div>
           <div class="wm-tip" id="wm-tip" hidden></div><div class="wm-loading" id="wm-loading" hidden><span></span>Loading data…</div></div>
         <aside class="wm-side" id="wm-side"></aside>
-      </div></section>`;
+      </div></div></div></section>`;
     WM.built = true;
     bindWmStage();
     requestAnimationFrame(() => { $(".wm")?.classList.add("is-in"); wmPill(true); });
@@ -6510,6 +6512,13 @@ function wmTip(e, p) {
 document.addEventListener("pointermove", (e) => { const p = e.target instanceof Element && e.target.closest(".wm-g path"); if (p || !$("#wm-tip")?.hidden) wmTip(e, p || null); });
 document.addEventListener("click", (e) => {
   const t = e.target; if (!(t instanceof Element) || !t.closest("#tc-map")) return;
+  if (t.closest("[data-wm-toggle]")) {
+    WM.collapsed = !WM.collapsed; try { localStorage.setItem("hra_wm_collapsed", WM.collapsed ? "1" : "0"); } catch {}
+    const sec = $(".wm"), tg = t.closest("[data-wm-toggle]");
+    sec.classList.toggle("is-collapsed", WM.collapsed); tg.setAttribute("aria-expanded", String(!WM.collapsed)); $("span", tg).textContent = WM.collapsed ? "Show" : "Hide";
+    if (!WM.collapsed) setTimeout(() => wmPill(true), 30);
+    return;
+  }
   const b = t.closest("[data-wm-layer]");
   if (b) { WM.layer = b.dataset.wmLayer; $$(".wm-btn").forEach((x) => x.classList.toggle("is-on", x === b)); wmPill(); const svg = $("#wm-svg"); svg?.classList.remove("is-sweep"); void svg?.offsetWidth; svg?.classList.add("is-sweep"); wmRefresh(); return; }
   const f = t.closest("[data-wm-focus-btn]"); if (f) { wmSetFocus(f.dataset.wmFocusBtn); return; }
