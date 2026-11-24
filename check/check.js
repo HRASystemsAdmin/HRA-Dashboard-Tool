@@ -146,13 +146,13 @@ function finish(sp) {
     { t: "Latency", s: "Lower is better for calls", v: `${sp.ping} ms`, st: sp.ping <= 100 ? "ok" : sp.ping <= 200 ? "warn" : "bad", info: true },
     { t: "Operating system", s: "Windows 11", v: d.os, st: d.win11 === "yes" ? "ok" : d.win11 === "no" ? "bad" : "warn" },
     { t: "Not a Chromebook", s: "Chromebooks aren't supported", v: d.chromebook ? "Chromebook" : "OK", st: d.chromebook ? "bad" : "ok" },
-    { t: "Processor (you selected)", s: "Intel Core i5 or better", v: cpuText, st: ["i5", "i7", "ultra"].includes(cpu) ? "ok" : cpu === "i3" ? "bad" : "warn" },
+    { t: "Processor (you selected)", s: "Recommended: Intel Core i5, AMD Ryzen or similar", v: cpuText, st: ["i5", "i7", "ultra", "amd"].includes(cpu) ? "ok" : "warn", info: true },
     { t: "Memory (you selected)", s: "16 GB or more", v: ramText, st: ["16", "32"].includes(ram) ? "ok" : ram === "8" ? "bad" : "warn" }
   ];
   const required = items.filter((i) => !i.info);
   const result = required.some((i) => i.st === "bad") ? "fail" : required.some((i) => i.st === "warn") ? "review" : "pass";
   const b = band(sp.down, sp.up);
-  const V = { pass: ["✓", "You meet our requirements", "Your results have been shared with the HRA team."], review: ["!", "Almost there: a few items need a quick review", "Our team will review the items marked in yellow with you."], fail: ["!", "A few items may need an upgrade", "This doesn't disqualify you. Our team will review your results and let you know if anything needs to be upgraded before you start."] }[result];
+  const V = { pass: ["✓", "You meet our requirements", "Your results have been shared with the HRA team."], review: ["!", "Almost there: a few items need a quick review", "Our team will review the items marked in yellow with you."], fail: ["!", "A few items may need an upgrade", "Our team will review your results and let you know if anything needs to be upgraded before you start."] }[result];
   $("#verdict").className = `verdict ${result}`;
   $("#verdict").innerHTML = `<div class="ic">${V[0]}</div><div><h2>${V[1]}</h2><p>${V[2]}</p><span class="band">Internet: ${b}</span></div>`;
   $("#checks").innerHTML = items.map((i) => `<div class="chk ${i.st}"><span class="d">${i.st === "ok" ? "✓" : "!"}</span><div class="t"><b>${esc(i.t)}</b><span>${esc(i.s)}</span></div><span class="v">${esc(i.v)}</span></div>`).join("");
