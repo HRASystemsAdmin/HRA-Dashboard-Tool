@@ -2289,6 +2289,7 @@ let currentTool = "requests";
 function setRailMore(open, quiet) {
   const box = $("#rail-more"), btn = $("[data-rail-more]"); if (!box || !btn) return;
   box.classList.toggle("is-open", open); btn.setAttribute("aria-expanded", String(open)); btn.classList.toggle("is-open", open);
+  btn.setAttribute("aria-label", open ? "Hide more tools" : "Show more tools"); btn.title = open ? "Hide" : "More tools";
   if (!quiet) { try { localStorage.setItem("hra_rail_more", open ? "1" : "0"); } catch {} }
   setTimeout(moveRailGlow, 320);
 }
@@ -6268,7 +6269,8 @@ document.addEventListener("click", (e) => { const b = e.target instanceof Elemen
    Candidate tech checks: results from the public /check/ page
    ========================================================================== */
 const TC = { list: [], unsub: null, q: "", filter: "", error: "" };
-const TC_CPU = { "i5-14": "Core i5 14th gen+", "i7-14": "Core i7/i9 14th gen+", ultra: "Core Ultra", older: "Intel 13th gen or older", amd: "AMD Ryzen", other: "Other", unsure: "Not sure" };
+const TC_CPU = { i3: "Core i3", i5: "Core i5", i7: "Core i7/i9", ultra: "Core Ultra", amd: "AMD Ryzen", other: "Other", unsure: "Not sure",
+  "i5-14": "Core i5 14th gen+", "i7-14": "Core i7/i9 14th gen+", older: "Intel 13th gen or older" };   // last three: results from the first version
 const TC_RAM = { "8": "8 GB or less", "16": "16 GB", "32": "32 GB+", unsure: "Not sure" };
 const TC_RES = { pass: ["Meets requirements", "ok"], review: ["Needs review", "warn"], fail: ["Doesn't meet", "bad"] };
 const tcLink = () => new URL("check/", location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, "")).href;
@@ -6280,13 +6282,13 @@ function startTech() {
 function renderTech() {
   const root = $("#tc-root"); if (!root) return;
   const q = lower(TC.q.trim());
-  const rows = TC.list.filter((r) => (!TC.filter || r.result === TC.filter) && (!q || lower([r.name, r.email, r.position].join(" ")).includes(q)));
+  const rows = TC.list.filter((r) => (!TC.filter || r.result === TC.filter) && (!q || lower([r.name, r.position].join(" ")).includes(q)));
   const cnt = (k) => TC.list.filter((r) => r.result === k).length;
   const sp = (v, min) => `<span class="tc-sp${v < min ? " is-low" : ""}">${esc(String(v))}</span>`;
   root.innerHTML = `
     <div class="hero tc-hero"><div><h1 class="hero-title">Tech checks</h1><p class="hero-sub">Candidates' internet speed and computer, against HRA's minimum requirements.</p></div>
       <div class="tc-actions"><button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button></div></div>
-    <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 10 or 11</span><span><b>CPU</b> Intel Core i5 14th gen+</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
+    <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 10 or 11</span><span><b>CPU</b> Intel Core i5 or better</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
     <div class="tc-bar">
       <div class="tc-tabs">${[["", "All", TC.list.length], ["pass", "Meets", cnt("pass")], ["review", "Review", cnt("review")], ["fail", "Doesn't meet", cnt("fail")]].map(([k, l, n]) => `<button type="button" class="tc-tab${TC.filter === k ? " is-on" : ""}" data-tc-filter="${k}">${l}<b>${n}</b></button>`).join("")}</div>
       <label class="search tc-search">${svgI('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', 15)}<input id="tc-q" type="search" placeholder="Find a candidate" value="${esc(TC.q)}" autocomplete="off"/></label>
@@ -6294,10 +6296,10 @@ function renderTech() {
     ${TC.error ? `<p class="form-error">Couldn't load results (${esc(TC.error)}). Make sure the latest firestore.rules is published.</p>` : ""}
     ${rows.length ? `<div class="tc-table-wrap"><table class="tc-table"><thead><tr><th>Candidate</th><th>Result</th><th>Down</th><th>Up</th><th>Ping</th><th>Computer</th><th>Tested</th>${state.isAdmin ? "<th></th>" : ""}</tr></thead><tbody>
       ${rows.map((r, i) => { const [rl, rc] = TC_RES[r.result] || ["—", ""]; return `<tr style="--i:${Math.min(i, 14)}">
-        <td><strong>${esc(r.name)}</strong><small>${esc(r.email)}${r.position ? ` · ${esc(r.position)}` : ""}</small></td>
+        <td><strong>${esc(r.name)}</strong><small>${esc(r.position || "")}</small></td>
         <td><span class="tc-res is-${rc}">${esc(rl)}</span><small>${esc(r.band || "")}</small></td>
         <td>${sp(r.down, 10)}<small>Mbps</small></td><td>${sp(r.up, 10)}<small>Mbps</small></td><td>${esc(String(r.ping))}<small>ms</small></td>
-        <td><span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
+        <td><span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(r.cpu === "other" && r.cpuOther ? r.cpuOther : TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
         <td>${esc(r.createdAt ? ago(r.createdAt) : "")}<small>${flag(r.loc)} ${esc(r.loc || "")}</small></td>
         ${state.isAdmin ? `<td><button type="button" class="icon-btn tc-del" data-tc-del="${esc(r.id)}" title="Delete" aria-label="Delete result">${svgI('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', 15)}</button></td>` : ""}
       </tr>`; }).join("")}</tbody></table></div>`

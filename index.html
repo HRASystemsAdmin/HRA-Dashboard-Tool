@@ -1,354 +1,167 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#F3F7FC" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Technical Requirements Check · Hunter Recruitment Advisors</title>
+  <!-- Public candidate page. Self-contained: it does not load the HRA Dashboard's code, settings or sign-in. -->
   <meta name="robots" content="noindex, nofollow" />
-  <title>Request Center · Hunter Recruitment Advisors</title>
-  <script>try { if (localStorage.getItem("hra_rail_collapsed") === "1") document.documentElement.classList.add("rail-collapsed", "rail-settled"); } catch (e) {}</script>
-  <link rel="icon" href="assets/favicon.ico" sizes="any" />
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
-  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png" />
-  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://www.gstatic.com; connect-src https://speed.cloudflare.com https://firestore.googleapis.com https://*.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; base-uri 'none'; form-action 'none'" />
+  <link rel="icon" href="../assets/favicon-64.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root { --navy: #00377F; --navy2: #2D6BFF; --orange: #F26A26; --ink: #0B1B33; --muted: #62789A; --line: #E3EAF3; --ok: #0E9F7E; --warn: #E0A800; --bad: #E5484D; --ease: cubic-bezier(.22,1,.36,1); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif; color: var(--ink); background: radial-gradient(1200px 600px at 85% -10%, #DDE8FF 0%, transparent 60%), radial-gradient(900px 500px at -10% 110%, #FFE7DA 0%, transparent 55%), #F5F8FC; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 60px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+    header img { height: 44px; width: auto; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(0,30,70,.04), 0 30px 60px -40px rgba(0,40,100,.45); animation: in .45s var(--ease) both; }
+    @keyframes in { from { opacity: 0; transform: translateY(10px); } }
+    h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: -.02em; }
+    h2 { margin: 0 0 4px; font-size: 19px; letter-spacing: -.01em; }
+    p.sub { margin: 0 0 20px; color: var(--muted); line-height: 1.5; }
+    .reqs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 22px; }
+    .req { padding: 12px 14px; border-radius: 14px; background: #F6F9FE; border: 1px solid #E5EDF8; font-size: 13.5px; }
+    .req b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 2px; }
+    .req.no { background: #FFF5F2; border-color: #FBD9CB; }
+    label.f { display: grid; gap: 6px; margin-bottom: 14px; font-size: 13px; font-weight: 600; }
+    input[type=text], input[type=email], select { height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid #CFDAE8; font: inherit; font-size: 15px; background: #fff; color: var(--ink); outline: none; transition: border-color .15s, box-shadow .15s; }
+    input:focus, select:focus { border-color: var(--navy); box-shadow: 0 0 0 4px rgba(0,55,127,.1); }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .consent { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); line-height: 1.45; margin: 6px 0 20px; }
+    .consent input { margin-top: 2px; width: 17px; height: 17px; accent-color: var(--navy); flex: none; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 50px; padding: 0 24px; border: 0; border-radius: 14px; font: inherit; font-size: 15.5px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--navy), var(--navy2)); box-shadow: 0 14px 30px -14px rgba(0,55,127,.7); cursor: pointer; transition: transform .2s var(--ease), box-shadow .2s, opacity .2s; }
+    .btn:hover { transform: translateY(-1px); } .btn:active { transform: scale(.98); } .btn:disabled { opacity: .5; pointer-events: none; }
+    .btn.ghost { background: #fff; color: var(--navy); border: 1px solid #CFDAE8; box-shadow: none; }
+    .btn.wide { width: 100%; }
+    .err { color: var(--bad); font-size: 13px; margin: -6px 0 12px; min-height: 1em; }
+    .tip { font-size: 12.5px; color: var(--muted); margin-top: -4px; margin-bottom: 14px; }
+    .tip b { color: var(--ink); }
+    .dev { display: grid; gap: 8px; margin-bottom: 18px; }
+    .dev div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: 12px; background: #F6F9FE; font-size: 14px; }
+    .dev span { color: var(--muted); }
+    .pill { font-weight: 700; }
+    .pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); } .pill.warn { color: #8A6400; }
+    /* gauge */
+    .gauge { position: relative; width: 240px; height: 240px; margin: 8px auto 18px; }
+    .gauge svg { width: 100%; height: 100%; transform: rotate(135deg); }
+    .gauge .track { fill: none; stroke: #E8EEF6; stroke-width: 14; stroke-linecap: round; }
+    .gauge .val { fill: none; stroke: url(#g); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
+    .gauge .mid { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+    .gauge .num { font-size: 46px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+    .gauge .unit { font-size: 13px; color: var(--muted); font-weight: 600; }
+    .phase { text-align: center; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+    .live { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .live div { text-align: center; padding: 12px; border-radius: 14px; background: #F6F9FE; }
+    .live b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+    .live span { font-size: 12px; color: var(--muted); font-weight: 600; }
+    /* result */
+    .verdict { display: flex; align-items: center; gap: 14px; padding: 18px; border-radius: 18px; margin-bottom: 18px; }
+    .verdict .ic { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 26px; font-weight: 800; flex: none; }
+    .verdict.pass { background: #E6F7F1; } .verdict.pass .ic { background: var(--ok); }
+    .verdict.review { background: #FFF6D6; } .verdict.review .ic { background: var(--warn); }
+    .verdict.fail { background: #FDECEC; } .verdict.fail .ic { background: var(--bad); }
+    .verdict h2 { margin: 0; } .verdict p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+    .band { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; background: #fff; }
+    .checks { display: grid; gap: 8px; margin-bottom: 18px; }
+    .chk { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); }
+    .chk .d { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 14px; font-weight: 800; flex: none; }
+    .chk.ok .d { background: var(--ok); } .chk.bad .d { background: var(--bad); } .chk.warn .d { background: var(--warn); }
+    .chk .t { flex: 1; } .chk .t b { display: block; font-size: 14px; } .chk .t span { font-size: 12.5px; color: var(--muted); }
+    .chk .v { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .note { font-size: 13px; color: var(--muted); line-height: 1.5; padding: 12px 14px; border-radius: 12px; background: #F6F9FE; margin-bottom: 16px; }
+    .sent { font-size: 13.5px; font-weight: 600; color: var(--ok); margin-bottom: 14px; }
+    .sent.bad { color: var(--bad); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 18px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 560px) { .reqs, .row2 { grid-template-columns: 1fr; } .card { padding: 20px; } h1 { font-size: 24px; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
 </head>
 <body>
-  <!-- Ambient background -->
-  <div class="ambient" aria-hidden="true">
-    <div class="grid"></div>
-    <div class="orb orb-a"></div>
-    <div class="orb orb-b"></div>
-    <div class="cursor-light"></div>
-  </div>
+  <div class="wrap">
+    <header><img src="../assets/logo.png" alt="Hunter Recruitment Advisors" /></header>
 
-  <!-- All-employees alert banner + takeover -->
-  <div id="alert-root" aria-live="assertive"></div>
-
-  <!-- Helper chat -->
-  <div class="helper" id="helper" hidden>
-    <section class="hp-panel" id="hp-panel" role="dialog" aria-modal="false" aria-labelledby="hp-title" hidden>
-      <header class="hp-head">
-        <span class="hp-av" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.6L12 15l-1.8-4.4L5.5 9l4.7-1.4z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8zM5 16l.6 1.4L7 18l-1.4.6L5 20l-.6-1.4L3 18l1.4-.6z"/></svg></span>
-        <span class="hp-titles"><strong id="hp-title">HRA Helper</strong><small><i></i>People, requests and pipeline answers</small></span>
-        <button type="button" class="hp-x" data-hp-clear title="Start over" aria-label="Start over"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
-        <button type="button" class="hp-x" data-hp-toggle aria-label="Close helper"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-      </header>
-      <div class="hp-msgs" id="hp-msgs" aria-live="polite"></div>
-      <form class="hp-input" id="hp-form" autocomplete="off">
-        <input id="hp-q" type="text" maxlength="200" placeholder="Ask anything, like “how many hires this month?”" aria-label="Ask the helper" />
-        <button type="submit" class="hp-send" aria-label="Send"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+    <!-- Step 1: who you are -->
+    <section class="card" id="s1">
+      <h1>Technical requirements check</h1>
+      <p class="sub">Our team works remotely on video and phone calls all day. This 1-minute check confirms your computer and internet meet our requirements. Nothing to install.</p>
+      <div class="reqs">
+        <div class="req"><b>Internet</b>10 Mbps download and 10 Mbps upload or faster</div>
+        <div class="req"><b>Operating system</b>Windows 10 or 11</div>
+        <div class="req"><b>Processor</b>Intel Core i5 or better</div>
+        <div class="req"><b>Memory (RAM)</b>16 GB or more</div>
+        <div class="req no" style="grid-column:1/-1"><b>Not supported</b>Chromebooks can't be used on our systems.</div>
+      </div>
+      <form id="who" novalidate>
+        <label class="f">Full name<input type="text" id="name" maxlength="100" autocomplete="name" required /></label>
+        <label class="f">Position or recruiter (optional)<input type="text" id="position" maxlength="150" placeholder="e.g. Recruiter role, or your recruiter's name" /></label>
+        <p class="tip">Please run this on the <b>same computer and internet connection</b> you'll use for work.</p>
+        <label class="consent"><input type="checkbox" id="consent" required /> I agree to share my results, name and basic device information with Hunter Recruitment Advisors to review my application.</label>
+        <p class="err" id="err1"></p>
+        <button class="btn wide" type="submit">Continue</button>
       </form>
     </section>
-    <button type="button" class="hp-bubble" id="hp-bubble" data-hp-toggle aria-label="Open the helper" aria-expanded="false">
-      <span class="hp-ring" aria-hidden="true"></span>
-      <svg class="hp-ico-open" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5z"/><path d="M12 7.2l.9 2.2 2.3.7-2.3.8L12 13l-.9-2.1-2.3-.8 2.3-.7z" fill="currentColor"/></svg>
-      <svg class="hp-ico-close" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-      <span class="hp-tip">Need something? Ask me</span>
-    </button>
-  </div>
 
-  <!-- Messenger-style notification windows -->
-  <div class="msgr" id="msgr" aria-live="polite"></div>
-
-  <!-- Boot -->
-  <div id="boot" class="boot" aria-live="polite">
-    <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo boot-logo" />
-    <div class="boot-bar"><span></span></div>
-  </div>
-
-  <!-- Sign in -->
-  <section id="view-login" class="view view-login" hidden>
-    <div class="login-card">
-      <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo login-logo" />
-      <h1 class="login-title">Request Center</h1>
-      <p class="login-sub">Sign in with your work account to send and track requests.</p>
-
-      <form id="login-form" class="login-form" novalidate>
-        <label class="field">
-          <span class="field-label">Work email</span>
-          <input type="email" name="email" autocomplete="username" required placeholder="name@yourcompany.com" />
-        </label>
-        <label class="field">
-          <span class="field-label">Password</span>
-          <input type="password" name="password" autocomplete="current-password" required />
-        </label>
-        <p id="login-error" class="form-error" role="alert"></p>
-        <button type="submit" class="btn btn-primary btn-block">
-          <span class="btn-text">Sign in</span>
-          <span class="spinner" aria-hidden="true"></span>
-        </button>
-        <button type="button" id="forgot-btn" class="link-btn">Forgot password</button>
-      </form>
-
-      <div id="demo-entry" class="demo-entry" hidden>
-        <p class="demo-note">Demo mode is on because Firebase isn't connected yet. Requests are saved in this browser only.</p>
-        <div class="demo-buttons">
-          <button type="button" class="btn btn-ghost" data-demo="member">Try as employee</button>
-          <button type="button" class="btn btn-ghost" data-demo="admin">Try as admin</button>
-        </div>
+    <!-- Step 2: computer -->
+    <section class="card" id="s2" hidden>
+      <h2>Your computer</h2>
+      <p class="sub">We detected what we can. Please confirm the processor and memory (browsers can't read these).</p>
+      <div class="dev" id="dev"></div>
+      <div class="row2">
+        <label class="f">Processor
+          <select id="cpu"><option value="">Choose…</option>
+            <option value="i3">Intel Core i3</option>
+            <option value="i5">Intel Core i5</option>
+            <option value="i7">Intel Core i7 / i9</option>
+            <option value="ultra">Intel Core Ultra</option>
+            <option value="amd">AMD Ryzen</option>
+            <option value="other">Other</option>
+            <option value="unsure">Not sure</option>
+          </select></label>
+        <label class="f">Memory (RAM)
+          <select id="ram"><option value="">Choose…</option>
+            <option value="8">8 GB or less</option>
+            <option value="16">16 GB</option>
+            <option value="32">32 GB or more</option>
+            <option value="unsure">Not sure</option>
+          </select></label>
       </div>
-    </div>
-  </section>
+      <label class="f" id="cpu-other-wrap" hidden>Which processor?<input type="text" id="cpu-other" maxlength="60" placeholder="e.g. Intel Pentium Gold 7505" /></label>
+      <p class="tip">Where to find them on Windows: <b>Settings → System → About</b> shows “Processor” and “Installed RAM”.</p>
+      <p class="err" id="err2"></p>
+      <button class="btn wide" id="go">Start speed test</button>
+    </section>
 
-  <!-- No access -->
-  <section id="view-denied" class="view view-login" hidden>
-    <div class="login-card">
-      <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo login-logo" />
-      <h1 class="login-title">This account doesn't have access</h1>
-      <p class="login-sub"><span id="denied-email"></span> isn't on the access list. Ask your administrator to add it, then sign in again.</p>
-      <button type="button" class="btn btn-primary btn-block" data-action="signout">Use another account</button>
-    </div>
-  </section>
-
-  <!-- App -->
-  <section id="view-app" class="view view-app" hidden>
-    <aside class="rail" aria-label="Tools">
-      <div class="rail-brand">
-        <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo rail-logo" />
-        <span class="rail-mark" aria-hidden="true"><img src="assets/favicon-64.png" alt="" width="36" height="36" /></span>
+    <!-- Step 3: speed test -->
+    <section class="card" id="s3" hidden>
+      <p class="phase" id="phase">Connecting…</p>
+      <div class="gauge">
+        <svg viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#00377F"/><stop offset="1" stop-color="#2D6BFF"/></linearGradient></defs>
+          <circle class="track" cx="100" cy="100" r="80" stroke-dasharray="377 503"/>
+          <circle class="val" id="arc" cx="100" cy="100" r="80" stroke-dasharray="377 503" stroke-dashoffset="377"/></svg>
+        <div class="mid"><div class="num" id="num">0</div><div class="unit">Mbps</div></div>
       </div>
-      <nav class="rail-nav" id="rail">
-        <button class="rail-item is-active" data-tool="requests" aria-label="Request Center" data-short="Requests">
-          <span class="rail-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 5v2M14 11v2M14 17v2"/></svg></span>
-          <span class="rail-text"><span class="rail-label">Request Center</span><span class="rail-sub">Send and track requests</span></span>
-        </button>
-        <button class="rail-item" data-tool="am" aria-label="Account Manager Dashboard" data-short="AM">
-          <span class="rail-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg></span>
-          <span class="rail-text"><span class="rail-label">AM Dashboard</span><span class="rail-sub">Pipeline · Training · Tech</span></span>
-        </button>
-        <button class="rail-item" data-tool="insights" aria-label="Insights" data-short="Insights" hidden>
-          <span class="rail-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/><circle cx="16" cy="9" r="2"/></svg></span>
-          <span class="rail-text"><span class="rail-label">Insights</span><span class="rail-sub">Admin performance view</span></span>
-        </button>
-        <span class="rail-spacer" aria-hidden="true"></span>
-        <span class="rail-divider" aria-hidden="true"></span>
-        <button type="button" class="rail-more-btn" data-rail-more aria-expanded="false" aria-controls="rail-more">
-          <span class="rail-icon rail-more-ico"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg></span>
-          <span class="rail-text"><span class="rail-label">More</span></span>
-          <svg class="rail-more-chev" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
-        </button>
-        <div class="rail-more" id="rail-more"><div class="rail-more-in">
-        <button class="rail-item rail-foot rail-super" data-tool="super" aria-label="Super admin" data-short="Super" hidden>
-          <span class="rail-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6z"/><path d="M8.8 12.2l2.2 2.2 4.3-4.6"/></svg></span>
-          <span class="rail-text"><span class="rail-label">Super admin</span><span class="rail-sub">Only you</span></span>
-        </button>
-        <button class="rail-item rail-foot" data-tool="org" aria-label="Org chart" data-short="Org" hidden>
-          <span class="rail-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/></svg></span>
-          <span class="rail-text"><span class="rail-label">Org chart</span><span class="rail-sub">Who reports to whom</span></span>
-        </button>
-        <button class="rail-item rail-foot" data-tool="contacts" aria-label="Who to contact" data-short="Contacts">
-          <span class="rail-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h11a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2z"/><path d="M6 18a2 2 0 0 1 2-2h11"/><circle cx="12.5" cy="9" r="2"/><path d="M9.5 13.5a3 3 0 0 1 6 0"/></svg></span>
-          <span class="rail-text"><span class="rail-label">Who to contact</span><span class="rail-sub">Find the right person</span></span>
-        </button>
-        <a class="rail-item rail-foot rail-link" id="rail-sharepoint" href="#" target="_blank" rel="noopener" aria-label="SharePoint (opens in a new tab)" data-short="SharePoint">
-          <span class="rail-icon rail-icon-sp"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="8" r="5"/><circle cx="16.5" cy="14" r="4"/><circle cx="10" cy="17" r="3"/></svg></span>
-          <span class="rail-text"><span class="rail-label">SharePoint</span><span class="rail-sub">Team site</span></span>
-          <span class="rail-ext" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></span>
-        </a>
-        </div></div>
-        <span class="rail-glow" aria-hidden="true"></span>
-      </nav>
-    </aside>
-    <button type="button" class="rail-toggle" id="rail-toggle" data-rail-toggle aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
-      <span class="rail-toggle-ring" aria-hidden="true"></span>
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5L9 12l5.5 5.5"/></svg>
-    </button>
+      <div class="live"><div><b id="lp">–</b><span>Latency (ms)</span></div><div><b id="ld">–</b><span>Download</span></div><div><b id="lu">–</b><span>Upload</span></div></div>
+    </section>
 
-    <div class="workspace">
-    <header class="topbar">
-      <div class="topbar-inner">
-        <img src="assets/logo.png" alt="Hunter Recruitment Advisors" class="logo topbar-logo" />
-        <nav class="tabs" id="tabs" aria-label="Sections">
-          <button class="tab is-active" data-tab="mine">My requests</button>
-          <span class="tab-indicator" aria-hidden="true"></span>
-        </nav>
-        <div class="top-actions">
-          <button type="button" class="icon-btn alert-btn" id="alert-btn" data-alert-compose title="Alert all employees" aria-label="Alert all employees" hidden>
-            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.2v3.6a1 1 0 0 0 1 1H7l9.2 4.4a.6.6 0 0 0 .8-.55V5.35a.6.6 0 0 0-.8-.55L7 9.2H4.5a1 1 0 0 0-1 1z"/><path d="M7 14.8l1.3 4.4a1 1 0 0 0 1 .7h1.2a.8.8 0 0 0 .75-1.05L10.2 15.6"/><path d="M19.6 9.4a3.6 3.6 0 0 1 0 5.2"/></svg>
-          </button>
-          <div class="notif-wrap">
-            <button type="button" class="icon-btn bell-btn" id="bell-btn" data-notif-panel title="Notifications" aria-label="Notification settings" aria-expanded="false">
-              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>
-              <span class="bell-dot" hidden></span>
-            </button>
-            <div class="notif-pop pop" id="notif-pop" role="dialog" aria-label="Notification settings" hidden></div>
-          </div>
-        </div>
-        <div class="user">
-          <button type="button" class="user-profile" data-profile aria-label="Your profile" title="Your profile">
-          <span class="avatar" id="user-avatar">?</span>
-          <span class="user-meta">
-            <span class="user-name" id="user-name"></span>
-            <span class="user-role" id="user-role"></span>
-          </span>
-          </button>
-          <button class="icon-btn" data-action="signout" title="Sign out" aria-label="Sign out">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5"/><path d="M15 12H4"/></svg>
-          </button>
-        </div>
-      </div>
-    </header>
+    <!-- Step 4: results -->
+    <section class="card" id="s4" hidden>
+      <div class="verdict" id="verdict"></div>
+      <div class="checks" id="checks"></div>
+      <div class="note" id="advice" hidden></div>
+      <p class="tip" id="fastnote" hidden>Very fast connections can show a lower number here than on other speed tests (this test uses a single connection). It doesn't affect your result: only the minimum matters.</p>
+      <p class="sent" id="sent">Sending your results…</p>
+      <div class="actions"><button class="btn ghost" id="again">Run the test again</button></div>
+    </section>
 
-    <nav class="hub-nav" id="hub-nav" aria-label="Account Manager Dashboard" hidden></nav>
-
-    <main class="main" data-tool-panel="requests">
-      <!-- My requests -->
-      <div class="panel is-active" data-panel="mine">
-        <div class="hero">
-          <h1 class="hero-title" id="greeting">Hi there</h1>
-        </div>
-
-        <div class="create-wrap" id="type-tiles"></div>
-
-        <div class="section-head">
-          <h2>Your requests</h2>
-          <div class="seg" id="mine-filter" role="tablist" aria-label="Filter your requests">
-            <button class="seg-btn is-active" data-filter="active">Active</button>
-            <button class="seg-btn" data-filter="completed">Completed</button>
-            <button class="seg-btn" data-filter="all">All</button>
-            <span class="seg-indicator" aria-hidden="true"></span>
-          </div>
-        </div>
-        <ul class="tickets" id="mine-list"></ul>
-      </div>
-    </main>
-
-    <!-- Client Pipeline (Workable) -->
-    <main class="main tool-pipeline" data-tool-panel="pipeline" hidden>
-      <div class="pl-hero">
-        <div class="pl-hero-text">
-          <h1 class="hero-title">Client pipeline</h1>
-          <p class="hero-sub">Every submitted candidate and where they stand, straight from Workable. Nothing to type in twice.</p>
-        </div>
-        <div class="pl-hero-actions">
-          <span class="sync-chip" id="pl-sync"><i></i><span>Connecting</span></span>
-          <button type="button" class="btn btn-ghost pl-ojr" id="pl-openjobs" data-ojr hidden title="Excel report of every open Workable job">
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="17" rx="2.5"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
-            <span class="btn-text">Open jobs report</span><span class="spinner" aria-hidden="true"></span>
-          </button>
-          <button type="button" class="btn btn-primary" id="pl-download" data-pl-download>
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5"/><path d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/></svg>
-            <span class="btn-text">Download spreadsheet</span><span class="spinner" aria-hidden="true"></span>
-          </button>
-        </div>
-      </div>
-
-      <div class="pl-am">
-        <span class="pl-am-label" id="pl-am-label">Account manager</span>
-        <div class="am-row" id="pl-ams" role="tablist" aria-labelledby="pl-am-label"></div>
-      </div>
-
-      <div class="sheet-tabs-wrap"><div class="sheet-tabs" id="pl-clients" role="tablist" aria-label="Clients"></div></div>
-      <section class="pl-area" id="pl-sheet" aria-live="polite"></section>
-    </main>
-
-    <!-- Super admin -->
-    <main class="main tool-super" data-tool-panel="super" hidden>
-      <div id="super-root"></div>
-    </main>
-
-    <!-- Training -->
-    <main class="main tool-training" data-tool-panel="training" hidden>
-      <div id="training-root"></div>
-    </main>
-
-    <!-- Who to contact -->
-    <main class="main tool-contacts" data-tool-panel="contacts" hidden>
-      <div id="contacts-root"></div>
-    </main>
-
-    <!-- Insights (admins only) -->
-    <main class="main tool-techcheck" data-tool-panel="techcheck" hidden>
-      <div id="tc-root"></div>
-    </main>
-
-    <main class="main tool-org" data-tool-panel="org" hidden>
-      <div id="org-root"></div>
-    </main>
-
-    <main class="main tool-insights" data-tool-panel="insights" hidden>
-      <div id="insights-root"></div>
-    </main>
-    </div>
-  </section>
-
-  <!-- New request modal -->
-  <div class="overlay" id="modal" hidden>
-    <div class="sheet sheet-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <button class="icon-btn sheet-close" data-close aria-label="Close">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-      <div class="modal-body" id="modal-body"></div>
-    </div>
+    <footer>Hunter Recruitment Advisors · This page only checks your computer and connection.</footer>
   </div>
-
-  <!-- Ticket drawer -->
-  <div class="overlay overlay-drawer" id="drawer" hidden>
-    <aside class="sheet sheet-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-      <button class="icon-btn sheet-close" data-close aria-label="Close">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-      <div id="drawer-body"></div>
-    </aside>
-  </div>
-
-  <!-- Training: trainee details for managers -->
-  <div class="overlay overlay-drawer" id="tr-drawer" hidden>
-    <aside class="sheet sheet-drawer" role="dialog" aria-modal="true" aria-labelledby="trd-title">
-      <button class="icon-btn sheet-close" data-close aria-label="Close">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-      <div id="tr-drawer-body"></div>
-    </aside>
-  </div>
-
-  <!-- Candidate notes -->
-  <div class="overlay" id="note-modal" hidden>
-    <div class="sheet sheet-modal sheet-note" role="dialog" aria-modal="true" aria-labelledby="note-title">
-      <button class="icon-btn sheet-close" data-close aria-label="Close">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-      <div id="note-body"></div>
-    </div>
-  </div>
-
-  <!-- Image viewer -->
-  <div class="overlay overlay-lightbox" id="lightbox" hidden>
-    <figure class="lightbox" role="dialog" aria-modal="true" aria-label="Attachment preview">
-      <img id="lb-img" alt="" />
-      <figcaption class="lb-bar">
-        <span class="lb-info"><span id="lb-name"></span><span id="lb-count"></span></span>
-        <span class="lb-actions">
-          <button type="button" class="lb-btn lb-nav" data-lb="-1" aria-label="Previous image"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
-          <button type="button" class="lb-btn lb-nav" data-lb="1" aria-label="Next image"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
-          <button type="button" class="lb-btn lb-text" data-lb-download><span class="btn-text">Download</span><span class="spinner" aria-hidden="true"></span></button>
-          <button type="button" class="lb-btn" data-close aria-label="Close preview"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-        </span>
-      </figcaption>
-    </figure>
-  </div>
-
-  <!-- Confirm -->
-  <div class="overlay overlay-confirm" id="confirm" hidden>
-    <div class="sheet sheet-confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
-      <span class="confirm-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></svg></span>
-      <h2 id="confirm-title">Delete this request?</h2>
-      <p id="confirm-text"></p>
-      <div class="confirm-actions">
-        <button type="button" class="btn btn-ghost" id="confirm-cancel">Cancel</button>
-        <button type="button" class="btn btn-danger-solid" id="confirm-ok"><span class="btn-text">Delete permanently</span><span class="spinner" aria-hidden="true"></span></button>
-      </div>
-    </div>
-  </div>
-
-  <div class="toasts" id="toasts" aria-live="polite"></div>
-
-  <script src="config.js"></script>
-  <script src="training.js"></script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="check.js"></script>
 </body>
 </html>

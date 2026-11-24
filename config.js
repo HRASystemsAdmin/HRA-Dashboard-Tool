@@ -310,8 +310,6 @@ window.HRA_CONFIG = {
   },
 
   /* 8) Links in the left panel. */
-  // Weekly Maintenance & Security Spine: who receives the written status (Aaron's email).
-  spine: { statusTo: "" },
 
   links: {
     sharepoint: "https://hunterrecruitmentnet.sharepoint.com/sites/TeamSite"
