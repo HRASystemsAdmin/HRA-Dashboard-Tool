@@ -6274,7 +6274,8 @@ const TC_CPU = { i3: "Core i3", i5: "Core i5", i7: "Core i7/i9", ultra: "Core Ul
 const TC_RAM = { "8": "8 GB or less", "16": "16 GB", "32": "32 GB+", unsure: "Not sure" };
 const TC_RES = { pass: ["Meets requirements", "ok"], review: ["Needs review", "warn"], fail: ["Doesn't meet", "bad"] };
 const tcLink = () => new URL("check/", location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, "")).href;
-const flag = (cc) => /^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0))) : "";
+// country name instead of a flag emoji (Windows shows flag emojis as two letters)
+const tcCountry = (() => { let dn = null; try { dn = new Intl.DisplayNames(["en"], { type: "region" }); } catch {} return (cc) => (/^[A-Z]{2}$/.test(cc || "") ? (dn?.of(cc) || cc) : ""); })();
 function startTech() {
   if (!TC.unsub) TC.unsub = state.store.watchTech((list, err) => { TC.list = list || []; TC.error = err ? (err.code || "error") : ""; if (currentTool === "techcheck") renderTech(); });
   renderTech();
@@ -6284,7 +6285,8 @@ function renderTech() {
   const q = lower(TC.q.trim());
   const rows = TC.list.filter((r) => (!TC.filter || r.result === TC.filter) && (!q || lower([r.name, r.position].join(" ")).includes(q)));
   const cnt = (k) => TC.list.filter((r) => r.result === k).length;
-  const sp = (v, min) => `<span class="tc-sp${v < min ? " is-low" : ""}">${esc(String(v))}</span>`;
+  // above 100 Mbps a browser test only proves "100+"; the measured value is in the tooltip
+  const sp = (v, min) => `<span class="tc-sp${v < min ? " is-low" : ""}"${v >= 100 ? ` title="Measured ${esc(String(v))} Mbps (single-connection browser test)"` : ""}>${v >= 100 ? "100+" : esc(String(v))}</span>`;
   root.innerHTML = `
     <div class="hero tc-hero"><div><h1 class="hero-title">Tech checks</h1><p class="hero-sub">Candidates' internet speed and computer, against HRA's minimum requirements.</p></div>
       <div class="tc-actions"><button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button></div></div>
@@ -6300,7 +6302,7 @@ function renderTech() {
         <td><span class="tc-res is-${rc}">${esc(rl)}</span><small>${esc(r.band || "")}</small></td>
         <td>${sp(r.down, 10)}<small>Mbps</small></td><td>${sp(r.up, 10)}<small>Mbps</small></td><td>${esc(String(r.ping))}<small>ms</small></td>
         <td><span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(r.cpu === "other" && r.cpuOther ? r.cpuOther : TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
-        <td>${esc(r.createdAt ? ago(r.createdAt) : "")}<small>${flag(r.loc)} ${esc(r.loc || "")}</small></td>
+        <td>${esc(r.createdAt ? ago(r.createdAt) : "")}<small>${esc(tcCountry(r.loc))}</small></td>
         ${state.isAdmin ? `<td><button type="button" class="icon-btn tc-del" data-tc-del="${esc(r.id)}" title="Delete" aria-label="Delete result">${svgI('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', 15)}</button></td>` : ""}
       </tr>`; }).join("")}</tbody></table></div>`
     : `<div class="tc-empty"><h2>${TC.list.length ? "No matches" : "No results yet"}</h2><p>${TC.list.length ? "Try another search or filter." : "Send candidates the link. Their results appear here as soon as they finish the test."}</p></div>`}`;
