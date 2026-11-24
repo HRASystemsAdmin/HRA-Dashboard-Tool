@@ -101,13 +101,15 @@ function band(down, up) {
   if (down >= MIN.down && up >= MIN.up) return "Meets minimum";
   return "Below minimum";
 }
+// One browser connection can't fill very fast lines, so above 100 Mbps we only vouch for "100+".
+const fmtSpeed = (v) => (v >= 100 ? "100+ Mbps" : `${v} Mbps`);
 function finish(sp) {
   const d = R.dev, cpu = $("#cpu").value, ram = $("#ram").value;
   const cpuOther = cpu === "other" ? $("#cpu-other").value.trim().slice(0, 60) : "";
   const cpuText = cpuOther || $("#cpu").selectedOptions[0].text, ramText = $("#ram").selectedOptions[0].text;
   const items = [
-    { t: "Download speed", s: `Minimum ${MIN.down} Mbps`, v: `${sp.down} Mbps`, st: sp.down >= MIN.down ? "ok" : "bad" },
-    { t: "Upload speed", s: `Minimum ${MIN.up} Mbps`, v: `${sp.up} Mbps`, st: sp.up >= MIN.up ? "ok" : "bad" },
+    { t: "Download speed", s: `Minimum ${MIN.down} Mbps`, v: fmtSpeed(sp.down), st: sp.down >= MIN.down ? "ok" : "bad" },
+    { t: "Upload speed", s: `Minimum ${MIN.up} Mbps`, v: fmtSpeed(sp.up), st: sp.up >= MIN.up ? "ok" : "bad" },
     { t: "Latency", s: "Lower is better for calls", v: `${sp.ping} ms`, st: sp.ping <= 100 ? "ok" : sp.ping <= 200 ? "warn" : "bad", info: true },
     { t: "Operating system", s: "Windows 10 or 11", v: d.os, st: d.win11 === "yes" ? "ok" : d.win11 === "no" ? "bad" : "warn" },
     { t: "Not a Chromebook", s: "Chromebooks aren't supported", v: d.chromebook ? "Chromebook" : "OK", st: d.chromebook ? "bad" : "ok" },
@@ -124,7 +126,7 @@ function finish(sp) {
   const slow = sp.down < MIN.down || sp.up < MIN.up;
   $("#advice").hidden = !slow;
   $("#advice").innerHTML = slow ? "<b>Tips to improve your speed:</b> connect with an Ethernet cable if possible, move closer to your Wi-Fi router, close other apps, videos or downloads, and run the test again." : "";
-  $("#fastnote").hidden = !(sp.down >= 150);
+  $("#fastnote").hidden = !(sp.down >= 100 || sp.up >= 100);
   show("#s4");
   send({ ...sp, cpuOther, os: d.os, win11: d.win11, chromebook: d.chromebook, browser: d.browser, cores: d.cores, mem: d.mem, ua: d.ua, cpu, ram, band: b, result });
 }
