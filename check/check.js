@@ -1,8 +1,9 @@
 /* HRA candidate technical requirements check (public page).
    Self-contained: loads only Firebase app + Firestore to ADD one result. Firestore rules allow nothing else
    from this page (no reading, no changes, no deletes). The web keys below are public by design. */
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+// Firebase loads only when the result is sent, so the test itself always works.
+const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
+import SpeedTest from "./speedtest.js";   // Cloudflare's official speed test engine (same as speed.cloudflare.com)
 
 const FIREBASE = {
   apiKey: "AIzaSyCil1W-ab6RniMUIAN_7Ye_q6jOmRc4mFA",
@@ -36,8 +37,8 @@ async function detectDevice() {
   if (uad?.getHighEntropyValues) { try { const h = await uad.getHighEntropyValues(["platformVersion"]); version = h.platformVersion || ""; } catch {} }
   if (chromebook) { os = "ChromeOS (Chromebook)"; win11 = "no"; }
   else if (mobile) { os = /iPhone|iPad|iPod/.test(ua) ? "iPhone / iPad" : "Android phone or tablet"; win11 = "no"; }
-  else if (platform === "Windows" && version) { const major = parseInt(version, 10); win11 = major >= 13 ? "yes" : "no"; os = major >= 13 ? "Windows 11" : "Windows 10 or older"; }
-  else if (/Windows NT 10/.test(ua)) { os = "Windows 10 or 11"; win11 = "unknown"; }
+  else if (platform === "Windows" && version) { const major = parseInt(version, 10); win11 = major >= 1 ? "yes" : "no"; os = major >= 13 ? "Windows 11" : major >= 1 ? "Windows 10" : "Older Windows"; }
+  else if (/Windows NT 10/.test(ua)) { os = "Windows 10 or 11"; win11 = "yes"; }
   else if (/Windows/.test(ua)) { os = "Older Windows"; win11 = "no"; }
   else if (/Mac OS X|Macintosh/.test(ua)) { os = "macOS"; win11 = "no"; }
   else if (/Linux/.test(ua)) { os = "Linux"; win11 = "no"; }
@@ -46,7 +47,7 @@ async function detectDevice() {
 }
 function renderDevice() {
   const d = R.dev;
-  const osPill = d.win11 === "yes" ? ["ok", "Meets requirement"] : d.win11 === "no" ? ["bad", "Doesn't meet requirement"] : ["warn", "Couldn't confirm Windows 11"];
+  const osPill = d.win11 === "yes" ? ["ok", "Meets requirement"] : d.win11 === "no" ? ["bad", "Doesn't meet requirement"] : ["warn", "Couldn't confirm"];
   $("#dev").innerHTML = `
     <div><span>Operating system</span><b>${esc(d.os)} · <span class="pill ${osPill[0]}">${osPill[1]}</span></b></div>
     <div><span>Chromebook</span><b class="pill ${d.chromebook ? "bad" : "ok"}">${d.chromebook ? "Yes (not supported)" : "No"}</b></div>
@@ -61,56 +62,34 @@ $("#go").addEventListener("click", () => {
 const ARC = 377;
 function gauge(mbps) { const v = Math.min(1, Math.log10(1 + mbps) / Math.log10(1 + 300)); $("#arc").style.strokeDashoffset = String(ARC * (1 - v)); $("#num").textContent = mbps >= 100 ? Math.round(mbps) : mbps.toFixed(1); }
 const now = () => performance.now();
-const bust = () => `&r=${Math.random().toString(36).slice(2)}`;
 
-async function latency() {
-  const t = [];
-  for (let i = 0; i < 12; i++) { const s = now(); await fetch(`${CF}/__down?bytes=0${bust()}`, { cache: "no-store" }); t.push(now() - s); }
-  const v = t.slice(2).sort((a, b) => a - b); const med = v[Math.floor(v.length / 2)];
-  const jit = t.slice(3).reduce((a, x, i) => a + Math.abs(x - t[i + 2]), 0) / (t.length - 3);
-  return { ping: Math.round(med), jitter: Math.round(jit) };
-}
-async function download(seconds = 8) {
-  let bytes = 0, stop = false; const start = now();
-  const tick = setInterval(() => { const s = (now() - start) / 1000; if (s > .3) { const m = bytes * 8 / s / 1e6; gauge(m); $("#ld").textContent = m.toFixed(1); } }, 200);
-  const worker = async () => {
-    let size = 1e6;
-    while (!stop) {
-      const res = await fetch(`${CF}/__down?bytes=${Math.round(size)}${bust()}`, { cache: "no-store" });
-      const rd = res.body.getReader();
-      while (true) { const { done, value } = await rd.read(); if (done) break; bytes += value.length; if (stop) { rd.cancel().catch(() => {}); break; } }
-      size = Math.min(size * 2, 50e6);
-    }
-  };
-  const ws = [worker(), worker(), worker(), worker()];
-  await new Promise((r) => setTimeout(r, seconds * 1000)); stop = true; clearInterval(tick);
-  await Promise.allSettled(ws.map((w) => Promise.race([w, new Promise((r) => setTimeout(r, 1500))])));
-  return bytes * 8 / ((now() - start) / 1000) / 1e6;
-}
-async function upload(seconds = 8) {
-  const chunk = new Uint8Array(4e6); for (let i = 0; i < chunk.length; i += 65536) crypto.getRandomValues(chunk.subarray(i, Math.min(i + 65536, chunk.length)));
-  let bytes = 0, stop = false; const start = now();
-  const tick = setInterval(() => { const s = (now() - start) / 1000; if (s > .5) { const m = bytes * 8 / s / 1e6; gauge(m); $("#lu").textContent = m.toFixed(1); } }, 200);
-  const worker = async () => { let size = 250e3; while (!stop) { const body = chunk.subarray(0, Math.round(size)); await fetch(`${CF}/__up?${bust().slice(1)}`, { method: "POST", body, cache: "no-store" }); bytes += body.length; size = Math.min(size * 2, chunk.length); } };
-  const ws = [worker(), worker(), worker()];
-  await new Promise((r) => setTimeout(r, seconds * 1000)); stop = true; clearInterval(tick);
-  await Promise.allSettled(ws.map((w) => Promise.race([w, new Promise((r) => setTimeout(r, 2500))])));
-  return bytes * 8 / ((now() - start) / 1000) / 1e6;
-}
 async function runTest() {
-  try {
-    $("#phase").textContent = "Measuring latency…"; gauge(0); ["#lp", "#ld", "#lu"].forEach((s) => ($(s).textContent = "–"));
-    let loc = "", colo = "";
-    try { const t = await (await fetch(`${CF}/cdn-cgi/trace`, { cache: "no-store" })).text(); loc = (t.match(/loc=(\w+)/) || [])[1] || ""; colo = (t.match(/colo=(\w+)/) || [])[1] || ""; } catch {}
-    const { ping, jitter } = await latency(); $("#lp").textContent = ping;
-    $("#phase").textContent = "Testing download…"; const down = await download(); $("#ld").textContent = down.toFixed(1);
-    $("#phase").textContent = "Testing upload…"; gauge(0); const up = await upload(); $("#lu").textContent = up.toFixed(1);
-    finish({ down: +down.toFixed(1), up: +up.toFixed(1), ping, jitter, loc, colo });
-  } catch (e) {
-    console.error(e);
-    $("#phase").textContent = "The test couldn't finish. Please check your connection and try again.";
-    setTimeout(() => show("#s2"), 2500);
-  }
+  $("#phase").textContent = "Measuring latency…"; gauge(0); ["#lp", "#ld", "#lu"].forEach((x) => ($(x).textContent = "–"));
+  let loc = "", colo = "";
+  try { const t = await (await fetch(`${CF}/cdn-cgi/trace`, { cache: "no-store" })).text(); loc = (t.match(/loc=(\w+)/) || [])[1] || ""; colo = (t.match(/colo=(\w+)/) || [])[1] || ""; } catch {}
+  // results stay between the candidate and HRA: no reporting to Cloudflare's result logs
+  const st = new SpeedTest({ autoStart: false, logAimApiUrl: null, logMeasurementApiUrl: null });
+  let done = false;
+  const guard = setTimeout(() => { if (!done) { done = true; st.pause?.(); fail(); } }, 150000);
+  const mbps = (bps) => (bps ? bps / 1e6 : 0);
+  st.onResultsChange = ({ type }) => {
+    const r = st.results;
+    if (type === "latency") { const l = r.getUnloadedLatency?.(); if (l) $("#lp").textContent = Math.round(l); }
+    if (type === "download") { const d = mbps(r.getDownloadBandwidth?.()); if (d) { $("#phase").textContent = "Testing download…"; gauge(d); $("#ld").textContent = d.toFixed(1); } }
+    if (type === "upload") { const u = mbps(r.getUploadBandwidth?.()); if (u) { $("#phase").textContent = "Testing upload…"; gauge(u); $("#lu").textContent = u.toFixed(1); } }
+  };
+  st.onError = (e) => console.warn("Speed test:", e);
+  st.onFinish = (r) => {
+    if (done) return; done = true; clearTimeout(guard);
+    const down = mbps(r.getDownloadBandwidth?.()), up = mbps(r.getUploadBandwidth?.());
+    if (!down || !up) { fail(); return; }
+    finish({ down: +down.toFixed(1), up: +up.toFixed(1), ping: Math.round(r.getUnloadedLatency?.() || 0), jitter: Math.round(r.getUnloadedJitter?.() || 0), loc, colo });
+  };
+  try { st.play(); } catch (e) { console.error(e); done = true; clearTimeout(guard); fail(); }
+}
+function fail() {
+  $("#phase").textContent = "The test couldn't finish. Please check your connection and try again.";
+  setTimeout(() => show("#s2"), 2500);
 }
 
 /* ---------- Step 4: score + send ---------- */
@@ -127,7 +106,7 @@ function finish(sp) {
     { t: "Download speed", s: `Minimum ${MIN.down} Mbps`, v: `${sp.down} Mbps`, st: sp.down >= MIN.down ? "ok" : "bad" },
     { t: "Upload speed", s: `Minimum ${MIN.up} Mbps`, v: `${sp.up} Mbps`, st: sp.up >= MIN.up ? "ok" : "bad" },
     { t: "Latency", s: "Lower is better for calls", v: `${sp.ping} ms`, st: sp.ping <= 100 ? "ok" : sp.ping <= 200 ? "warn" : "bad", info: true },
-    { t: "Operating system", s: "Windows 11", v: d.os, st: d.win11 === "yes" ? "ok" : d.win11 === "no" ? "bad" : "warn" },
+    { t: "Operating system", s: "Windows 10 or 11", v: d.os, st: d.win11 === "yes" ? "ok" : d.win11 === "no" ? "bad" : "warn" },
     { t: "Not a Chromebook", s: "Chromebooks aren't supported", v: d.chromebook ? "Chromebook" : "OK", st: d.chromebook ? "bad" : "ok" },
     { t: "Processor (you selected)", s: "Intel Core i5, 14th gen or newer", v: cpuText, st: ["i5-14", "i7-14", "ultra"].includes(cpu) ? "ok" : cpu === "older" ? "bad" : "warn" },
     { t: "Memory (you selected)", s: "16 GB or more", v: ramText, st: ["16", "32"].includes(ram) ? "ok" : ram === "8" ? "bad" : "warn" }
@@ -145,11 +124,12 @@ function finish(sp) {
   show("#s4");
   send({ ...sp, os: d.os, win11: d.win11, chromebook: d.chromebook, browser: d.browser, cores: d.cores, mem: d.mem, ua: d.ua, cpu, ram, band: b, result });
 }
-let db = null;
+let db = null, fs = null;
 async function send(r) {
   $("#sent").className = "sent"; $("#sent").textContent = "Sending your results…";
   try {
-    db = db || getFirestore(initializeApp(FIREBASE));
+    if (!db) { const app = await import(FB + "firebase-app.js"); fs = await import(FB + "firebase-firestore.js"); db = fs.getFirestore(app.initializeApp(FIREBASE)); }
+    const { collection, addDoc, serverTimestamp } = fs;
     await addDoc(collection(db, "techchecks"), {
       v: 1, name: R.name.slice(0, 100), email: R.email.slice(0, 150), position: R.position.slice(0, 150),
       down: r.down, up: r.up, ping: r.ping, jitter: r.jitter, loc: String(r.loc).slice(0, 10), colo: String(r.colo).slice(0, 10),
