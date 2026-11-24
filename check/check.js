@@ -17,13 +17,13 @@ const CF = "https://speed.cloudflare.com";        // Cloudflare's public speed t
 const $ = (s) => document.querySelector(s);
 const show = (id) => { for (const s of ["#s1", "#s2", "#s3", "#s4"]) $(s).hidden = s !== id; window.scrollTo({ top: 0, behavior: "smooth" }); };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const R = { name: "", email: "", position: "", dev: null };
+const R = { name: "", position: "", dev: null };
 
 /* ---------- Step 1 ---------- */
 $("#who").addEventListener("submit", async (e) => {
   e.preventDefault();
-  R.name = $("#name").value.trim(); R.email = $("#email").value.trim(); R.position = $("#position").value.trim();
-  const err = !R.name ? "Please enter your full name." : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(R.email) ? "Please enter a valid email." : !$("#consent").checked ? "Please accept to share your results." : "";
+  R.name = $("#name").value.trim(); R.position = $("#position").value.trim();
+  const err = !R.name ? "Please enter your full name." : !$("#consent").checked ? "Please accept to share your results." : "";
   $("#err1").textContent = err; if (err) return;
   R.dev = await detectDevice(); renderDevice(); show("#s2");
 });
@@ -53,8 +53,10 @@ function renderDevice() {
     <div><span>Chromebook</span><b class="pill ${d.chromebook ? "bad" : "ok"}">${d.chromebook ? "Yes (not supported)" : "No"}</b></div>
     ${d.mobile ? `<div><span>Device</span><b class="pill bad">Phone or tablet: please use your work computer</b></div>` : ""}`;
 }
+$("#cpu").addEventListener("change", () => { const o = $("#cpu").value === "other"; $("#cpu-other-wrap").hidden = !o; if (o) $("#cpu-other").focus(); });
 $("#go").addEventListener("click", () => {
   if (!$("#cpu").value || !$("#ram").value) { $("#err2").textContent = "Please choose your processor and memory (or “Not sure”)."; return; }
+  if ($("#cpu").value === "other" && !$("#cpu-other").value.trim()) { $("#err2").textContent = "Please type which processor you have."; $("#cpu-other").focus(); return; }
   $("#err2").textContent = ""; show("#s3"); runTest();
 });
 
@@ -101,14 +103,15 @@ function band(down, up) {
 }
 function finish(sp) {
   const d = R.dev, cpu = $("#cpu").value, ram = $("#ram").value;
-  const cpuText = $("#cpu").selectedOptions[0].text, ramText = $("#ram").selectedOptions[0].text;
+  const cpuOther = cpu === "other" ? $("#cpu-other").value.trim().slice(0, 60) : "";
+  const cpuText = cpuOther || $("#cpu").selectedOptions[0].text, ramText = $("#ram").selectedOptions[0].text;
   const items = [
     { t: "Download speed", s: `Minimum ${MIN.down} Mbps`, v: `${sp.down} Mbps`, st: sp.down >= MIN.down ? "ok" : "bad" },
     { t: "Upload speed", s: `Minimum ${MIN.up} Mbps`, v: `${sp.up} Mbps`, st: sp.up >= MIN.up ? "ok" : "bad" },
     { t: "Latency", s: "Lower is better for calls", v: `${sp.ping} ms`, st: sp.ping <= 100 ? "ok" : sp.ping <= 200 ? "warn" : "bad", info: true },
     { t: "Operating system", s: "Windows 10 or 11", v: d.os, st: d.win11 === "yes" ? "ok" : d.win11 === "no" ? "bad" : "warn" },
     { t: "Not a Chromebook", s: "Chromebooks aren't supported", v: d.chromebook ? "Chromebook" : "OK", st: d.chromebook ? "bad" : "ok" },
-    { t: "Processor (you selected)", s: "Intel Core i5, 14th gen or newer", v: cpuText, st: ["i5-14", "i7-14", "ultra"].includes(cpu) ? "ok" : cpu === "older" ? "bad" : "warn" },
+    { t: "Processor (you selected)", s: "Intel Core i5 or better", v: cpuText, st: ["i5", "i7", "ultra"].includes(cpu) ? "ok" : cpu === "i3" ? "bad" : "warn" },
     { t: "Memory (you selected)", s: "16 GB or more", v: ramText, st: ["16", "32"].includes(ram) ? "ok" : ram === "8" ? "bad" : "warn" }
   ];
   const required = items.filter((i) => !i.info);
@@ -121,8 +124,9 @@ function finish(sp) {
   const slow = sp.down < MIN.down || sp.up < MIN.up;
   $("#advice").hidden = !slow;
   $("#advice").innerHTML = slow ? "<b>Tips to improve your speed:</b> connect with an Ethernet cable if possible, move closer to your Wi-Fi router, close other apps, videos or downloads, and run the test again." : "";
+  $("#fastnote").hidden = !(sp.down >= 150);
   show("#s4");
-  send({ ...sp, os: d.os, win11: d.win11, chromebook: d.chromebook, browser: d.browser, cores: d.cores, mem: d.mem, ua: d.ua, cpu, ram, band: b, result });
+  send({ ...sp, cpuOther, os: d.os, win11: d.win11, chromebook: d.chromebook, browser: d.browser, cores: d.cores, mem: d.mem, ua: d.ua, cpu, ram, band: b, result });
 }
 let db = null, fs = null;
 async function send(r) {
@@ -131,11 +135,11 @@ async function send(r) {
     if (!db) { const app = await import(FB + "firebase-app.js"); fs = await import(FB + "firebase-firestore.js"); db = fs.getFirestore(app.initializeApp(FIREBASE)); }
     const { collection, addDoc, serverTimestamp } = fs;
     await addDoc(collection(db, "techchecks"), {
-      v: 1, name: R.name.slice(0, 100), email: R.email.slice(0, 150), position: R.position.slice(0, 150),
+      v: 2, name: R.name.slice(0, 100), position: R.position.slice(0, 150),
       down: r.down, up: r.up, ping: r.ping, jitter: r.jitter, loc: String(r.loc).slice(0, 10), colo: String(r.colo).slice(0, 10),
       os: r.os.slice(0, 40), win11: r.win11, chromebook: r.chromebook, browser: r.browser.slice(0, 40),
       cores: Math.min(256, Math.max(0, Math.round(r.cores))), mem: Math.min(64, Math.max(0, Number(r.mem) || 0)),
-      cpu: r.cpu, ram: r.ram, band: r.band, result: r.result, ua: r.ua.slice(0, 380), createdAt: serverTimestamp()
+      cpu: r.cpu, cpuOther: r.cpuOther || "", ram: r.ram, band: r.band, result: r.result, ua: r.ua.slice(0, 380), createdAt: serverTimestamp()
     });
     $("#sent").textContent = "✓ Your results were sent to the HRA team.";
   } catch (e) {
