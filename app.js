@@ -1987,6 +1987,8 @@ function bind() {
     if (IN.pop && !t.closest(".cust-pop")) { IN.pop = null; const pop = $(".cust-pop"); if (pop) pop.hidden = true; $("[data-in-customize]")?.setAttribute("aria-expanded", "false"); }
     const ts = t.closest("[data-tsort]"); if (ts) { const k = ts.dataset.tsort; IN.tsort = { key: k, dir: IN.tsort.key === k ? -IN.tsort.dir : (k === "name" ? 1 : -1) }; IN.animate = false; renderInsights(); return; }
     if (t.closest("[data-action='signout']")) { state.store.signOut(); return; }
+    const hb = t.closest("[data-hub]"); if (hb) { setTool(hb.dataset.hub); return; }
+    if (t.closest("[data-rail-more]")) { setRailMore(!$("#rail-more")?.classList.contains("is-open")); return; }
     const tool = t.closest("[data-tool]"); if (tool) { setTool(tool.dataset.tool); return; }
     const ctTry = t.closest("[data-ct-try]"); if (ctTry) { CT.q = ctTry.dataset.ctTry; CT.cat = ""; $("#ct-q").value = CT.q; renderContactList(); $("#ct-q").focus(); return; }
     const ctP = t.closest("[data-ct-person]"); if (ctP) {
@@ -2283,6 +2285,15 @@ function bind() {
 const TOOL_KEY = "hra_tool";
 let currentTool = "requests";
 
+/* Expandable "More" group at the bottom of the sidebar (remembered) */
+function setRailMore(open, quiet) {
+  const box = $("#rail-more"), btn = $("[data-rail-more]"); if (!box || !btn) return;
+  box.classList.toggle("is-open", open); btn.setAttribute("aria-expanded", String(open)); btn.classList.toggle("is-open", open);
+  if (!quiet) { try { localStorage.setItem("hra_rail_more", open ? "1" : "0"); } catch {} }
+  setTimeout(moveRailGlow, 320);
+}
+(() => { let v = "0"; try { v = localStorage.getItem("hra_rail_more") || "0"; } catch {} setRailMore(v === "1", true); })();
+
 function moveRailGlow() {
   const active = $("#rail .rail-item.is-active"), glow = $("#rail .rail-glow");
   if (!active || !glow) return;
@@ -2360,6 +2371,7 @@ function applyAccess() {
       item.dataset.flag = state.isSuper && m !== (t.base || "all") ? MODE_LABEL[m] : "";
       if (item.dataset.flag) item.title = `${t.label}: ${MODE_LABEL[m]} (only you see it this way)`; else item.removeAttribute("title");
     }
+    if (t.id === "helper") { const am = $('#rail [data-tool="am"]'); if (am) am.hidden = !hubOpen().length; }
     if (t.id === "helper") { const h = $("#helper"); if (h) h.hidden = acc !== "on"; if (acc !== "on" && HP.open) toggleHelper(false); }
     const panel = $(`[data-tool-panel="${t.id}"]`);
     if (panel) {
@@ -2554,7 +2566,33 @@ async function saveProfile(btn) {
   }
 }
 
+/* Account Manager Dashboard: one sidebar item, three tools behind a switcher */
+const HUB = [
+  { id: "pipeline", label: "Client Pipeline", icon: '<path d="M4 5h16M4 12h16M4 19h10"/>' },
+  { id: "training", label: "Training", icon: '<path d="M3 9l9-5 9 5-9 5-9-5z"/><path d="M7 11.5V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.5"/>' },
+  { id: "techcheck", label: "Tech checks", icon: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4-6"/><circle cx="12" cy="18" r="1.3"/>' }
+];
+const HUB_KEY = "hra_hub_last";
+const hubOpen = () => HUB.filter((h) => toolAccess(h.id) !== "hidden");
+function renderHubNav(id) {
+  const nav = $("#hub-nav"); if (!nav) return;
+  const inHub = HUB.some((h) => h.id === id), list = hubOpen();
+  nav.hidden = !inHub || list.length < 2;
+  if (nav.hidden) return;
+  nav.innerHTML = `<span class="hub-title">Account Manager Dashboard</span><div class="hub-seg" role="tablist"><span class="hub-pill" aria-hidden="true"></span>${list.map((h) => `<button type="button" class="hub-btn${h.id === id ? " is-on" : ""}" role="tab" aria-selected="${h.id === id}" data-hub="${h.id}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${h.icon}</svg>${h.label}<span class="hub-badge" data-hub-badge="${h.id}" hidden></span></button>`).join("")}</div>`;
+  updateTrainingBadge();
+  requestAnimationFrame(() => moveHubPill(true));
+}
+function moveHubPill(instant) {
+  const on = $("#hub-nav .hub-btn.is-on"), pill = $("#hub-nav .hub-pill"); if (!on || !pill) return;
+  if (instant) pill.style.transition = "none";
+  pill.style.width = on.offsetWidth + "px"; pill.style.transform = `translateX(${on.offsetLeft - 4}px)`;
+  if (instant) { void pill.offsetWidth; pill.style.transition = ""; }
+}
+addEventListener("resize", () => moveHubPill(true));
+
 function setTool(id, silent) {
+  if (id === "am") { const last = (() => { try { return localStorage.getItem(HUB_KEY); } catch { return ""; } })(); const list = hubOpen(); id = (list.find((h) => h.id === last) || list[0] || { id: "requests" }).id; }
   if (!$(`[data-tool-panel="${id}"]`)) id = "requests";
   if ((id === "insights" || id === "org") && !state.isAdmin) id = "requests";
   if (id === "super" && !state.isSuper) id = "requests";
@@ -2562,7 +2600,11 @@ function setTool(id, silent) {
   const changed = id !== currentTool;
   currentTool = id;
   try { localStorage.setItem(TOOL_KEY, id); } catch {}
-  $$("#rail .rail-item").forEach((b) => { b.classList.toggle("is-active", b.dataset.tool === id); b.setAttribute("aria-current", b.dataset.tool === id ? "page" : "false"); });
+  const inHub = HUB.some((h) => h.id === id);
+  if (inHub) { try { localStorage.setItem(HUB_KEY, id); } catch {} }
+  $$("#rail .rail-item").forEach((b) => { const on = b.dataset.tool === id || (b.dataset.tool === "am" && inHub); b.classList.toggle("is-active", on); b.setAttribute("aria-current", on ? "page" : "false"); });
+  if ($("#rail-more .rail-item.is-active")) setRailMore(true, true);
+  renderHubNav(id);
   $$("[data-tool-panel]").forEach((m) => {
     const on = m.dataset.toolPanel === id;
     m.hidden = !on;
@@ -5263,11 +5305,10 @@ function onOpenQuestions(list) {
   if (currentTool === "training" && TRS.view === "home") renderTraining();
 }
 function updateTrainingBadge() {
-  const item = $('[data-tool="training"]'); if (!item) return;
-  const open = isTrainerMe() ? TRS.openQ.length : 0;
-  let b = $(".rail-badge", item);
-  if (!b) { b = document.createElement("span"); b.className = "rail-badge"; $(".rail-icon", item).appendChild(b); }
-  b.textContent = open > 9 ? "9+" : String(open); b.hidden = !open;
+  const open = isTrainerMe() ? TRS.openQ.length : 0, txt = open > 9 ? "9+" : String(open);
+  const item = $('#rail [data-tool="am"]');
+  if (item) { let b = $(".rail-badge", item); if (!b) { b = document.createElement("span"); b.className = "rail-badge"; $(".rail-icon", item).appendChild(b); } b.textContent = txt; b.hidden = !open; }
+  const hb = $('[data-hub-badge="training"]'); if (hb) { hb.textContent = txt; hb.hidden = !open; }
 }
 function saveStep(c, patch) {
   const uid = state.user.uid, now = new Date().toISOString();

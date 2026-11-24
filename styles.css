@@ -3340,6 +3340,38 @@ body.in-course .tp-nav { margin-right: 86px; }
 .tc-empty { padding: 48px 20px; text-align: center; border-radius: 20px; background: #fff; border: 1px solid var(--line); }
 .tc-empty h2 { margin: 0 0 4px; font-family: var(--display); } .tc-empty p { margin: 0; color: var(--muted); }
 
+/* Account Manager Dashboard: tool switcher */
+.hub-nav { max-width: 1120px; margin: 0 auto; padding: 28px 24px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; animation: hubIn .35s var(--ease-out) both; }
+.workspace:has(.tool-pipeline:not([hidden])) .hub-nav { max-width: none; }
+@keyframes hubIn { from { opacity: 0; transform: translateY(-6px); } }
+.hub-title { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.hub-seg { position: relative; display: inline-flex; gap: 2px; padding: 4px; border-radius: 16px; background: rgba(255,255,255,.75); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0,30,70,.05), 0 14px 30px -24px rgba(0,40,100,.45); backdrop-filter: blur(8px); }
+.hub-pill { position: absolute; top: 4px; bottom: 4px; left: 4px; border-radius: 12px; background: linear-gradient(135deg, var(--navy), #2D6BFF); box-shadow: 0 8px 18px -8px rgba(0,55,127,.7); transition: transform .32s var(--ease-spring), width .32s var(--ease-spring); }
+.hub-btn { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border: 0; border-radius: 12px; background: none; font: inherit; font-size: 13.5px; font-weight: 650; color: var(--muted); white-space: nowrap; transition: color .2s; }
+.hub-btn:hover { color: var(--navy); }
+.hub-btn.is-on { color: #fff; }
+.hub-btn svg { transition: transform .3s var(--ease-spring); }
+.hub-btn.is-on svg { transform: scale(1.08); }
+.hub-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #E5484D; color: #fff; font-size: 10.5px; font-weight: 800; display: inline-grid; place-items: center; }
+.hub-nav:not([hidden]) ~ .main { padding-top: 22px; }
+@media (max-width: 760px) { .hub-nav { padding: 16px 14px 0; } .hub-title { display: none; } .hub-seg { width: 100%; } .hub-btn { flex: 1; justify-content: center; padding: 0 8px; font-size: 12.5px; } }
+
+/* Sidebar: expandable "More" group */
+.rail-more-btn { position: relative; z-index: 1; display: flex; align-items: center; gap: 13px; width: 100%; padding: 8px 12px 8px 10px; border: 0; border-radius: 14px; background: none; text-align: left; font: inherit; color: rgba(255,255,255,.55); cursor: pointer; transition: color .18s, background .18s; }
+.rail-more-btn:hover, .rail-more-btn.is-open { color: #fff; background: rgba(255,255,255,.06); }
+.rail-more-btn .rail-label { font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.rail-more-ico { width: 34px; height: 34px; display: grid; place-items: center; }
+.rail-more-chev { margin-left: auto; opacity: .7; transform: rotate(180deg); transition: transform .3s var(--ease-spring); }
+.rail-more-btn.is-open .rail-more-chev { transform: rotate(0deg); }
+.rail-more { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .32s var(--ease-out), opacity .22s; }
+.rail-more.is-open { grid-template-rows: 1fr; opacity: 1; }
+.rail-more-in { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+.rail-more .rail-item { transform: translateY(-6px); opacity: 0; transition: transform .3s var(--ease-out), opacity .25s, color .18s; }
+.rail-more.is-open .rail-item { transform: none; opacity: 1; }
+.rail-more.is-open .rail-item:nth-child(2) { transition-delay: .03s; } .rail-more.is-open .rail-item:nth-child(3) { transition-delay: .06s; } .rail-more.is-open .rail-item:nth-child(4) { transition-delay: .09s; }
+html.rail-collapsed .rail-more-btn { justify-content: center; padding-left: 0; padding-right: 0; }
+html.rail-collapsed .rail-more-btn .rail-text, html.rail-collapsed .rail-more-chev { display: none; }
+
 /* Rail: collapsed on medium screens, bottom dock on phones */
 @media (max-width: 1180px) and (min-width: 761px) {
   :root { --rail-w: 86px; }
