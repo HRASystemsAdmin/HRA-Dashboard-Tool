@@ -6296,7 +6296,7 @@ function renderTech() {
   const sp = (v, min) => `<span class="tc-sp${v < min ? " is-low" : ""}"${v >= 100 ? ` title="Measured ${esc(String(v))} Mbps (single-connection browser test)"` : ""}>${v >= 100 ? "100+" : esc(String(v))}</span>`;
   root.innerHTML = `
     <div class="hero tc-hero"><div><h1 class="hero-title">Tech checks</h1><p class="hero-sub">Candidates' internet speed and computer, against HRA's minimum requirements.</p></div>
-      <div class="tc-actions">${state.isAdmin ? `<button type="button" class="btn btn-ghost" data-tc-clean title="Delete specification screenshots older than 90 days to keep storage small">Clear old screenshots</button>` : ""}<button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button></div></div>
+      <div class="tc-actions"><button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button>${state.isAdmin ? `<button type="button" class="tc-clean" data-tc-clean title="Clear old screenshots" aria-label="Clear old specification screenshots"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="11" height="9" rx="2"/><circle cx="6.3" cy="7.4" r="1.1"/><path d="M13.5 11l-3-3-5 5"/><path d="M14 14.5h7.5M16 14.5v-1.3a1 1 0 0 1 1-1h1.5a1 1 0 0 1 1 1v1.3M15.2 14.5l.6 6.2a1 1 0 0 0 1 .8h2.4a1 1 0 0 0 1-.8l.6-6.2"/></svg></button>` : ""}</div></div>
     <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 11</span><span><b>CPU</b> Intel Core i5 or better</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
     <div class="tc-bar">
       <div class="tc-tabs">${[["", "All", TC.list.length], ["pass", "Meets", cnt("pass")], ["review", "Review", cnt("review")], ["fail", "Doesn't meet", cnt("fail")]].map(([k, l, n]) => `<button type="button" class="tc-tab${TC.filter === k ? " is-on" : ""}" data-tc-filter="${k}">${l}<b>${n}</b></button>`).join("")}</div>
@@ -6323,9 +6323,13 @@ document.addEventListener("click", async (e) => {
   const sh = t.closest("[data-tc-shot]"); if (sh) { openShot(sh.dataset.tcShot, sh.dataset.tcName); return; }
   const cl = t.closest("[data-tc-clean]"); if (cl && state.isAdmin) {
     cl.disabled = true;
-    try { const ids = await state.store.oldShots(90); if (!ids.length) { toast("No screenshots older than 90 days", "var(--s-done)"); return; }
-      if (!confirm(`Delete ${ids.length} screenshot${ids.length === 1 ? "" : "s"} older than 90 days? The test results stay.`)) return;
+    try { const ids = await state.store.oldShots(90); if (!ids.length) { toast("There are no screenshots older than 90 days", "var(--s-done)"); return; }
+      const ok = await confirmDialog({ title: "Delete old screenshots?", confirm: `Delete ${ids.length} screenshot${ids.length === 1 ? "" : "s"}`,
+        body: `${ids.length} system specification screenshot${ids.length === 1 ? "" : "s"} older than 90 days will be permanently deleted. Candidates' test results will be kept. This can't be undone.` });
+      if (!ok) return;
+      $("#confirm-ok")?.classList.add("is-loading");
       for (const id of ids) await state.store.deleteShot(id).catch(() => {});
+      closeOverlay($("#confirm"));
       toast(`${ids.length} old screenshot${ids.length === 1 ? "" : "s"} deleted`, "var(--s-done)"); }
     catch (e) { console.error(e); toast("Couldn't clear screenshots. Publish the latest firestore.rules.", "#E2632B"); }
     finally { cl.disabled = false; }
