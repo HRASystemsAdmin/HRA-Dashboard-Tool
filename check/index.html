@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Technical Requirements Check · Hunter Recruitment Advisors</title>
+  <!-- Public candidate page. Self-contained: it does not load the HRA Dashboard's code, settings or sign-in. -->
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://www.gstatic.com; connect-src https://speed.cloudflare.com https://firestore.googleapis.com https://*.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; base-uri 'none'; form-action 'none'" />
+  <link rel="icon" href="../assets/favicon-64.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root { --navy: #00377F; --navy2: #2D6BFF; --orange: #F26A26; --ink: #0B1B33; --muted: #62789A; --line: #E3EAF3; --ok: #0E9F7E; --warn: #E0A800; --bad: #E5484D; --ease: cubic-bezier(.22,1,.36,1); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif; color: var(--ink); background: radial-gradient(1200px 600px at 85% -10%, #DDE8FF 0%, transparent 60%), radial-gradient(900px 500px at -10% 110%, #FFE7DA 0%, transparent 55%), #F5F8FC; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 60px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+    header img { height: 44px; width: auto; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 24px; padding: 28px; box-shadow: 0 1px 2px rgba(0,30,70,.04), 0 30px 60px -40px rgba(0,40,100,.45); animation: in .45s var(--ease) both; }
+    @keyframes in { from { opacity: 0; transform: translateY(10px); } }
+    h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: -.02em; }
+    h2 { margin: 0 0 4px; font-size: 19px; letter-spacing: -.01em; }
+    p.sub { margin: 0 0 20px; color: var(--muted); line-height: 1.5; }
+    .reqs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 22px; }
+    .req { padding: 12px 14px; border-radius: 14px; background: #F6F9FE; border: 1px solid #E5EDF8; font-size: 13.5px; }
+    .req b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 2px; }
+    .req.no { background: #FFF5F2; border-color: #FBD9CB; }
+    label.f { display: grid; gap: 6px; margin-bottom: 14px; font-size: 13px; font-weight: 600; }
+    input[type=text], input[type=email], select { height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid #CFDAE8; font: inherit; font-size: 15px; background: #fff; color: var(--ink); outline: none; transition: border-color .15s, box-shadow .15s; }
+    input:focus, select:focus { border-color: var(--navy); box-shadow: 0 0 0 4px rgba(0,55,127,.1); }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .consent { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); line-height: 1.45; margin: 6px 0 20px; }
+    .consent input { margin-top: 2px; width: 17px; height: 17px; accent-color: var(--navy); flex: none; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 50px; padding: 0 24px; border: 0; border-radius: 14px; font: inherit; font-size: 15.5px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--navy), var(--navy2)); box-shadow: 0 14px 30px -14px rgba(0,55,127,.7); cursor: pointer; transition: transform .2s var(--ease), box-shadow .2s, opacity .2s; }
+    .btn:hover { transform: translateY(-1px); } .btn:active { transform: scale(.98); } .btn:disabled { opacity: .5; pointer-events: none; }
+    .btn.ghost { background: #fff; color: var(--navy); border: 1px solid #CFDAE8; box-shadow: none; }
+    .btn.wide { width: 100%; }
+    .err { color: var(--bad); font-size: 13px; margin: -6px 0 12px; min-height: 1em; }
+    .tip { font-size: 12.5px; color: var(--muted); margin-top: -4px; margin-bottom: 14px; }
+    .tip b { color: var(--ink); }
+    .dev { display: grid; gap: 8px; margin-bottom: 18px; }
+    .dev div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: 12px; background: #F6F9FE; font-size: 14px; }
+    .dev span { color: var(--muted); }
+    .pill { font-weight: 700; }
+    .pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); } .pill.warn { color: #8A6400; }
+    /* gauge */
+    .gauge { position: relative; width: 240px; height: 240px; margin: 8px auto 18px; }
+    .gauge svg { width: 100%; height: 100%; transform: rotate(135deg); }
+    .gauge .track { fill: none; stroke: #E8EEF6; stroke-width: 14; stroke-linecap: round; }
+    .gauge .val { fill: none; stroke: url(#g); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
+    .gauge .mid { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+    .gauge .num { font-size: 46px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+    .gauge .unit { font-size: 13px; color: var(--muted); font-weight: 600; }
+    .phase { text-align: center; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+    .live { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .live div { text-align: center; padding: 12px; border-radius: 14px; background: #F6F9FE; }
+    .live b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+    .live span { font-size: 12px; color: var(--muted); font-weight: 600; }
+    /* result */
+    .verdict { display: flex; align-items: center; gap: 14px; padding: 18px; border-radius: 18px; margin-bottom: 18px; }
+    .verdict .ic { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 26px; font-weight: 800; flex: none; }
+    .verdict.pass { background: #E6F7F1; } .verdict.pass .ic { background: var(--ok); }
+    .verdict.review { background: #FFF6D6; } .verdict.review .ic { background: var(--warn); }
+    .verdict.fail { background: #FDECEC; } .verdict.fail .ic { background: var(--bad); }
+    .verdict h2 { margin: 0; } .verdict p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+    .band { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; background: #fff; }
+    .checks { display: grid; gap: 8px; margin-bottom: 18px; }
+    .chk { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); }
+    .chk .d { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 14px; font-weight: 800; flex: none; }
+    .chk.ok .d { background: var(--ok); } .chk.bad .d { background: var(--bad); } .chk.warn .d { background: var(--warn); }
+    .chk .t { flex: 1; } .chk .t b { display: block; font-size: 14px; } .chk .t span { font-size: 12.5px; color: var(--muted); }
+    .chk .v { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .note { font-size: 13px; color: var(--muted); line-height: 1.5; padding: 12px 14px; border-radius: 12px; background: #F6F9FE; margin-bottom: 16px; }
+    .sent { font-size: 13.5px; font-weight: 600; color: var(--ok); margin-bottom: 14px; }
+    .sent.bad { color: var(--bad); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    footer { text-align: center; font-size: 12px; color: var(--muted); margin-top: 18px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 560px) { .reqs, .row2 { grid-template-columns: 1fr; } .card { padding: 20px; } h1 { font-size: 24px; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header><img src="../assets/logo.png" alt="Hunter Recruitment Advisors" /></header>
+
+    <!-- Step 1: who you are -->
+    <section class="card" id="s1">
+      <h1>Technical requirements check</h1>
+      <p class="sub">Our team works remotely on video and phone calls all day. This 1-minute check confirms your computer and internet meet our requirements. Nothing to install.</p>
+      <div class="reqs">
+        <div class="req"><b>Internet</b>10 Mbps download and 10 Mbps upload or faster</div>
+        <div class="req"><b>Operating system</b>Windows 11</div>
+        <div class="req"><b>Processor</b>Intel Core i5, 14th gen or newer</div>
+        <div class="req"><b>Memory (RAM)</b>16 GB or more</div>
+        <div class="req no" style="grid-column:1/-1"><b>Not supported</b>Chromebooks can't be used on our systems.</div>
+      </div>
+      <form id="who" novalidate>
+        <div class="row2">
+          <label class="f">Full name<input type="text" id="name" maxlength="100" autocomplete="name" required /></label>
+          <label class="f">Email<input type="email" id="email" maxlength="150" autocomplete="email" required /></label>
+        </div>
+        <label class="f">Position or recruiter (optional)<input type="text" id="position" maxlength="150" placeholder="e.g. Recruiter role, or your recruiter's name" /></label>
+        <p class="tip">Please run this on the <b>same computer and internet connection</b> you'll use for work.</p>
+        <label class="consent"><input type="checkbox" id="consent" required /> I agree to share my results, name, email and basic device information with Hunter Recruitment Advisors to review my application.</label>
+        <p class="err" id="err1"></p>
+        <button class="btn wide" type="submit">Continue</button>
+      </form>
+    </section>
+
+    <!-- Step 2: computer -->
+    <section class="card" id="s2" hidden>
+      <h2>Your computer</h2>
+      <p class="sub">We detected what we can. Please confirm the processor and memory (browsers can't read these).</p>
+      <div class="dev" id="dev"></div>
+      <div class="row2">
+        <label class="f">Processor
+          <select id="cpu"><option value="">Choose…</option>
+            <option value="i5-14">Intel Core i5 (14th gen or newer)</option>
+            <option value="i7-14">Intel Core i7 / i9 (14th gen or newer)</option>
+            <option value="ultra">Intel Core Ultra</option>
+            <option value="older">Intel Core, 13th gen or older</option>
+            <option value="amd">AMD Ryzen</option>
+            <option value="other">Other</option>
+            <option value="unsure">Not sure</option>
+          </select></label>
+        <label class="f">Memory (RAM)
+          <select id="ram"><option value="">Choose…</option>
+            <option value="8">8 GB or less</option>
+            <option value="16">16 GB</option>
+            <option value="32">32 GB or more</option>
+            <option value="unsure">Not sure</option>
+          </select></label>
+      </div>
+      <p class="tip">Where to find them on Windows: <b>Settings → System → About</b> shows “Processor” and “Installed RAM”.</p>
+      <p class="err" id="err2"></p>
+      <button class="btn wide" id="go">Start speed test</button>
+    </section>
+
+    <!-- Step 3: speed test -->
+    <section class="card" id="s3" hidden>
+      <p class="phase" id="phase">Connecting…</p>
+      <div class="gauge">
+        <svg viewBox="0 0 200 200" aria-hidden="true"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#00377F"/><stop offset="1" stop-color="#2D6BFF"/></linearGradient></defs>
+          <circle class="track" cx="100" cy="100" r="80" stroke-dasharray="377 503"/>
+          <circle class="val" id="arc" cx="100" cy="100" r="80" stroke-dasharray="377 503" stroke-dashoffset="377"/></svg>
+        <div class="mid"><div class="num" id="num">0</div><div class="unit">Mbps</div></div>
+      </div>
+      <div class="live"><div><b id="lp">–</b><span>Latency (ms)</span></div><div><b id="ld">–</b><span>Download</span></div><div><b id="lu">–</b><span>Upload</span></div></div>
+    </section>
+
+    <!-- Step 4: results -->
+    <section class="card" id="s4" hidden>
+      <div class="verdict" id="verdict"></div>
+      <div class="checks" id="checks"></div>
+      <div class="note" id="advice" hidden></div>
+      <p class="sent" id="sent">Sending your results…</p>
+      <div class="actions"><button class="btn ghost" id="again">Run the test again</button></div>
+    </section>
+
+    <footer>Hunter Recruitment Advisors · This page only checks your computer and connection.</footer>
+  </div>
+  <script type="module" src="check.js"></script>
+</body>
+</html>

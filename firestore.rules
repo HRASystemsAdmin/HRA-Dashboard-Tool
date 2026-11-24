@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// RULES VERSION: 2026-11-26 (Training, clean-up tools, profiles, super admin, org chart, start dates, team notes)
+// RULES VERSION: 2026-11-27 (Training, profiles, super admin, org chart, start dates, team notes, candidate tech checks)
 // Paste this into Firebase console → Firestore Database → Rules → Publish.
 // These rules are the real lock on the data. Keep the two lists below in
 // sync with config.js (lowercase emails).
@@ -133,6 +133,34 @@ service cloud.firestore {
     match /org/{docId} {
       allow read: if isAdmin();
       allow write: if isSuperAdmin();
+    }
+
+    // Candidate tech checks (public page /check/). Anyone may ADD one result in this exact shape;
+    // nobody outside the team can read, change or delete anything. Staff read; admins delete.
+    function str(d, k, max) { return d[k] is string && d[k].size() <= max; }
+    function num(d, k, lo, hi) { return d[k] is number && d[k] >= lo && d[k] <= hi; }
+    function validTechCheck(d) {
+      return d.keys().hasOnly(['v','name','email','position','down','up','ping','jitter','loc','colo','os','win11','chromebook','browser','cores','mem','cpu','ram','band','result','ua','createdAt'])
+        && d.keys().hasAll(['v','name','email','position','down','up','ping','jitter','loc','colo','os','win11','chromebook','browser','cores','mem','cpu','ram','band','result','ua','createdAt'])
+        && d.v == 1
+        && str(d, 'name', 100) && d.name.size() > 0
+        && str(d, 'email', 150) && d.email.matches('[^@ ]+@[^@ ]+[.][^@ ]+')
+        && str(d, 'position', 150)
+        && num(d, 'down', 0, 100000) && num(d, 'up', 0, 100000) && num(d, 'ping', 0, 60000) && num(d, 'jitter', 0, 60000)
+        && str(d, 'loc', 10) && str(d, 'colo', 10) && str(d, 'os', 40) && str(d, 'browser', 40) && str(d, 'ua', 400)
+        && d.win11 in ['yes', 'no', 'unknown'] && d.chromebook is bool
+        && d.cores is int && d.cores >= 0 && d.cores <= 256 && num(d, 'mem', 0, 64)
+        && d.cpu in ['i5-14', 'i7-14', 'ultra', 'older', 'amd', 'other', 'unsure']
+        && d.ram in ['8', '16', '32', 'unsure']
+        && d.band in ['Excellent', 'Good', 'Meets minimum', 'Below minimum']
+        && d.result in ['pass', 'review', 'fail']
+        && d.createdAt == request.time;
+    }
+    match /techchecks/{checkId} {
+      allow create: if validTechCheck(request.resource.data);
+      allow read: if isMember();
+      allow delete: if isAdmin();
+      allow update: if false;
     }
 
     // Dashboard settings (which tools are on). Everyone reads them; only super admins change them.

@@ -148,6 +148,21 @@ function createDemoStore() {
       save(load().map((t) => t.id === id ? { ...t, emailStatus } : t));
     },
     async getPrefs(uid) { try { return JSON.parse(localStorage.getItem("hra_prefs_" + uid)) || {}; } catch { return {}; } },
+    // Candidate tech checks (demo)
+    watchTech(cb) {
+      if (!localStorage.getItem("hra_demo_tech")) {
+        const mk = (n, e, p, down, up, ping, os, w, cb2, cpu, ram, res, band, days, loc) => ({ id: "t" + Math.random().toString(36).slice(2, 8), v: 1, name: n, email: e, position: p, down, up, ping, jitter: 4, loc, colo: "", os, win11: w, chromebook: cb2, browser: "Chrome", cores: 8, mem: 8, cpu, ram, band, result: res, ua: "", createdAt: new Date(Date.now() - days * 86400e3).toISOString() });
+        localStorage.setItem("hra_demo_tech", JSON.stringify([
+          mk("Maria Fernanda Ruiz", "mf.ruiz@gmail.com", "Recruiter", 92.4, 41.2, 18, "Windows 11", "yes", false, "i5-14", "16", "pass", "Excellent", 0.2, "MX"),
+          mk("Kevin Otieno", "kotieno@outlook.com", "Sourcer · Holly", 18.7, 6.3, 64, "Windows 11", "yes", false, "i7-14", "16", "fail", "Below minimum", 1, "KE"),
+          mk("Ana Lucía Torres", "analucia.t@gmail.com", "Recruiter", 35.1, 17.9, 33, "Windows 10 or 11", "unknown", false, "unsure", "16", "review", "Good", 2, "CO"),
+          mk("Joseph Mensah", "jmensah@yahoo.com", "Admin assistant", 54.0, 22.5, 41, "ChromeOS (Chromebook)", "no", true, "other", "8", "fail", "Excellent", 4, "GH")
+        ]));
+      }
+      const fn = (e) => { if (!e || e.key === "hra_demo_tech") cb(JSON.parse(localStorage.getItem("hra_demo_tech") || "[]")); };
+      addEventListener("storage", fn); setTimeout(() => fn(), 0); return () => removeEventListener("storage", fn);
+    },
+    async deleteTech(id) { const a = JSON.parse(localStorage.getItem("hra_demo_tech") || "[]").filter((x) => x.id !== id); localStorage.setItem("hra_demo_tech", JSON.stringify(a)); dispatchEvent(new StorageEvent("storage", { key: "hra_demo_tech" })); },
     // Open jobs report (demo)
     async getJobsReport() {
       const jobs = (PL.clients || []).flatMap((c, ci) => [...new Set((c.candidates || []).map((r) => r.role))].slice(0, 3).map((t, i) => {
@@ -384,6 +399,8 @@ async function createFirebaseStore() {
     replyNote(id, reply, patch) { return fsMod.updateDoc(fsMod.doc(db, "training_notes", id), { ...patch, replies: fsMod.arrayUnion(reply) }); },
     addTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayUnion(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
     removeTeamNote(clientId, candId, note) { return fsMod.setDoc(fsMod.doc(db, "pipeline_edits", clientId), { notes: { [candId]: fsMod.arrayRemove(note) }, updatedAt: new Date().toISOString() }, { merge: true }); },
+    watchTech(cb) { return fsMod.onSnapshot(fsMod.query(fsMod.collection(db, "techchecks"), fsMod.orderBy("createdAt", "desc"), fsMod.limit(300)), (q) => cb(q.docs.map((d) => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.toDate?.()?.toISOString() || "" }))), (e) => { console.warn("Tech checks unavailable", e); cb([], e); }); },
+    deleteTech(id) { return fsMod.deleteDoc(fsMod.doc(db, "techchecks", id)); },
     async getJobsReport() { const d = await fsMod.getDoc(fsMod.doc(db, "workable_meta", "jobs")); return d.exists() ? d.data() : null; },
     async getEdits(clientId) { const d = await fsMod.getDoc(fsMod.doc(db, "pipeline_edits", clientId)); return d.exists() ? d.data() : {}; },
     watchEdits(clientId, cb) { return fsMod.onSnapshot(fsMod.doc(db, "pipeline_edits", clientId), (d) => cb(d.exists() ? d.data() : {}), (e) => { console.warn("Start dates unavailable", e); cb({}); }); },
@@ -2310,6 +2327,7 @@ const TOOLS = [
   { id: "org", label: "Org chart", desc: "Who reports to whom (admins only)", modes: ["admins", "off", "maint"], base: "admins" },
   { id: "training", label: "Training", desc: "Courses and team progress", modes: ["all", "admins", "off", "maint"] },
   { id: "contacts", label: "Who to contact", desc: "The contact directory", modes: ["all", "admins", "off", "maint"] },
+  { id: "techcheck", label: "Tech checks", desc: "Candidate internet & computer results", modes: ["all", "admins", "off", "maint"] },
   { id: "sharepoint", label: "SharePoint link", desc: "Link to the team site", modes: ["all", "admins", "off"] },
   { id: "helper", label: "HRA Helper", desc: "The chat bubble", modes: ["all", "admins", "off"] }
 ];
@@ -2367,6 +2385,7 @@ const SUPER_ICONS = {
   requests: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/>',
   pipeline: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M9 9.5V20"/>',
   insights: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+ techcheck: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4-6"/><circle cx="12" cy="18" r="1.3"/>',
   org: '<rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="3" y="16" width="6" height="5" rx="1.5"/><rect x="15" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M6 16v-2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/>',
   training: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/>',
   contacts: '<path d="M6 4h11a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2z"/><circle cx="12.5" cy="9" r="2"/><path d="M9.5 13.5a3 3 0 0 1 6 0"/>',
@@ -2552,6 +2571,8 @@ function setTool(id, silent) {
   $(".topbar").classList.toggle("is-tool-pipeline", id !== "requests");
   moveRailGlow();
   if (id !== "pipeline" && PL.unsub) pausePipeline();
+  if (id !== "techcheck" && TC.unsub) { TC.unsub(); TC.unsub = null; }   // results stream only while the page is open
+  if (id === "techcheck") startTech();
   if (id === "pipeline") startPipeline();
   if (id === "insights") { IN.animate = true; startInsights(); }
   if (id === "training") { renderTraining(); } else { document.body.classList.remove("in-course"); stopTeamWatch(); }
@@ -6201,3 +6222,51 @@ async function downloadOpenJobs(btn) {
   finally { btn?.classList.remove("is-loading"); if (btn) btn.disabled = false; }
 }
 document.addEventListener("click", (e) => { const b = e.target instanceof Element && e.target.closest("[data-ojr]"); if (b) downloadOpenJobs(b); });
+
+/* ==========================================================================
+   Candidate tech checks: results from the public /check/ page
+   ========================================================================== */
+const TC = { list: [], unsub: null, q: "", filter: "", error: "" };
+const TC_CPU = { "i5-14": "Core i5 14th gen+", "i7-14": "Core i7/i9 14th gen+", ultra: "Core Ultra", older: "Intel 13th gen or older", amd: "AMD Ryzen", other: "Other", unsure: "Not sure" };
+const TC_RAM = { "8": "8 GB or less", "16": "16 GB", "32": "32 GB+", unsure: "Not sure" };
+const TC_RES = { pass: ["Meets requirements", "ok"], review: ["Needs review", "warn"], fail: ["Doesn't meet", "bad"] };
+const tcLink = () => new URL("check/", location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, "")).href;
+const flag = (cc) => /^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0))) : "";
+function startTech() {
+  if (!TC.unsub) TC.unsub = state.store.watchTech((list, err) => { TC.list = list || []; TC.error = err ? (err.code || "error") : ""; if (currentTool === "techcheck") renderTech(); });
+  renderTech();
+}
+function renderTech() {
+  const root = $("#tc-root"); if (!root) return;
+  const q = lower(TC.q.trim());
+  const rows = TC.list.filter((r) => (!TC.filter || r.result === TC.filter) && (!q || lower([r.name, r.email, r.position].join(" ")).includes(q)));
+  const cnt = (k) => TC.list.filter((r) => r.result === k).length;
+  const sp = (v, min) => `<span class="tc-sp${v < min ? " is-low" : ""}">${esc(String(v))}</span>`;
+  root.innerHTML = `
+    <div class="hero tc-hero"><div><h1 class="hero-title">Tech checks</h1><p class="hero-sub">Candidates' internet speed and computer, against HRA's minimum requirements.</p></div>
+      <div class="tc-actions"><button type="button" class="btn btn-ghost" data-tc-open>Open test page</button><button type="button" class="btn btn-primary" data-tc-copy>${svgI('<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 16)}Copy candidate link</button></div></div>
+    <div class="tc-reqs"><span><b>Internet</b> 10 Mbps down · 10 Mbps up</span><span><b>OS</b> Windows 11</span><span><b>CPU</b> Intel Core i5 14th gen+</span><span><b>RAM</b> 16 GB+</span><span class="no"><b>No</b> Chromebooks</span></div>
+    <div class="tc-bar">
+      <div class="tc-tabs">${[["", "All", TC.list.length], ["pass", "Meets", cnt("pass")], ["review", "Review", cnt("review")], ["fail", "Doesn't meet", cnt("fail")]].map(([k, l, n]) => `<button type="button" class="tc-tab${TC.filter === k ? " is-on" : ""}" data-tc-filter="${k}">${l}<b>${n}</b></button>`).join("")}</div>
+      <label class="search tc-search">${svgI('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', 15)}<input id="tc-q" type="search" placeholder="Find a candidate" value="${esc(TC.q)}" autocomplete="off"/></label>
+    </div>
+    ${TC.error ? `<p class="form-error">Couldn't load results (${esc(TC.error)}). Make sure the latest firestore.rules is published.</p>` : ""}
+    ${rows.length ? `<div class="tc-table-wrap"><table class="tc-table"><thead><tr><th>Candidate</th><th>Result</th><th>Down</th><th>Up</th><th>Ping</th><th>Computer</th><th>Tested</th>${state.isAdmin ? "<th></th>" : ""}</tr></thead><tbody>
+      ${rows.map((r, i) => { const [rl, rc] = TC_RES[r.result] || ["—", ""]; return `<tr style="--i:${Math.min(i, 14)}">
+        <td><strong>${esc(r.name)}</strong><small>${esc(r.email)}${r.position ? ` · ${esc(r.position)}` : ""}</small></td>
+        <td><span class="tc-res is-${rc}">${esc(rl)}</span><small>${esc(r.band || "")}</small></td>
+        <td>${sp(r.down, 10)}<small>Mbps</small></td><td>${sp(r.up, 10)}<small>Mbps</small></td><td>${esc(String(r.ping))}<small>ms</small></td>
+        <td><span class="tc-dev${r.chromebook || r.win11 === "no" ? " is-low" : ""}">${esc(r.os || "")}</span><small>${esc(TC_CPU[r.cpu] || r.cpu)} · ${esc(TC_RAM[r.ram] || r.ram)} <em>(self-reported)</em></small></td>
+        <td>${esc(r.createdAt ? ago(r.createdAt) : "")}<small>${flag(r.loc)} ${esc(r.loc || "")}</small></td>
+        ${state.isAdmin ? `<td><button type="button" class="icon-btn tc-del" data-tc-del="${esc(r.id)}" title="Delete" aria-label="Delete result">${svgI('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', 15)}</button></td>` : ""}
+      </tr>`; }).join("")}</tbody></table></div>`
+    : `<div class="tc-empty"><h2>${TC.list.length ? "No matches" : "No results yet"}</h2><p>${TC.list.length ? "Try another search or filter." : "Send candidates the link. Their results appear here as soon as they finish the test."}</p></div>`}`;
+}
+document.addEventListener("click", async (e) => {
+  const t = e.target; if (!(t instanceof Element) || !t.closest("#tc-root")) return;
+  if (t.closest("[data-tc-copy]")) { try { await navigator.clipboard.writeText(tcLink()); toast("Candidate link copied", "var(--s-done)"); } catch { prompt("Copy this link:", tcLink()); } return; }
+  if (t.closest("[data-tc-open]")) { window.open(tcLink(), "_blank", "noopener"); return; }
+  const f = t.closest("[data-tc-filter]"); if (f) { TC.filter = f.dataset.tcFilter; renderTech(); return; }
+  const d = t.closest("[data-tc-del]"); if (d && state.isAdmin) { if (!confirm("Delete this result?")) return; try { await state.store.deleteTech(d.dataset.tcDel); toast("Result deleted", "var(--s-done)"); } catch { toast("Couldn't delete.", "#E2632B"); } }
+});
+document.addEventListener("input", (e) => { if (e.target.id !== "tc-q") return; TC.q = e.target.value; const pos = e.target.selectionStart; renderTech(); const q = $("#tc-q"); q?.focus(); q?.setSelectionRange(pos, pos); });
