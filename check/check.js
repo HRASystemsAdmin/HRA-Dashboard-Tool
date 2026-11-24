@@ -152,10 +152,10 @@ function finish(sp) {
   const required = items.filter((i) => !i.info);
   const result = required.some((i) => i.st === "bad") ? "fail" : required.some((i) => i.st === "warn") ? "review" : "pass";
   const b = band(sp.down, sp.up);
-  const V = { pass: ["✓", "You meet our requirements", "Your results have been shared with the HRA team."], review: ["!", "Almost there: a few items need a quick review", "Our team will review the items marked in yellow with you."], fail: ["✕", "Some requirements aren't met yet", "See the items in red below. You can fix them and run the test again."] }[result];
+  const V = { pass: ["✓", "You meet our requirements", "Your results have been shared with the HRA team."], review: ["!", "Almost there: a few items need a quick review", "Our team will review the items marked in yellow with you."], fail: ["!", "A few items may need an upgrade", "This doesn't disqualify you. Our team will review your results and let you know if anything needs to be upgraded before you start."] }[result];
   $("#verdict").className = `verdict ${result}`;
   $("#verdict").innerHTML = `<div class="ic">${V[0]}</div><div><h2>${V[1]}</h2><p>${V[2]}</p><span class="band">Internet: ${b}</span></div>`;
-  $("#checks").innerHTML = items.map((i) => `<div class="chk ${i.st}"><span class="d">${i.st === "ok" ? "✓" : i.st === "bad" ? "✕" : "!"}</span><div class="t"><b>${esc(i.t)}</b><span>${esc(i.s)}</span></div><span class="v">${esc(i.v)}</span></div>`).join("");
+  $("#checks").innerHTML = items.map((i) => `<div class="chk ${i.st}"><span class="d">${i.st === "ok" ? "✓" : "!"}</span><div class="t"><b>${esc(i.t)}</b><span>${esc(i.s)}</span></div><span class="v">${esc(i.v)}</span></div>`).join("");
   const slow = sp.down < MIN.down || sp.up < MIN.up;
   $("#advice").hidden = !slow;
   $("#advice").innerHTML = slow ? "<b>Tips to improve your speed:</b> connect with an Ethernet cable if possible, move closer to your Wi-Fi router, close other apps, videos or downloads, and run the test again." : "";

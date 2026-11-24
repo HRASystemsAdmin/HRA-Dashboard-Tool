@@ -45,7 +45,7 @@
     .dev div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: 12px; background: #F6F9FE; font-size: 14px; }
     .dev span { color: var(--muted); }
     .pill { font-weight: 700; }
-    .pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); } .pill.warn { color: #8A6400; }
+    .pill.ok { color: var(--ok); } .pill.bad { color: #C46A06; } .pill.warn { color: #8A6400; }
     /* gauge */
     .gauge { position: relative; width: 240px; height: 240px; margin: 8px auto 18px; }
     .gauge svg { width: 100%; height: 100%; transform: rotate(135deg); }
@@ -64,13 +64,13 @@
     .verdict .ic { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 26px; font-weight: 800; flex: none; }
     .verdict.pass { background: #E6F7F1; } .verdict.pass .ic { background: var(--ok); }
     .verdict.review { background: #FFF6D6; } .verdict.review .ic { background: var(--warn); }
-    .verdict.fail { background: #FDECEC; } .verdict.fail .ic { background: var(--bad); }
+    .verdict.fail { background: #FFF3E0; } .verdict.fail .ic { background: linear-gradient(140deg, #F5A524, #E8860B); }
     .verdict h2 { margin: 0; } .verdict p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
     .band { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; background: #fff; }
     .checks { display: grid; gap: 8px; margin-bottom: 18px; }
     .chk { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); }
     .chk .d { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 14px; font-weight: 800; flex: none; }
-    .chk.ok .d { background: var(--ok); } .chk.bad .d { background: var(--bad); } .chk.warn .d { background: var(--warn); }
+    .chk.ok .d { background: var(--ok); } .chk.bad .d { background: #F08A1C; } .chk.warn .d { background: var(--warn); }
     .chk .t { flex: 1; } .chk .t b { display: block; font-size: 14px; } .chk .t span { font-size: 12.5px; color: var(--muted); }
     .chk .v { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .note { font-size: 13px; color: var(--muted); line-height: 1.5; padding: 12px 14px; border-radius: 12px; background: #F6F9FE; margin-bottom: 16px; }
